@@ -1,0 +1,11 @@
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}

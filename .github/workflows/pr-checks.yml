@@ -1,0 +1,67 @@
+# Same checks as the local hook, on every PR.
+name: PR checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint, type check, tests
+        run: bash scripts/gate.sh
+
+      - name: Flag magic strings
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! out="$(bash scripts/magic-strings.sh "origin/${{ github.base_ref }}")"; then
+            echo "::warning::This PR adds possible magic strings. Use named constants, or justify them in the PR."
+            { echo "## Possible magic strings"; echo; echo '```'; echo "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Flag database migrations
+        if: github.event_name == 'pull_request'
+        run: |
+          . .claude/gate.conf
+          [ -z "${MIGRATIONS_PATH:-}" ] && exit 0
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- "$MIGRATIONS_PATH" || true)"
+          if [ -n "$changed" ]; then
+            echo "::warning::This PR changes database migrations. A human must review them."
+            { echo "## Database migrations changed"; echo; echo "$changed" | sed 's/^/- /'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  ensure-mvp-label:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure mvp label and tag MVP issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create mvp --color 0E8A16 --description "MVP scope" 2>/dev/null || true
+          # Tag open issues whose title starts with [NN]
+          gh issue list --state open --limit 100 --json number,title,labels \
+            --jq '.[] | select(.title | test("^\\[[0-9]+\\]")) | select([.labels[].name] | index("mvp") | not) | .number' \
+            | while read -r n; do
+                [ -n "$n" ] || continue
+                gh issue edit "$n" --add-label mvp || true
+              done
