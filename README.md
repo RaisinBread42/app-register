@@ -23,6 +23,12 @@ npm ci
 npm run dev          # http://localhost:3000
 ```
 
+## Database
+
+```bash
+npm run db:migrate     # creates SQLite schema (DATABASE_URL, default file:./data/app-register.db)
+```
+
 ## Checks
 
 ```bash
