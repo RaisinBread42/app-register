@@ -7,9 +7,6 @@ coverage/
 .env.*
 !.env.example
 .pr-review/
-*.db
-*.db-journal
-data/
 e2e-results/
 playwright-report/
 test-results/

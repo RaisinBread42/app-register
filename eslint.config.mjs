@@ -9,7 +9,6 @@ const config = [
       'node_modules/**',
       '.claude/**',
       'coverage/**',
-      'data/**',
       'theme.template.ts',
     ],
   },
