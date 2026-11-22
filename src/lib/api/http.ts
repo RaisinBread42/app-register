@@ -25,6 +25,20 @@ export function noContent(): ApiResult {
   return {status: HTTP_STATUS.noContent, body: null};
 }
 
+export type HandleOptions = {
+  /**
+   * A POST that is safe to repeat (a re-check, not a write of the caller's data):
+   * it needs no Idempotency-Key and does not run inside a write transaction.
+   */
+  isSafeToRepeat?: boolean;
+  /**
+   * Slow follow-up work (outside calls) for a successful write. It runs after the
+   * write has committed, never inside its transaction, and before the response is
+   * sent. If it fails the write still stands; the failure is logged by name only.
+   */
+  afterCommit?: (context: Omit<ApiContext, 'body'>, result: ApiResult) => Promise<unknown>;
+};
+
 /**
  * Every API route goes through here:
  * 1. a bearer API key picks the workspace (401 without one);
@@ -34,12 +48,14 @@ export function noContent(): ApiResult {
 export async function handle(
   request: Request,
   run: (context: ApiContext) => Promise<ApiResult>,
+  options: HandleOptions = {},
 ): Promise<Response> {
   try {
     const db = getDb();
     const workspaceId = await authenticate(db, request);
     const body = await request.text();
-    if (!(IDEMPOTENT_METHODS as readonly string[]).includes(request.method)) {
+    const isWrite = (IDEMPOTENT_METHODS as readonly string[]).includes(request.method);
+    if (!isWrite || options.isSafeToRepeat) {
       return toResponse(await run({db, workspaceId, body}));
     }
     const url = new URL(request.url);
@@ -50,6 +66,11 @@ export async function handle(
       {method: request.method, path: url.pathname + url.search, body},
       (tx) => run({db: tx, workspaceId, body}),
     );
+    if (options.afterCommit) {
+      await options.afterCommit({db, workspaceId}, result).catch((error: unknown) => {
+        console.error('API follow-up failed', {name: (error as Error | undefined)?.name});
+      });
+    }
     return toResponse(result);
   } catch (error) {
     return errorResponse(error);

@@ -1,6 +1,16 @@
 import {
+  ADVISORY_SEVERITIES,
   APP_KINDS,
   APP_SORTS,
+  DEPENDENCY_CHECK_ERRORS,
+  DEPENDENCY_IMPORT_MAX_BYTES,
+  DEPENDENCY_SOURCES,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_CRITICAL_BELOW,
+  HEALTH_DIMENSION,
+  HEALTH_DIMENSIONS,
+  HEALTH_MAX_SCORE,
+  HEALTH_STATUSES,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
   NOTICE_ALERT_STATUSES,
@@ -91,6 +101,7 @@ const appProperties = {
   ...appFields,
   owner: personRef,
   backupOwner: personRef,
+  health: ref('Health'),
   archivedAt: nullable('string', {format: 'date-time'}),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -108,6 +119,43 @@ const dependencyFields = {
   latestVersion: nullable('string'),
   vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
   recommendedAction: nullable('string'),
+};
+
+const count: Schema = {type: 'integer', minimum: 0};
+const healthStatus: Schema = {type: 'string', enum: [...HEALTH_STATUSES]};
+
+/** What monitoring stores on a dependency; read-only in the API. */
+const dependencyMonitoring = {
+  source: {
+    type: 'string',
+    enum: [...DEPENDENCY_SOURCES],
+    description: 'How it got here. An import only removes dependencies an import created.',
+  },
+  isDev: {type: 'boolean', description: 'A devDependency in the imported file'},
+  advisories: {
+    type: 'array',
+    items: ref('Advisory'),
+    description: 'Advisories OSV knows for the tracked version',
+  },
+  checkedAt: {...nullable('string', {format: 'date-time'}), description: 'Last registry check; null until the first one'},
+  checkError: {
+    type: ['string', 'null'],
+    enum: [...DEPENDENCY_CHECK_ERRORS, null],
+    description:
+      'not_found: not on the public npm registry. unavailable: a source did not answer, the previous result is kept. ' +
+      'invalid_version: the tracked version is a range or tag, so advisories cannot be matched.',
+  },
+  status: {
+    ...healthStatus,
+    description: 'critical with a critical or high advisory; attention with anything else that costs points; na until checked',
+  },
+};
+
+const refreshCounts = {
+  checked: {...count, description: 'Dependencies looked up'},
+  notFound: {...count, description: 'Not on the public npm registry'},
+  unavailable: {...count, description: 'A source did not answer; the previous result was kept'},
+  advisories: {...count, description: 'Advisories now known across the checked dependencies'},
 };
 
 const hostingFields = {
@@ -159,7 +207,66 @@ const schemas = {
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
-  Dependency: strict({id, appId: id, ...dependencyFields, createdAt: timestamp, updatedAt: timestamp}),
+  Dependency: strict({
+    id,
+    appId: id,
+    ...dependencyFields,
+    ...dependencyMonitoring,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }),
+  Advisory: strict({
+    id: {...text, examples: ['GHSA-p6mc-m468-83gw']},
+    aliases: {type: 'array', items: text, description: 'Other ids for the same advisory, e.g. its CVE'},
+    severity: {type: 'string', enum: [...ADVISORY_SEVERITIES]},
+    summary: text,
+    url: {type: 'string', format: 'uri'},
+  }),
+  Deduction: strict({
+    dimension: {type: 'string', enum: [...HEALTH_DIMENSIONS]},
+    label: text,
+    detail: text,
+    points: {type: 'integer', minimum: 0, description: 'Points taken off the score'},
+  }),
+  DimensionHealth: strict({
+    status: {...healthStatus, description: 'na: the app records nothing for this dimension'},
+    deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
+  }),
+  Health: {
+    ...strict({
+      score: {
+        ...nullable('integer', {minimum: 0, maximum: HEALTH_MAX_SCORE}),
+        description: 'null when no monitored dimension has anything to check',
+      },
+      status: healthStatus,
+      dimensions: strict(
+        Object.fromEntries(
+          HEALTH_DIMENSIONS.map((dimension) => [
+            dimension,
+            {oneOf: [ref('DimensionHealth'), {type: 'null'}], description: 'null: not monitored yet'},
+          ]),
+        ),
+      ),
+    }),
+    description:
+      `Starts at ${HEALTH_MAX_SCORE} and loses the points of every deduction (floor 0). ` +
+      `Below ${HEALTH_CRITICAL_BELOW} is critical, below ${HEALTH_ATTENTION_BELOW} is attention, otherwise ok. ` +
+      `Only \`${HEALTH_DIMENSION.dependencies}\` is monitored so far.`,
+  },
+  DependencyImport: strict({
+    added: count,
+    updated: {...count, description: 'Known dependencies whose version changed'},
+    unchanged: count,
+    removed: {...count, description: 'Imported earlier and no longer in the file'},
+  }),
+  DependencyRefresh: strict(refreshCounts),
+  WorkspaceDependencyRefresh: strict({apps: {...count, description: 'Active apps with dependencies'}, ...refreshCounts}),
+  PackageFile: {
+    type: 'object',
+    description:
+      'An npm package.json or package-lock.json (lockfileVersion 2 or 3), sent as it is on disk. ' +
+      `At most ${DEPENDENCY_IMPORT_MAX_BYTES / (1024 * 1024)} MB.`,
+  },
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
   Hosting: strict({id, appId: id, ...hostingFields, createdAt: timestamp, updatedAt: timestamp}),
@@ -178,7 +285,7 @@ export const openApiSpec = {
     description:
       'Register of bought SaaS and in-house apps. Every request except this document needs ' +
       '`Authorization: Bearer <API key>`; the key decides the workspace. POST and PATCH need an ' +
-      '`Idempotency-Key` header. Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
+      '`Idempotency-Key` header (except the refresh endpoints, which are safe to repeat). Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
   },
   servers: [{url: '/'}],
   security: [{bearerAuth: []}],
@@ -254,15 +361,40 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a dependency (name unique per app, case-insensitive)',
+        summary: 'Add a dependency (name unique per app, case-insensitive); it is then checked against the registry',
         parameters: [appId, idempotencyKey],
         requestBody: body('DependencyInput'),
         responses: {201: json(strict({dependency: ref('Dependency')}), 'Added'), ...errors},
       },
     },
+    '/api/apps/{id}/dependencies/import': {
+      post: {
+        summary: 'Import direct dependencies from a package.json or package-lock.json, then check them',
+        description:
+          'The body is the file itself. Runtime and dev dependencies are both taken (dev ones flagged `isDev`). ' +
+          'A lockfile gives exact installed versions; a package.json gives its ranges with the operators stripped. ' +
+          'By name: new ones are added, known ones get the file\'s version, and ones no longer in the file are ' +
+          'removed only if an earlier import created them.',
+        parameters: [appId, idempotencyKey],
+        requestBody: body('PackageFile'),
+        responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},
+      },
+    },
+    '/api/apps/{id}/dependencies/refresh': {
+      post: {
+        summary: "Check an app's dependencies against the npm registry and OSV now",
+        description: 'Safe to repeat, so it needs no Idempotency-Key. One package failing never fails the refresh.',
+        parameters: [appId],
+        responses: {
+          200: json(strict({refresh: ref('DependencyRefresh')}), 'Checked'),
+          401: errors[401],
+          404: errors[404],
+        },
+      },
+    },
     '/api/apps/{id}/dependencies/{dependencyId}': {
       patch: {
-        summary: 'Update a dependency',
+        summary: 'Update a dependency; it is then checked again',
         parameters: [appId, pathId('dependencyId', 'Dependency id'), idempotencyKey],
         requestBody: body('DependencyPatch'),
         responses: {200: json(strict({dependency: ref('Dependency')}), 'Updated'), ...errors},
@@ -301,6 +433,16 @@ export const openApiSpec = {
         summary: 'Remove a hosting entry (a second delete answers 404)',
         parameters: [appId, pathId('hostingId', 'Hosting entry id')],
         responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
+      },
+    },
+    '/api/monitoring/dependencies/refresh': {
+      post: {
+        summary: 'Check the dependencies of every active app (the daily scheduled job calls this)',
+        description: 'Safe to repeat, so it needs no Idempotency-Key.',
+        responses: {
+          200: json(strict({refresh: ref('WorkspaceDependencyRefresh')}), 'Checked'),
+          401: errors[401],
+        },
       },
     },
     '/api/people': {
