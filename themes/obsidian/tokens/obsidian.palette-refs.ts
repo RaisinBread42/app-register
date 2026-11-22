@@ -4,8 +4,8 @@
 // prettier-ignore
 export const obsidianPaletteRefs = {
   accent: {
-    light: {40: '#612ccc', 85: '#d3d1ed'},
-    dark: {30: '#48338a', 70: '#aa9bfc', 80: '#c5bef9'},
+    light: {40: '#612ccc'},
+    dark: {80: '#c5bef9'},
   },
   white: '#ffffff',
   black: '#000000',
