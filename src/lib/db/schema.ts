@@ -7,7 +7,9 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -305,7 +307,99 @@ export const reviewItems = pgTable(
   ],
 );
 
+/** What an app runs on or pulls in: a library, SDK or agent, recorded by hand. */
+export const appDependencies = pgTable(
+  'app_dependencies',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    appId: uuid('app_id').notNull(),
+    name: text('name').notNull(),
+    currentVersion: text('current_version').notNull(),
+    latestVersion: text('latest_version'),
+    /** Advisory ids such as CVE-2026-1234; empty when none are known. */
+    vulnerabilities: text('vulnerabilities').array().notNull().default(sql`'{}'::text[]`),
+    recommendedAction: text('recommended_action'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'app_dependencies_app_fk',
+      columns: [t.appId, t.workspaceId],
+      foreignColumns: [apps.id, apps.workspaceId],
+    }).onDelete('cascade'),
+    // Also serves "an app's dependencies".
+    uniqueIndex('app_dependencies_app_name_unique').on(t.appId, sql`lower(${t.name})`),
+  ],
+);
+
+/** Where an app runs: one row per provider service, e.g. Azure SQL Server in uksouth. */
+export const appHosting = pgTable(
+  'app_hosting',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    appId: uuid('app_id').notNull(),
+    provider: text('provider').notNull(),
+    service: text('service').notNull(),
+    region: text('region'),
+    version: text('version'),
+    endOfSupportOn: date('end_of_support_on', {mode: 'string'}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'app_hosting_app_fk',
+      columns: [t.appId, t.workspaceId],
+      foreignColumns: [apps.id, apps.workspaceId],
+    }).onDelete('cascade'),
+    // Also serves "an app's hosting".
+    unique('app_hosting_app_service_unique')
+      .on(t.appId, t.provider, t.service, t.region)
+      .nullsNotDistinct(),
+  ],
+);
+
+/** Bearer API keys. Only the SHA-256 hash is stored; the key is shown once at creation. */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull().unique('api_keys_key_hash_unique'),
+    /** First characters of the key, so a person can tell keys apart. Not secret. */
+    keyPrefix: text('key_prefix').notNull(),
+    revokedAt: timestamp('revoked_at', {withTimezone: true}),
+    createdAt: createdAt(),
+  },
+  // Listing and revoking a workspace's keys.
+  (t) => [index('api_keys_workspace_idx').on(t.workspaceId)],
+);
+
+/** First response to each Idempotency-Key, replayed for repeats of the same request. */
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    workspaceId: workspaceId(),
+    key: text('key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    statusCode: integer('status_code').notNull(),
+    responseBody: jsonb('response_body').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({name: 'idempotency_keys_pk', columns: [t.workspaceId, t.key]}),
+    // Expiry sweep: keys older than the TTL.
+    index('idempotency_keys_created_idx').on(t.createdAt),
+  ],
+);
+
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type PersonRow = typeof people.$inferSelect;
 export type AppRow = typeof apps.$inferSelect;
 export type NoticeAlertRow = typeof noticeAlerts.$inferSelect;
+export type AppDependencyRow = typeof appDependencies.$inferSelect;
+export type AppHostingRow = typeof appHosting.$inferSelect;

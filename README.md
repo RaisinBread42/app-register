@@ -36,7 +36,16 @@ npm run db:generate    # after editing src/lib/db/schema.ts: write a new migrati
 npm run db:down        # stop the container (data stays in the named volume)
 ```
 
-Unit tests need no Docker: they run on PGlite. API shapes: [docs/api.md](docs/api.md).
+Unit tests need no Docker: they run on PGlite.
+
+## API
+
+Every request needs `Authorization: Bearer <key>`; POST and PATCH also need an `Idempotency-Key`. Details: [docs/api.md](docs/api.md). Spec: `GET /api/openapi.json`.
+
+```bash
+npm run api-key:create -- "Front end"   # prints the key once
+npm run api-key:revoke -- ar_AbC123     # by the prefix printed at creation
+```
 
 ## Checks
 

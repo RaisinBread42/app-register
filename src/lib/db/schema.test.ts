@@ -28,8 +28,12 @@ import {createTestDb, type TestDb} from './test-db';
 import {ensureDefaultWorkspace} from '@/lib/services/workspaces';
 
 const ALL_TABLES = [
+  'api_keys',
+  'app_dependencies',
+  'app_hosting',
   'apps',
   'attachments',
+  'idempotency_keys',
   'notice_alerts',
   'ownership_changes',
   'people',
@@ -37,6 +41,8 @@ const ALL_TABLES = [
   'review_items',
   'workspaces',
 ];
+
+const TABLES_0001 = ['api_keys', 'app_dependencies', 'app_hosting', 'idempotency_keys'];
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
 async function seedWorkspace(t: TestDb, workspaceId: string) {
@@ -189,6 +195,24 @@ describe('database schema', () => {
     for (const [fk, write] of cases) {
       await expect(write(), fk).rejects.toThrow(fk);
     }
+  });
+
+  it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
+    const down = readFileSync(
+      path.join(MIGRATIONS_FOLDER, 'rollback', '0001_api_keys_idempotency_deps_hosting.down.sql'),
+      'utf8',
+    );
+    await t.client.exec(down);
+    const after = await t.client.query<{table_name: string}>(
+      `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
+    );
+    expect(after.rows.map((r) => r.table_name)).toEqual(ALL_TABLES.filter((n) => !TABLES_0001.includes(n)));
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    const restored = await t.client.query<{table_name: string}>(
+      `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
+    );
+    expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
   });
 
   it('unit tests run on in-process PGlite with the real migrations, no Docker needed', async () => {

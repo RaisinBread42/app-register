@@ -1,11 +1,18 @@
 import {and, asc, eq, inArray} from 'drizzle-orm';
-import {PERSON_STATUS} from '@/lib/constants';
+import {PERSON_STATUS, PERSON_STATUSES} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
-import {newId} from '@/lib/db/ids';
+import {isUuid, newId} from '@/lib/db/ids';
 import {people, type PersonRow} from '@/lib/db/schema';
-import {isUniqueViolation, ValidationError} from './errors';
+import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
+import {optionalDate} from './validation';
 
 export type CreatePersonInput = {name: string; email: string};
+
+/** `status: 'left'` needs `leftOn`; going back to `active` clears it. */
+export type UpdatePersonInput = Partial<CreatePersonInput> & {
+  status?: string;
+  leftOn?: string | null;
+};
 
 /** JSON shape of a person in the API. */
 export type PersonView = {
@@ -25,27 +32,38 @@ export async function createPerson(
   workspaceId: string,
   input: CreatePersonInput,
 ): Promise<PersonView> {
-  const name = typeof input.name === 'string' ? input.name.trim() : '';
-  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
-  if (!name) {
-    throw new ValidationError('Name is required');
-  }
-  if (!EMAIL_PATTERN.test(email)) {
-    throw new ValidationError('A valid email is required');
-  }
-
-  try {
+  const values = validateNameAndEmail(input);
+  return withEmailCheck(async () => {
     const [row] = await db
       .insert(people)
-      .values({id: newId(), workspaceId, name, email})
+      .values({id: newId(), workspaceId, ...values})
       .returning();
     return toPersonView(row);
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new ValidationError('A person with this email already exists');
-    }
-    throw error;
+  });
+}
+
+/** Renames, re-emails or marks a person as left (or back to active). */
+export async function updatePerson(
+  db: AppDatabase,
+  workspaceId: string,
+  id: string,
+  patch: UpdatePersonInput,
+): Promise<PersonView> {
+  const [current] = isUuid(id)
+    ? await db
+        .select()
+        .from(people)
+        .where(and(eq(people.workspaceId, workspaceId), eq(people.id, id)))
+    : [];
+  if (!current) {
+    throw new NotFoundError('Person not found');
   }
+  const merged = {...current, ...patch};
+  const values = {...validateNameAndEmail(merged), ...validateStatus(merged.status, merged.leftOn)};
+  return withEmailCheck(async () => {
+    const [row] = await db.update(people).set(values).where(eq(people.id, id)).returning();
+    return toPersonView(row);
+  });
 }
 
 export async function listActivePeople(
@@ -78,6 +96,44 @@ export async function assertActivePeople(
     );
   if (rows.length !== new Set(personIds).size) {
     throw new ValidationError('Owner and backup owner must be active people in this workspace');
+  }
+}
+
+function validateNameAndEmail(input: {name?: unknown; email?: unknown}) {
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  if (!name) {
+    throw new ValidationError('Name is required');
+  }
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new ValidationError('A valid email is required');
+  }
+  return {name, email};
+}
+
+function validateStatus(status: unknown, leftOn: unknown) {
+  if (!(PERSON_STATUSES as readonly unknown[]).includes(status)) {
+    throw new ValidationError('Status must be active or left');
+  }
+  if (status === PERSON_STATUS.active) {
+    return {status: PERSON_STATUS.active, leftOn: null};
+  }
+  const date = optionalDate(leftOn, 'left on date');
+  if (!date) {
+    throw new ValidationError('A person who has left needs a leftOn date');
+  }
+  return {status: PERSON_STATUS.left, leftOn: date};
+}
+
+/** Emails are unique per workspace; the message never repeats the email. */
+async function withEmailCheck<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ValidationError('A person with this email already exists');
+    }
+    throw error;
   }
 }
 

@@ -6,7 +6,7 @@ Variable **names** only, never values.
 | --- | --- | --- |
 | URL | TBD (preview / single VM) | TBD |
 | Hosting | Single Node process (Next.js) | Same shape; human-promoted |
-| Auth | TBD (not in first skeleton) | TBD |
+| Auth | API: bearer API keys (hashed in `api_keys`, one workspace per key). User sign-in TBD | Same |
 | Database | Postgres 18 via `DATABASE_URL` | Postgres 18 via `DATABASE_URL` |
 | Other services | Email sink / provider via `EMAIL_*` | Real email provider |
 | Who deploys | Agent may deploy via CI to UAT | Human only |
@@ -29,6 +29,10 @@ Copy names into `.env.example` when the skeleton lands. Never commit `.env` file
 | Local dev | Postgres 18 in Docker | `npm run db:up`, then `npm run db:migrate` |
 | Unit tests | PGlite (in-process, in-memory) | Nothing to start; each test builds a fresh DB from `drizzle/` |
 | CI | `postgres:18` service container | `npm run db:migrate` runs twice to prove migrations apply and are idempotent |
+
+## API keys
+
+Not environment variables: keys live hashed in the database. Create one per client and environment with `npm run api-key:create -- "<name>"` (against that environment's `DATABASE_URL`). Store the printed key in the client's secret store, never in the repo. Revoke with `npm run api-key:revoke -- <prefix>`.
 
 ## Deploy flow
 

@@ -8,7 +8,7 @@ App Register is a flat-priced register of the SaaS a company buys and the apps i
 
 Browser → Next.js App Router (`src/app/`) → server actions or route handlers → domain services (`src/lib/services/`) → Drizzle (`src/lib/db/`) → Postgres 18.
 
-JSON API: route handlers in `src/app/api/` (shapes in [api.md](api.md)). Each handler resolves the workspace with `getCurrentWorkspaceId()` and only touches rows in it.
+JSON API: route handlers in `src/app/api/` ([api.md](api.md); OpenAPI spec in `src/lib/api/openapi.ts`). Every handler goes through `handle()` in `src/lib/api/http.ts`: bearer API key → workspace, `Idempotency-Key` on POST/PATCH, errors → `{ error }`. Services only touch rows in that workspace.
 
 UI uses Meta Astryx components only. Business rules live in services, not in React components.
 
@@ -19,7 +19,7 @@ UI uses Meta Astryx components only. Business rules live in services, not in Rea
 | Page / route | `src/app/` | `src/app/page.tsx` |
 | Astryx providers | `src/app/providers.tsx` | same |
 | Domain services | `src/lib/services/` | `src/lib/services/apps.ts` |
-| JSON API route | `src/app/api/<resource>/route.ts` | `src/app/api/apps/route.ts` |
+| JSON API route | `src/app/api/<resource>/route.ts` (and add it to `src/lib/api/openapi.ts` and `ROUTES` in `src/lib/api/test/client.ts`, or the tests fail) | `src/app/api/apps/route.ts` |
 | Constants / enums | `src/lib/constants.ts` | same |
 | DB schema + client | `src/lib/db/` | `src/lib/db/schema.ts` |
 | Migrations | `drizzle/` (generated), `drizzle/rollback/` (hand-written) | `drizzle/0000_init.sql` |
