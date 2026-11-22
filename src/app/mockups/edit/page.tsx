@@ -5,180 +5,258 @@ import {useSearchParams} from 'next/navigation';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/HStack';
-import {Selector} from '@astryxdesign/core/Selector';
+import {Tab} from '@astryxdesign/core/TabList';
+import {TabList} from '@astryxdesign/core/TabList';
+import {Table} from '@astryxdesign/core/Table';
 import {Text, Heading} from '@astryxdesign/core/Text';
-import {TextArea} from '@astryxdesign/core/TextArea';
-import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
+import {HealthScore} from '../_components/HealthBits';
 import {MockShell} from '../_components/MockShell';
 import {
   MOCK_APPS,
-  MOCK_PEOPLE,
-  statusBadgeVariant,
+  MOCK_NOTICES,
+  severityBadgeVariant,
+  type CategoryHealth,
+  type MockNotice,
 } from '../_data/seed';
 
-const KIND_OPTIONS = [
-  {value: 'saas', label: 'SaaS (bought)'},
-  {value: 'in_house', label: 'In-house'},
-  {value: 'citizen_built', label: 'Citizen-built'},
-  {value: 'vendor_service', label: 'Vendor service'},
-];
+type TabKey =
+  | 'overview'
+  | 'dependencies'
+  | 'hosting'
+  | 'notices'
+  | 'sources';
 
-const PERSON_OPTIONS = MOCK_PEOPLE.map((p) => ({
-  value: p.id,
-  label: p.name,
-  description: p.email,
-}));
-
-function personIdByName(name: string): string | null {
-  return MOCK_PEOPLE.find((p) => p.name === name)?.id ?? null;
-}
-
-function EditForm() {
+function DetailInner() {
   const params = useSearchParams();
-  const id = params.get('id') ?? 'a1';
-  const seed = useMemo(
+  const id = params.get('id') ?? 'a5';
+  const app = useMemo(
     () => MOCK_APPS.find((a) => a.id === id) ?? MOCK_APPS[0],
     [id],
   );
+  const [tab, setTab] = useState<TabKey>('overview');
 
-  const [name, setName] = useState(seed.name);
-  const [kind, setKind] = useState<string>(seed.kind);
-  const [ownerId, setOwnerId] = useState(personIdByName(seed.owner) ?? 'p1');
-  const [backupId, setBackupId] = useState(
-    personIdByName(seed.backupOwner) ?? 'p2',
-  );
-  const [vendor, setVendor] = useState(
-    seed.kind === 'saas' || seed.kind === 'vendor_service'
-      ? seed.vendorOrRuntime
-      : '',
-  );
-  const [renewal, setRenewal] = useState(
-    seed.renewalDate === '—' ? '' : seed.renewalDate,
-  );
-  const [notice, setNotice] = useState(
-    seed.noticeDeadline === '—' ? '' : seed.noticeDeadline,
-  );
-  const [cost, setCost] = useState(
-    seed.costLabel === '—' ? '' : seed.costLabel.replace(/[^0-9]/g, ''),
-  );
-  const [runtime, setRuntime] = useState(seed.runtimeLocation ?? '');
-  const [dataKeys, setDataKeys] = useState(seed.dataAndKeys ?? '');
-  const [whatBreaks, setWhatBreaks] = useState(seed.whatBreaksIfStopped ?? '');
-
-  const isInHouse = kind === 'in_house' || kind === 'citizen_built';
+  const appNotices = MOCK_NOTICES.filter((n) => n.apps.includes(app.name));
+  const deducting = app.categories.filter((c) => c.deduction > 0);
 
   return (
-    <VStack gap={5} maxWidth={720}>
-      <HStack gap={3} vAlign="center" justify="between" wrap="wrap">
-        <VStack gap={1}>
-          <Heading level={1}>{seed.name}</Heading>
-          <Text type="body" color="secondary" display="block">
-            Edit ownership, dates, and in-house risk notes.
-          </Text>
-        </VStack>
-        <Badge
-          label={seed.statusLabel}
-          variant={statusBadgeVariant(seed.status)}
-        />
-      </HStack>
-
-      <VStack gap={4}>
-        <TextInput label="App name" value={name} onChange={setName} isRequired />
-        <Selector
-          label="Kind"
-          options={KIND_OPTIONS}
-          value={kind}
-          onChange={setKind}
-          isRequired
-        />
-        <HStack gap={3} wrap="wrap">
-          <Selector
-            label="Owner"
-            options={PERSON_OPTIONS}
-            value={ownerId}
-            onChange={setOwnerId}
-            isRequired
-            width={280}
-          />
-          <Selector
-            label="Backup owner"
-            options={PERSON_OPTIONS}
-            value={backupId}
-            onChange={setBackupId}
-            isRequired
-            width={280}
-          />
+    <MockShell active="detail">
+      <VStack gap={5}>
+        <HStack gap={4} vAlign="start" justify="between" wrap="wrap">
+          <VStack gap={1}>
+            <Text type="supporting" color="secondary">
+              <Button label="← Apps" variant="ghost" size="sm" href="/mockups/list" />
+            </Text>
+            <Heading level={1}>{app.name}</Heading>
+            <Text type="body" color="secondary" display="block">
+              {app.kindLabel} · Owner {app.owner} · Backup {app.backupOwner}
+            </Text>
+          </VStack>
+          <HealthScore score={app.healthScore} />
         </HStack>
 
-        {!isInHouse ? (
-          <>
-            <TextInput label="Vendor" value={vendor} onChange={setVendor} />
-            <HStack gap={3} wrap="wrap">
-              <TextInput
-                label="Notice deadline"
-                value={notice}
-                onChange={setNotice}
-                placeholder="YYYY-MM-DD"
-                description="Not the renewal date — this is what alerts use"
-                width={220}
-              />
-              <TextInput
-                label="Renewal date"
-                value={renewal}
-                onChange={setRenewal}
-                placeholder="YYYY-MM-DD"
-                width={220}
-              />
-              <TextInput
-                label="Cost (USD / period)"
-                value={cost}
-                onChange={setCost}
-                width={200}
-                isOptional
+        <VStack gap={2}>
+          <Heading level={2}>Score breakdown</Heading>
+          <Text type="supporting" color="secondary" display="block">
+            Starts at 100. Points deducted by category below.
+          </Text>
+          {deducting.length === 0 ? (
+            <Badge label="All clear — no deductions" variant="success" />
+          ) : (
+            <VStack gap={2}>
+              {deducting.map((c: CategoryHealth) => (
+                <HStack key={c.key} gap={3} vAlign="start" wrap="wrap">
+                  <Badge
+                    label={`${c.label} −${c.deduction}`}
+                    variant={severityBadgeVariant(c.severity)}
+                  />
+                  <Text type="body" display="block">
+                    {c.reasons.join(' · ')}
+                  </Text>
+                </HStack>
+              ))}
+            </VStack>
+          )}
+        </VStack>
+
+        <TabList value={tab} onChange={(v) => setTab(v as TabKey)} role="tablist">
+          <Tab value="overview" label="Overview" />
+          <Tab value="dependencies" label="Dependencies" />
+          <Tab value="hosting" label="Hosting" />
+          <Tab value="notices" label={`Notices (${appNotices.length})`} />
+          <Tab value="sources" label="Sources" />
+        </TabList>
+
+        {tab === 'overview' && (
+          <VStack gap={3}>
+            <HStack gap={6} wrap="wrap">
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Owner
+                </Text>
+                <Text type="body">{app.owner}</Text>
+              </VStack>
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Kind
+                </Text>
+                <Text type="body">{app.kindLabel}</Text>
+              </VStack>
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Licence
+                </Text>
+                <Text type="body">
+                  {app.hasLicence ? app.licenceLabel : '— (no licence)'}
+                </Text>
+              </VStack>
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Notice deadline
+                </Text>
+                <Text type="body">
+                  {app.hasLicence ? app.noticeDeadline : '—'}
+                </Text>
+              </VStack>
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Renewal
+                </Text>
+                <Text type="body">
+                  {app.hasLicence ? app.renewalDate : '—'}
+                </Text>
+              </VStack>
+              <VStack gap={1}>
+                <Text type="label" color="secondary">
+                  Cost
+                </Text>
+                <Text type="body">{app.costLabel}</Text>
+              </VStack>
+            </HStack>
+          </VStack>
+        )}
+
+        {tab === 'dependencies' && (
+          <Table
+            data={app.dependencies}
+            idKey="name"
+            hasHover
+            density="balanced"
+            columns={[
+              {key: 'name', header: 'Package'},
+              {key: 'current', header: 'Current'},
+              {key: 'latest', header: 'Latest'},
+              {
+                key: 'vulns',
+                header: 'Vulnerabilities',
+                renderCell: (d: (typeof app.dependencies)[0]) =>
+                  d.vulns.length === 0 ? (
+                    <Badge label="None" variant="success" />
+                  ) : (
+                    <HStack gap={1} wrap="wrap">
+                      {d.vulns.map((v) => (
+                        <Badge key={v} label={v} variant="error" />
+                      ))}
+                    </HStack>
+                  ),
+              },
+              {key: 'action', header: 'Action'},
+            ]}
+          />
+        )}
+
+        {tab === 'hosting' && (
+          <Table
+            data={app.hosting}
+            idKey="service"
+            hasHover
+            density="balanced"
+            columns={[
+              {key: 'provider', header: 'Provider'},
+              {key: 'service', header: 'Service'},
+              {key: 'region', header: 'Region'},
+              {key: 'version', header: 'Version'},
+              {key: 'support', header: 'Support / retirement'},
+            ]}
+          />
+        )}
+
+        {tab === 'notices' && (
+          <Table
+            data={appNotices}
+            idKey="id"
+            hasHover
+            density="balanced"
+            columns={[
+              {
+                key: 'severity',
+                header: 'Severity',
+                renderCell: (n: MockNotice) => (
+                  <Badge
+                    label={n.severity}
+                    variant={severityBadgeVariant(n.severity)}
+                  />
+                ),
+              },
+              {key: 'categoryLabel', header: 'Category'},
+              {key: 'title', header: 'Notice'},
+              {key: 'date', header: 'Date'},
+              {key: 'source', header: 'Source'},
+            ]}
+          />
+        )}
+
+        {tab === 'sources' && (
+          <VStack gap={2}>
+            <Text type="body" color="secondary" display="block">
+              Sources that feed checks for this app (demo). Full catalogue on
+              Sources.
+            </Text>
+            <HStack gap={2} wrap="wrap">
+              {app.dependencies.length > 0 && (
+                <Badge label="npm registry" variant="info" />
+              )}
+              {app.dependencies.some((d) => d.vulns.length > 0) && (
+                <Badge label="GitHub Security Advisories" variant="info" />
+              )}
+              {app.hosting.some((h) => h.provider === 'Azure') && (
+                <Badge label="Azure status / lifecycle" variant="info" />
+              )}
+              {app.hosting.some((h) => h.provider === 'AWS') && (
+                <Badge label="AWS Health" variant="info" />
+              )}
+              {app.hosting.some((h) => h.provider === 'Cloudflare') && (
+                <Badge label="Cloudflare status" variant="info" />
+              )}
+              {app.hosting.some((h) => h.provider === 'Vercel') && (
+                <Badge label="Vercel status" variant="info" />
+              )}
+              {app.hasLicence && (
+                <Badge label="Contract register" variant="info" />
+              )}
+              <Button
+                label="Manage sources"
+                variant="secondary"
+                size="sm"
+                href="/mockups/sources"
               />
             </HStack>
-          </>
-        ) : (
-          <>
-            <TextInput
-              label="Where it runs"
-              value={runtime}
-              onChange={setRuntime}
-              isRequired
-            />
-            <TextArea
-              label="Data and keys it touches"
-              value={dataKeys}
-              onChange={setDataKeys}
-              rows={3}
-              isRequired
-            />
-            <TextArea
-              label="What breaks if this stops"
-              value={whatBreaks}
-              onChange={setWhatBreaks}
-              rows={3}
-              isRequired
-            />
-          </>
+          </VStack>
         )}
       </VStack>
-
-      <HStack gap={3}>
-        <Button label="Save changes" variant="primary" />
-        <Button label="Back to list" variant="secondary" href="/mockups/list" />
-      </HStack>
-    </VStack>
+    </MockShell>
   );
 }
 
 export default function MockEditPage() {
   return (
-    <MockShell active="edit">
-      <Suspense fallback={<Text type="body">Loading…</Text>}>
-        <EditForm />
-      </Suspense>
-    </MockShell>
+    <Suspense
+      fallback={
+        <MockShell active="detail">
+          <Text type="body">Loading…</Text>
+        </MockShell>
+      }>
+      <DetailInner />
+    </Suspense>
   );
 }

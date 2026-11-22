@@ -9,7 +9,7 @@ import {MOCK_ORG} from '../_data/seed';
 
 export default function MockEmptyPage() {
   return (
-    <MockShell active="empty">
+    <MockShell active="apps">
       <VStack gap={5}>
         <VStack gap={1}>
           <Heading level={1}>Apps</Heading>

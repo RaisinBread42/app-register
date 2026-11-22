@@ -1,7 +1,6 @@
 'use client';
 
 import {useMemo, useState} from 'react';
-import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Link} from '@astryxdesign/core/Link';
@@ -10,11 +9,16 @@ import {Table} from '@astryxdesign/core/Table';
 import {Text, Heading} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
+import {
+  CategoryChecks,
+  HealthScore,
+  LicenceBadge,
+} from '../_components/HealthBits';
 import {MockShell} from '../_components/MockShell';
 import {
-  MOCK_APPS,
   MOCK_ORG,
-  statusBadgeVariant,
+  SCORING_BLURB,
+  appsByHealthAsc,
   type MockApp,
 } from '../_data/seed';
 
@@ -26,36 +30,38 @@ const KIND_FILTERS = [
   {value: 'vendor_service', label: 'Vendor service'},
 ];
 
+function cat(app: MockApp, key: MockApp['categories'][number]['key']) {
+  return app.categories.find((c) => c.key === key)!;
+}
+
 export default function MockListPage() {
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_APPS.filter((app) => {
-      if (kind && kind !== 'all' && app.kind !== kind) {
-        return false;
-      }
-      if (!q) {
-        return true;
-      }
+    return appsByHealthAsc().filter((app) => {
+      if (kind !== 'all' && app.kind !== kind) return false;
+      if (!q) return true;
       return (
         app.name.toLowerCase().includes(q) ||
-        app.owner.toLowerCase().includes(q) ||
-        app.vendorOrRuntime.toLowerCase().includes(q)
+        app.owner.toLowerCase().includes(q)
       );
     });
   }, [query, kind]);
 
   return (
-    <MockShell active="list">
+    <MockShell active="apps">
       <VStack gap={5}>
         <HStack gap={4} vAlign="end" justify="between" wrap="wrap">
           <VStack gap={1}>
             <Heading level={1}>Apps</Heading>
             <Text type="body" color="secondary" display="block">
-              {MOCK_ORG.name} · {MOCK_ORG.itTeam} · {MOCK_APPS.length} apps in
-              the register
+              {MOCK_ORG.name} · sorted by health (worst first) ·{' '}
+              {rows.length} shown
+            </Text>
+            <Text type="supporting" color="secondary" display="block">
+              {SCORING_BLURB}
             </Text>
           </VStack>
           <Button label="Add app" variant="primary" href="/mockups/create" />
@@ -67,10 +73,10 @@ export default function MockListPage() {
             type="search"
             value={query}
             onChange={setQuery}
-            placeholder="Name, owner, or vendor"
+            placeholder="Name or owner"
             startIcon="search"
             hasClear
-            width={320}
+            width={280}
           />
           <Selector
             label="Kind"
@@ -85,36 +91,65 @@ export default function MockListPage() {
           data={rows}
           idKey="id"
           hasHover
-          density="balanced"
+          density="compact"
           dividers="rows"
           columns={[
             {
               key: 'name',
               header: 'App',
               renderCell: (app: MockApp) => (
-                <Link href={`/mockups/edit?id=${app.id}`}>{app.name}</Link>
+                <VStack gap={0}>
+                  <Link href={`/mockups/edit?id=${app.id}`}>{app.name}</Link>
+                  <Text type="supporting" color="secondary">
+                    {app.kindLabel} · {app.owner}
+                  </Text>
+                </VStack>
               ),
             },
             {
-              key: 'kindLabel',
-              header: 'Kind',
+              key: 'healthScore',
+              header: 'Health',
               renderCell: (app: MockApp) => (
-                <Badge label={app.kindLabel} variant="neutral" />
+                <HealthScore score={app.healthScore} size="sm" />
               ),
             },
-            {key: 'owner', header: 'Owner'},
-            {key: 'vendorOrRuntime', header: 'Vendor / where it runs'},
-            {key: 'noticeDeadline', header: 'Notice deadline'},
-            {key: 'renewalDate', header: 'Renewal'},
-            {key: 'costLabel', header: 'Cost'},
             {
-              key: 'statusLabel',
-              header: 'Status',
+              key: 'licenceLabel',
+              header: 'Licence',
               renderCell: (app: MockApp) => (
-                <Badge
-                  label={app.statusLabel}
-                  variant={statusBadgeVariant(app.status)}
+                <LicenceBadge
+                  hasLicence={app.hasLicence}
+                  label={app.licenceLabel}
+                  status={app.licenceStatus}
                 />
+              ),
+            },
+            {
+              key: 'deps',
+              header: 'Deps',
+              renderCell: (app: MockApp) => (
+                <CategoryChecks cat={cat(app, 'dependencies')} />
+              ),
+            },
+            {
+              key: 'host',
+              header: 'Hosting',
+              renderCell: (app: MockApp) => (
+                <CategoryChecks cat={cat(app, 'hosting')} />
+              ),
+            },
+            {
+              key: 'lic',
+              header: 'Lic. chk',
+              renderCell: (app: MockApp) => (
+                <CategoryChecks cat={cat(app, 'licence')} />
+              ),
+            },
+            {
+              key: 'price',
+              header: 'Pricing',
+              renderCell: (app: MockApp) => (
+                <CategoryChecks cat={cat(app, 'pricing')} />
               ),
             },
           ]}

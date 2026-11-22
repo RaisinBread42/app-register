@@ -12,19 +12,25 @@ import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {MOCK_ORG} from '../_data/seed';
 
+export type MockNav =
+  | 'overview'
+  | 'apps'
+  | 'notices'
+  | 'sources'
+  | 'settings'
+  | 'detail';
+
 type MockShellProps = {
   children: React.ReactNode;
-  active: 'list' | 'create' | 'edit' | 'empty' | 'home';
-  banner?: React.ReactNode;
+  active: MockNav;
 };
 
-export function MockShell({children, active, banner}: MockShellProps) {
+export function MockShell({children, active}: MockShellProps) {
   return (
     <AppShell
       height="fill"
       variant="wash"
       contentPadding={6}
-      banner={banner}
       sideNav={
         <SideNav
           header={
@@ -37,34 +43,44 @@ export function MockShell({children, active, banner}: MockShellProps) {
           footer={
             <VStack gap={1} padding={3}>
               <Text type="supporting" color="secondary" display="block">
-                Mockup only · fictional data
+                Mockup v2 · fictional data
               </Text>
-              <Badge label="Astryx prototype" variant="neutral" />
+              <Badge label="Obsidian theme" variant="info" />
             </VStack>
           }>
-          <SideNavSection title="Register">
+          <SideNavSection title="Workspace">
             <SideNavItem
-              label="All apps"
+              label="Overview"
+              href="/mockups/overview"
+              isSelected={active === 'overview'}
+              icon="viewColumns"
+            />
+            <SideNavItem
+              label="Apps"
               href="/mockups/list"
-              isSelected={active === 'list'}
-              icon="list"
+              isSelected={active === 'apps' || active === 'detail'}
+              icon="checkDouble"
             />
             <SideNavItem
-              label="Add app"
-              href="/mockups/create"
-              isSelected={active === 'create'}
-              icon="plus"
+              label="Notices"
+              href="/mockups/notices"
+              isSelected={active === 'notices'}
+              icon="warning"
             />
             <SideNavItem
-              label="Empty state"
-              href="/mockups/empty"
-              isSelected={active === 'empty'}
-              icon="inbox"
+              label="Sources"
+              href="/mockups/sources"
+              isSelected={active === 'sources'}
+              icon="externalLink"
             />
           </SideNavSection>
-          <SideNavSection title="People">
-            <SideNavItem label="Leavers (later)" isDisabled icon="users" />
-            <SideNavItem label="Quarterly review (later)" isDisabled icon="calendar" />
+          <SideNavSection title="Admin">
+            <SideNavItem
+              label="Settings"
+              href="/mockups/settings"
+              isSelected={active === 'settings'}
+              icon="wrench"
+            />
           </SideNavSection>
         </SideNav>
       }>

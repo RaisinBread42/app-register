@@ -1,0 +1,64 @@
+{
+  "name": "obsidian",
+  "like": "neutral",
+  "mode": "both",
+  "settings": [
+    {
+      "thing": "accent",
+      "value": "#612CCC",
+      "source": "dial"
+    },
+    {
+      "thing": "font",
+      "value": "poppins",
+      "source": "dial",
+      "on": "heading"
+    },
+    {
+      "thing": "font",
+      "value": "inter",
+      "source": "dial",
+      "on": "body"
+    },
+    {
+      "thing": "background-color",
+      "value": "#130F1C",
+      "source": "property",
+      "on": "side-nav"
+    },
+    {
+      "thing": "--color-text-primary",
+      "value": "#FFFFFF",
+      "source": "token",
+      "on": "side-nav"
+    },
+    {
+      "thing": "--color-text-primary",
+      "value": "#FFFFFF",
+      "source": "token",
+      "on": "side-nav-item"
+    },
+    {
+      "thing": "background-color",
+      "value": "#612CCC",
+      "source": "property",
+      "on": "side-nav-item",
+      "state": "selected"
+    },
+    {
+      "thing": "color",
+      "value": "#FFFFFF",
+      "source": "property",
+      "on": "side-nav-item",
+      "state": "selected"
+    },
+    {
+      "thing": "color",
+      "value": "#FFFFFF",
+      "source": "property",
+      "on": "side-nav-item"
+    }
+  ],
+  "lifted": [],
+  "palette": "d36117009097168324822d5b47461305cc9ed2d56dfa08c9e50ccdb8a863f3fd"
+}
