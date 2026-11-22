@@ -50,6 +50,12 @@ export const APP_TAB = {
 export const APP_TABS = Object.values(APP_TAB);
 export type AppTab = (typeof APP_TABS)[number];
 
+/** Health filter of the applications list. */
+export const APP_HEALTH_FILTER = {
+  attention: 'attention',
+  healthy: 'healthy',
+} as const;
+
 /** Sort orders of the applications list (sorted in the browser over the loaded apps). */
 export const APP_LIST_SORT = {
   health: 'health',
@@ -88,7 +94,14 @@ export const API_SUB_ROUTE = {
   dependencies: 'dependencies',
   hosting: 'hosting',
   acknowledge: 'acknowledge',
+  /** `POST /api/apps/:id/dependencies/import` */
+  import: 'import',
+  /** `POST /api/apps/:id/dependencies/refresh` */
+  refresh: 'refresh',
 } as const;
+
+/** `POST` here re-checks every active app's dependencies; the daily scheduled job calls it. */
+export const API_MONITORING_DEPENDENCIES_REFRESH = `${API_PATH_PREFIX}/monitoring/dependencies/refresh`;
 
 /** What the UI's Basic auth check decides for a request. */
 export const BASIC_AUTH_VERDICT = {
@@ -175,6 +188,8 @@ export const API_HEADER = {
   authorization: 'authorization',
   idempotencyKey: 'idempotency-key',
   contentType: 'content-type',
+  contentLength: 'content-length',
+  userAgent: 'user-agent',
   wwwAuthenticate: 'www-authenticate',
 } as const;
 
@@ -220,3 +235,95 @@ export const FILTER_ALL = 'all';
 
 /** The API stores money as whole cents; the UI shows and takes currency units. */
 export const CENTS_PER_UNIT = 100;
+
+/** How a dependency got on an app. An import only ever removes rows it created itself. */
+export const DEPENDENCY_SOURCE = {
+  manual: 'manual',
+  import: 'import',
+} as const;
+export const DEPENDENCY_SOURCES = Object.values(DEPENDENCY_SOURCE);
+export type DependencySource = (typeof DEPENDENCY_SOURCES)[number];
+
+/** Largest package.json / package-lock.json the import accepts (5 MB of text). */
+export const DEPENDENCY_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+
+/** Why the last registry check of a dependency gave no full answer. */
+export const DEPENDENCY_CHECK_ERROR = {
+  /** Not on the public npm registry: private, misspelt, or not an npm package. */
+  notFound: 'not_found',
+  /** The registry or advisory source did not answer; the previous result is kept. */
+  unavailable: 'unavailable',
+  /** The tracked version is a range or tag, so advisories cannot be matched to it. */
+  invalidVersion: 'invalid_version',
+} as const;
+export const DEPENDENCY_CHECK_ERRORS = Object.values(DEPENDENCY_CHECK_ERROR);
+export type DependencyCheckError = (typeof DEPENDENCY_CHECK_ERRORS)[number];
+
+export const ADVISORY_SEVERITY = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  /** The advisory source gave no severity. */
+  unknown: 'unknown',
+} as const;
+export const ADVISORY_SEVERITIES = Object.values(ADVISORY_SEVERITY);
+export type AdvisorySeverity = (typeof ADVISORY_SEVERITIES)[number];
+
+/** What an app's health score is made of. Each dimension reports its own deductions. */
+export const HEALTH_DIMENSION = {
+  dependencies: 'dependencies',
+  hosting: 'hosting',
+  licence: 'licence',
+  pricing: 'pricing',
+} as const;
+export const HEALTH_DIMENSIONS = Object.values(HEALTH_DIMENSION);
+export type HealthDimension = (typeof HEALTH_DIMENSIONS)[number];
+
+export const HEALTH_STATUS = {
+  ok: 'ok',
+  attention: 'attention',
+  critical: 'critical',
+  /** Nothing recorded to check. */
+  na: 'na',
+} as const;
+export const HEALTH_STATUSES = Object.values(HEALTH_STATUS);
+export type HealthStatus = (typeof HEALTH_STATUSES)[number];
+
+/** A score starts here and loses points per deduction, never going below zero. */
+export const HEALTH_MAX_SCORE = 100;
+/** Below this a score is `critical`. */
+export const HEALTH_CRITICAL_BELOW = 80;
+/** Below this (and not critical) a score is `attention`; at or above it the app is healthy. */
+export const HEALTH_ATTENTION_BELOW = 95;
+
+/** Points one known advisory costs, by severity. Unknown severity counts as medium so it is never ignored. */
+export const ADVISORY_POINTS: Record<AdvisorySeverity, number> = {
+  critical: 10,
+  high: 5,
+  medium: 2,
+  low: 0,
+  unknown: 2,
+};
+/** Points a runtime dependency costs when its tracked version is a major / a minor version behind the latest. */
+export const MAJOR_BEHIND_POINTS = 3;
+export const MINOR_BEHIND_POINTS = 1;
+
+export const VERSION_LAG = {
+  major: 'major',
+  minor: 'minor',
+} as const;
+export type VersionLag = (typeof VERSION_LAG)[keyof typeof VERSION_LAG];
+
+/** The free, keyless sources dependency monitoring reads. Only package names and versions are ever sent. */
+export const NPM_REGISTRY_URL = 'https://registry.npmjs.org';
+export const OSV_API_URL = 'https://api.osv.dev/v1';
+export const OSV_ADVISORY_PAGE_URL = 'https://osv.dev/vulnerability';
+export const OSV_ECOSYSTEM_NPM = 'npm';
+/** Sent as User-Agent on every monitoring request. No personal or workspace data. */
+export const MONITORING_USER_AGENT = 'app-register';
+export const MONITORING_TIMEOUT_MS = 8_000;
+/** At most this many monitoring requests are in flight at once. */
+export const MONITORING_CONCURRENCY = 6;
+/** OSV accepts up to 1000 queries per batch. */
+export const OSV_BATCH_SIZE = 500;

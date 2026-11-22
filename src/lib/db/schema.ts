@@ -19,12 +19,16 @@ import {
 } from 'drizzle-orm/pg-core';
 import {
   APP_KINDS,
+  DEPENDENCY_CHECK_ERRORS,
+  DEPENDENCY_SOURCE,
+  DEPENDENCY_SOURCES,
   NOTICE_ALERT_STATUS,
   NOTICE_ALERT_STATUSES,
   OWNERSHIP_CHANGE_REASONS,
   OWNERSHIP_ROLES,
   PERSON_STATUS,
   PERSON_STATUSES,
+  type AdvisorySeverity,
 } from '../constants';
 
 /** CHECK (column IN (...)) built from a constants array, so TS and DB share one list. */
@@ -307,7 +311,17 @@ export const reviewItems = pgTable(
   ],
 );
 
-/** What an app runs on or pulls in: a library, SDK or agent, recorded by hand. */
+/** One known security advisory for a dependency's tracked version, as monitoring found it. */
+export type StoredAdvisory = {
+  id: string;
+  /** Other ids for the same advisory (e.g. the CVE for a GHSA). */
+  aliases: string[];
+  severity: AdvisorySeverity;
+  summary: string;
+  url: string;
+};
+
+/** What an app runs on or pulls in: a library or SDK, added by hand or imported from a package file. */
 export const appDependencies = pgTable(
   'app_dependencies',
   {
@@ -320,6 +334,14 @@ export const appDependencies = pgTable(
     /** Advisory ids such as CVE-2026-1234; empty when none are known. */
     vulnerabilities: text('vulnerabilities').array().notNull().default(sql`'{}'::text[]`),
     recommendedAction: text('recommended_action'),
+    /** `import` rows came from a package file and are removed when a later import no longer lists them. */
+    source: text('source').notNull().default(DEPENDENCY_SOURCE.manual),
+    isDev: boolean('is_dev').notNull().default(false),
+    /** Advisories monitoring found for the tracked version; `vulnerabilities` stays hand-recorded. */
+    advisories: jsonb('advisories').$type<StoredAdvisory[]>().notNull().default([]),
+    /** When monitoring last checked this row; null until the first check. */
+    checkedAt: timestamp('checked_at', {withTimezone: true}),
+    checkError: text('check_error'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -331,6 +353,8 @@ export const appDependencies = pgTable(
     }).onDelete('cascade'),
     // Also serves "an app's dependencies".
     uniqueIndex('app_dependencies_app_name_unique').on(t.appId, sql`lower(${t.name})`),
+    check('app_dependencies_source_allowed', oneOf(t.source, DEPENDENCY_SOURCES)),
+    check('app_dependencies_check_error_allowed', oneOf(t.checkError, DEPENDENCY_CHECK_ERRORS)),
   ],
 );
 
