@@ -135,6 +135,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(image)) {
               {name: 'DATABASE_URL', secretRef: 'database-url'}
               {name: 'UI_PASSWORD', secretRef: 'ui-password'}
               {name: 'NODE_ENV', value: 'production'}
+              // The UI's server code calls this same process's /api over loopback.
+              {name: 'APP_URL', value: 'http://localhost:3000'}
             ],
             empty(uiApiKey) ? [] : [{name: 'APP_REGISTER_API_KEY', secretRef: 'ui-api-key'}]
           )
