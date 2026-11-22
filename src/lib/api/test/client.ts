@@ -128,3 +128,25 @@ function matchRoute(pathname: string): {template: string; params: Record<string,
   }
   throw new Error(`No route for ${pathname}`);
 }
+
+/**
+ * A `fetch` that answers from the route handlers instead of the network, and
+ * checks each response against the spec: lets the UI's API client run for real.
+ */
+export async function fetchFromRoutes(input: string, init: RequestInit = {}): Promise<Response> {
+  const request = new Request(input, init);
+  const {pathname} = new URL(request.url);
+  const {template, params} = matchRoute(pathname);
+  const handler = ROUTES[template][request.method] as Handler | undefined;
+  if (!handler) {
+    throw new Error(`No ${request.method} handler for ${template}`);
+  }
+  const response = await handler(request, {params: Promise.resolve(params)});
+  const text = await response.clone().text();
+  expectMatchesSpec(template, request.method, {
+    status: response.status,
+    body: text ? JSON.parse(text) : null,
+    headers: response.headers,
+  });
+  return response;
+}

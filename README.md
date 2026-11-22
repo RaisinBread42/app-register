@@ -25,6 +25,8 @@ npm ci
 npm run dev          # http://localhost:3000
 ```
 
+The UI needs `DATABASE_URL`, `APP_URL`, `APP_REGISTER_API_KEY` (from `npm run api-key:create -- "UI"`) and `UI_PASSWORD` in the environment ([docs/environments.md](docs/environments.md)). The browser asks for a password: any username, the `UI_PASSWORD` value. Without `UI_PASSWORD` set, every page answers 503.
+
 ## Database
 
 Postgres 18 only ([ADR 0002](docs/adr/0002-postgres.md)). Copy `DATABASE_URL` from `.env.example`.
