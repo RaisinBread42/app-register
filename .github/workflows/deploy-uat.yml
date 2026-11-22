@@ -1,0 +1,54 @@
+# Deploy main to UAT on Azure Container Apps. Never PROD.
+# Auth: GitHub OIDC (no stored Azure secret). Repo variables AZURE_CLIENT_ID,
+# AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, ACR_NAME are set once (see docs/environments.md).
+name: Deploy UAT
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-uat
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-app-register-uat
+  APP_NAME: appreg-uat
+  IMAGE: app-register
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in Azure Container Registry
+        run: az acr build --registry "${{ vars.ACR_NAME }}" --image "$IMAGE:${{ github.sha }}" .
+
+      - name: Roll out the new image (start-up applies migrations)
+        run: |
+          az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+            --image "${{ vars.ACR_NAME }}.azurecr.io/$IMAGE:${{ github.sha }}"
+
+      - name: Smoke test
+        run: |
+          url="https://$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)"
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$url/api/openapi.json" || true)"
+            [ "$code" = "200" ] && echo "UAT is up: $url" && exit 0
+            sleep 10
+          done
+          echo "UAT did not answer 200 on /api/openapi.json"; exit 1
