@@ -81,6 +81,7 @@ describe('JSON API', () => {
     expect((await call(appRoute.GET(request('/apps?kind=spreadsheet')))).status).toBe(400);
     expect((await call(appRoute.GET(request('/apps?sort=price')))).status).toBe(400);
     expect((await call(appRoute.GET(request('/apps?noticeDeadlineWithinDays=-1')))).status).toBe(400);
+    expect((await call(appRoute.GET(request('/apps?noticeDeadlineWithinDays=100000000')))).status).toBe(400);
 
     // GET /api/apps/[id]
     const one = await call(appByIdRoute.GET(request(`/apps/${app.id}`), params(app.id)));

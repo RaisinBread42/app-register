@@ -207,7 +207,10 @@ export const attachments = pgTable(
   ],
 );
 
-/** Append-only history: no updated_at. */
+/**
+ * Append-only history: no updated_at, and a hand-written trigger in
+ * drizzle/0000_init.sql refuses UPDATE (drizzle-kit cannot generate triggers).
+ */
 export const ownershipChanges = pgTable(
   'ownership_changes',
   {

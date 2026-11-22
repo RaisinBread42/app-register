@@ -14,7 +14,7 @@ Route handlers live in `src/app/api/`. Every request acts on the current workspa
 
 | Method | Path | Body / query | Success |
 | --- | --- | --- | --- |
-| GET | `/api/apps` | `?kind=<APP_KINDS>&sort=name\|notice_deadline&noticeDeadlineWithinDays=<int ≥ 0>` | `200 { apps: App[] }` — active (not archived) apps only |
+| GET | `/api/apps` | `?kind=<APP_KINDS>&sort=name\|notice_deadline&noticeDeadlineWithinDays=<int 0–36500>` | `200 { apps: App[] }` — active (not archived) apps only |
 | POST | `/api/apps` | `AppInput` | `201 { app: AppDetail }` — schedules notice alerts |
 | GET | `/api/apps/:id` | — | `200 { app: AppDetail }` (archived apps too, `archivedAt` set) |
 | PATCH | `/api/apps/:id` | any subset of `AppInput`; `null` clears an optional field | `200 { app: AppDetail }` — active apps only |
@@ -33,8 +33,8 @@ TypeScript sources of truth: `AppView`, `AppDetailView` (`src/lib/services/apps.
 type AppInput = {
   name: string;                 // required; unique per workspace among active apps (case-insensitive)
   kind: 'saas' | 'in_house' | 'citizen_built' | 'vendor_service';
-  ownerId: string;              // active person in this workspace
-  backupOwnerId: string;        // active person, not the owner
+  ownerId: string;              // person in this workspace; must be active when newly assigned
+  backupOwnerId: string;        // same rule; not the owner
   category?: string | null;
   vendor?: string | null;
   description?: string | null;
@@ -79,4 +79,4 @@ type NoticeAlert = {
 
 - Creating an app with a notice deadline schedules one alert per offset in `NOTICE_ALERT_OFFSET_DAYS` whose due date is today or later (UTC).
 - Changing the deadline deletes the app's `scheduled` alerts and schedules new ones; `sent` and `acknowledged` alerts stay as history. If the deadline moves back to one that already has a sent alert for an offset, that offset is not scheduled again.
-- Archiving an app (service only, no endpoint yet) deletes its `scheduled` alerts.
+- Archiving an app (service only, no endpoint yet) deletes its `scheduled` alerts. Its sent and acknowledged alerts stay in `GET /api/notice-alerts` as history.

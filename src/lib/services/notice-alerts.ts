@@ -1,4 +1,4 @@
-import {and, asc, eq} from 'drizzle-orm';
+import {and, asc, eq, ne} from 'drizzle-orm';
 import {NOTICE_ALERT_STATUS, NOTICE_ALERT_STATUSES} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
@@ -105,13 +105,18 @@ export async function acknowledgeAlert(
   id: string,
   now = new Date(),
 ): Promise<NoticeAlertView> {
-  const current = await findAlert(db, workspaceId, id);
-  if (current.status !== NOTICE_ALERT_STATUS.acknowledged) {
-    await db
-      .update(noticeAlerts)
-      .set({status: NOTICE_ALERT_STATUS.acknowledged, acknowledgedAt: now})
-      .where(and(eq(noticeAlerts.workspaceId, workspaceId), eq(noticeAlerts.id, id)));
-  }
+  await findAlert(db, workspaceId, id);
+  // The status condition keeps the first acknowledgement when two arrive at once.
+  await db
+    .update(noticeAlerts)
+    .set({status: NOTICE_ALERT_STATUS.acknowledged, acknowledgedAt: now})
+    .where(
+      and(
+        eq(noticeAlerts.workspaceId, workspaceId),
+        eq(noticeAlerts.id, id),
+        ne(noticeAlerts.status, NOTICE_ALERT_STATUS.acknowledged),
+      ),
+    );
   return findAlert(db, workspaceId, id);
 }
 

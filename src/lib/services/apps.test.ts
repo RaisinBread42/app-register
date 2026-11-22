@@ -1,7 +1,7 @@
 import {and, eq} from 'drizzle-orm';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS} from '@/lib/constants';
-import {noticeAlerts} from '@/lib/db/schema';
+import {NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {noticeAlerts, people} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {archiveApp, createApp, getApp, listActiveApps, updateApp} from './apps';
 import {ValidationError} from './errors';
@@ -185,5 +185,32 @@ describe('app domain model', () => {
     const app = await createApp(t.db, t.workspaceId, saas('Woodgrove Payroll', '2026-12-31'), '2026-12-01');
 
     expect(app.alerts.map((a) => [a.offsetDays, a.dueOn])).toEqual([[30, '2026-12-01']]);
+  });
+
+  it('two edits to the same app at once keep both changes and leave alerts only for the final deadline', async () => {
+    const app = await createApp(t.db, t.workspaceId, saas('Adatum Backup', '2026-12-31'), TODAY);
+
+    await Promise.all([
+      updateApp(t.db, t.workspaceId, app.id, {noticeDeadline: '2027-03-31'}, TODAY),
+      updateApp(t.db, t.workspaceId, app.id, {vendor: 'Adatum'}, TODAY),
+    ]);
+
+    const final = await getApp(t.db, t.workspaceId, app.id);
+    expect([final.noticeDeadline, final.vendor]).toEqual(['2027-03-31', 'Adatum']);
+    const scheduled = await alertsByStatus(app.id, NOTICE_ALERT_STATUS.scheduled);
+    expect(new Set(scheduled.map((a) => a.noticeDeadline))).toEqual(new Set(['2027-03-31']));
+  });
+
+  it('an app whose owner has left can still be edited, but a leaver cannot be newly assigned', async () => {
+    const app = await createApp(t.db, t.workspaceId, saas('Proseware Wiki'), TODAY);
+    const carl = await createPerson(t.db, t.workspaceId, {name: 'Carl Leaver', email: 'carl@example.test'});
+    await t.db.update(people).set({status: PERSON_STATUS.left, leftOn: '2026-05-29'}).where(eq(people.id, ownerId));
+    await t.db.update(people).set({status: PERSON_STATUS.left, leftOn: '2026-05-29'}).where(eq(people.id, carl.id));
+
+    const edited = await updateApp(t.db, t.workspaceId, app.id, {vendor: 'Proseware'}, TODAY);
+    expect(edited.vendor).toBe('Proseware');
+    await expect(
+      updateApp(t.db, t.workspaceId, app.id, {backupOwnerId: carl.id}, TODAY),
+    ).rejects.toThrow(/active people/);
   });
 });

@@ -16,6 +16,9 @@ import {assertActivePeople} from './people';
 
 const IN_HOUSE_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
 
+/** Widest `noticeDeadlineWithinDays` window (100 years); wider is a 400. */
+const MAX_NOTICE_WINDOW_DAYS = 36_500;
+
 /** Largest value the `cost_cents integer` column holds. */
 const MAX_COST_CENTS = 2_147_483_647;
 
@@ -104,8 +107,10 @@ export async function listActiveApps(
 
   if (query.noticeDeadlineWithinDays) {
     const days = Number(query.noticeDeadlineWithinDays);
-    if (!Number.isInteger(days) || days < 0) {
-      throw new ValidationError('noticeDeadlineWithinDays must be a whole number of days');
+    if (!Number.isInteger(days) || days < 0 || days > MAX_NOTICE_WINDOW_DAYS) {
+      throw new ValidationError(
+        `noticeDeadlineWithinDays must be a whole number of days from 0 to ${MAX_NOTICE_WINDOW_DAYS}`,
+      );
     }
     filters.push(between(apps.noticeDeadline, today, addDaysIso(today, days)));
   }
@@ -141,7 +146,8 @@ export async function getApp(
 }
 
 /**
- * Updates an active app. If the notice deadline changes, its `scheduled` alerts
+ * Updates an active app. Newly assigned owners must be active people.
+ * If the notice deadline changes, its `scheduled` alerts
  * are replaced; `sent` and `acknowledged` alerts stay as history.
  */
 export async function updateApp(
@@ -151,19 +157,30 @@ export async function updateApp(
   patch: UpdateAppInput,
   today = todayIso(),
 ): Promise<AppDetailView> {
-  const current = await getApp(db, workspaceId, id);
-  if (current.archivedAt) {
+  if (!isUuid(id)) {
     throw new NotFoundError('App not found');
   }
-  const values = validateCreateAppInput({...toInput(current), ...patch});
-  await assertActivePeople(db, workspaceId, [values.ownerId, values.backupOwnerId]);
-
   await withNameCheck(() =>
     db.transaction(async (tx) => {
-      await tx
-        .update(apps)
-        .set(values)
-        .where(and(activeAppsIn(workspaceId), eq(apps.id, id)));
+      // Lock the row so two edits at once cannot undo each other or orphan alerts.
+      const [current] = await tx
+        .select()
+        .from(apps)
+        .where(and(activeAppsIn(workspaceId), eq(apps.id, id)))
+        .for('update');
+      if (!current) {
+        throw new NotFoundError('App not found');
+      }
+      const values = validateCreateAppInput({...current, ...patch});
+      // Only newly assigned people must be active; an edit to an app whose owner has
+      // left still works (reassignment belongs to the leaver flow).
+      const newlyAssigned = [values.ownerId, values.backupOwnerId].filter(
+        (personId) => personId !== current.ownerId && personId !== current.backupOwnerId,
+      );
+      if (newlyAssigned.length > 0) {
+        await assertActivePeople(tx, workspaceId, newlyAssigned);
+      }
+      await tx.update(apps).set(values).where(eq(apps.id, id));
       if (values.noticeDeadline !== current.noticeDeadline) {
         await removeScheduledAlerts(tx, workspaceId, id);
         if (values.noticeDeadline) {
@@ -287,25 +304,6 @@ function toAppView(row: {
     archivedAt: app.archivedAt,
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,
-  };
-}
-
-function toInput(view: AppView): CreateAppInput {
-  return {
-    name: view.name,
-    kind: view.kind,
-    category: view.category,
-    vendor: view.vendor,
-    description: view.description,
-    ownerId: view.owner.id,
-    backupOwnerId: view.backupOwner.id,
-    renewalDate: view.renewalDate,
-    noticeDeadline: view.noticeDeadline,
-    billingCycle: view.billingCycle,
-    costCents: view.costCents,
-    runtimeLocation: view.runtimeLocation,
-    dataAndKeys: view.dataAndKeys,
-    whatBreaksIfStopped: view.whatBreaksIfStopped,
   };
 }
 

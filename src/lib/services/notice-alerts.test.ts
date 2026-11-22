@@ -14,7 +14,7 @@ describe('notice alerts', () => {
     t = await createTestDb();
   });
 
-  it('acknowledging an alert sets acknowledged_at and status only; the app and its deadline are unchanged', async () => {
+  it('acknowledging an alert sets acknowledged_at (first time wins) and status only; the app and its deadline are unchanged', async () => {
     const owner = await createPerson(t.db, t.workspaceId, {name: 'Ada Owner', email: 'ada@example.test'});
     const backup = await createPerson(t.db, t.workspaceId, {name: 'Ben Backup', email: 'ben@example.test'});
     const app = await createApp(
@@ -27,7 +27,10 @@ describe('notice alerts', () => {
     const [alert] = app.alerts;
     const seenAt = new Date('2026-10-03T09:15:00Z');
 
-    const acknowledged = await acknowledgeAlert(t.db, t.workspaceId, alert.id, seenAt);
+    const [acknowledged] = await Promise.all([
+      acknowledgeAlert(t.db, t.workspaceId, alert.id, seenAt),
+      acknowledgeAlert(t.db, t.workspaceId, alert.id, new Date('2026-10-03T10:00:00Z')),
+    ]);
 
     expect(acknowledged).toEqual({
       ...alert,

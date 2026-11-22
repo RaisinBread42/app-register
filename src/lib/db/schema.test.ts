@@ -123,6 +123,8 @@ describe('database schema', () => {
     await t.db.insert(noticeAlerts).values({id: newId(), ...alert});
     await t.db.insert(attachments).values({id: newId(), ...attachment, storageKey: 'k-1'});
     await t.db.insert(reviewItems).values({id: newId(), workspaceId: w.workspaceId, cycleId: w.cycleId, appId: w.appId});
+    const changeId = newId();
+    await t.db.insert(ownershipChanges).values({id: changeId, ...change, fromPersonId: w.backupId});
 
     const cases: [string, () => Promise<unknown>][] = [
       ['workspaces_slug_unique', () => t.db.insert(workspaces).values({id: newId(), name: 'Copy', slug: DEFAULT_WORKSPACE_SLUG})],
@@ -148,6 +150,7 @@ describe('database schema', () => {
       ['ownership_changes_from_differs_from_to', () => t.db.insert(ownershipChanges).values({id: newId(), ...change, fromPersonId: w.ownerId})],
       ['ownership_changes_role_allowed', () => t.db.insert(ownershipChanges).values({id: newId(), ...change, role: 'admin'})],
       ['ownership_changes_reason_allowed', () => t.db.insert(ownershipChanges).values({id: newId(), ...change, reason: 'whim'})],
+      ['ownership_changes_append_only', () => t.db.update(ownershipChanges).set({reason: OWNERSHIP_CHANGE_REASON.leaver}).where(eq(ownershipChanges.id, changeId))],
       ['review_cycles_workspace_quarter_unique', () => t.db.insert(reviewCycles).values({id: newId(), workspaceId: w.workspaceId, quarter: '2026-Q4', startedOn: '2026-10-02'})],
       ['review_cycles_closed_after_started', () => t.db.insert(reviewCycles).values({id: newId(), workspaceId: w.workspaceId, quarter: '2027-Q1', startedOn: '2027-01-05', closedOn: '2027-01-04'})],
       ['review_items_cycle_app_unique', () => t.db.insert(reviewItems).values({id: newId(), workspaceId: w.workspaceId, cycleId: w.cycleId, appId: w.appId})],
@@ -160,6 +163,7 @@ describe('database schema', () => {
     // Children cascade: deleting an app removes its alerts; deleting a workspace removes everything.
     await t.db.delete(apps).where(eq(apps.id, w.appId));
     expect(await t.db.select().from(noticeAlerts)).toHaveLength(0);
+    expect(await t.db.select().from(ownershipChanges)).toHaveLength(0);
     await t.db.delete(workspaces).where(eq(workspaces.id, w.workspaceId));
     expect(await t.db.select().from(people)).toHaveLength(0);
   });

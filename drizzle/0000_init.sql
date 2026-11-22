@@ -152,4 +152,11 @@ CREATE INDEX "notice_alerts_acknowledged_by_idx" ON "notice_alerts" USING btree 
 CREATE INDEX "ownership_changes_app_created_idx" ON "ownership_changes" USING btree ("app_id","created_at");--> statement-breakpoint
 CREATE INDEX "ownership_changes_from_person_idx" ON "ownership_changes" USING btree ("from_person_id");--> statement-breakpoint
 CREATE INDEX "ownership_changes_to_person_idx" ON "ownership_changes" USING btree ("to_person_id");--> statement-breakpoint
-CREATE INDEX "review_items_app_idx" ON "review_items" USING btree ("app_id");
+CREATE INDEX "review_items_app_idx" ON "review_items" USING btree ("app_id");;--> statement-breakpoint
+-- Hand-written: ownership_changes is append-only. UPDATE is refused; DELETE stays allowed so app/workspace cascades work.
+CREATE FUNCTION "ownership_changes_refuse_update"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'ownership_changes_append_only: ownership history cannot be changed';
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "ownership_changes_append_only" BEFORE UPDATE ON "ownership_changes" FOR EACH ROW EXECUTE FUNCTION "ownership_changes_refuse_update"();
