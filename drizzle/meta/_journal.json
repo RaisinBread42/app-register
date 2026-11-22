@@ -15,6 +15,13 @@
       "when": 1795365090850,
       "tag": "0001_api_keys_idempotency_deps_hosting",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795386559878,
+      "tag": "0002_hosting_health",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import {migrate} from 'drizzle-orm/pglite/migrator';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {
   DEFAULT_WORKSPACE_SLUG,
+  END_OF_SUPPORT_SOURCE,
   NOTICE_ALERT_STATUS,
   OWNERSHIP_CHANGE_REASON,
   OWNERSHIP_ROLE,
@@ -15,6 +16,7 @@ import {
 import {MIGRATIONS_FOLDER} from './client';
 import {newId} from './ids';
 import {
+  appHosting,
   apps,
   attachments,
   noticeAlerts,
@@ -43,6 +45,8 @@ const ALL_TABLES = [
 ];
 
 const TABLES_0001 = ['api_keys', 'app_dependencies', 'app_hosting', 'idempotency_keys'];
+
+const COLUMNS_0002 = ['end_of_support_source', 'health_checked_at', 'health_error', 'incidents', 'runtime', 'runtime_version'];
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
 async function seedWorkspace(t: TestDb, workspaceId: string) {
@@ -197,12 +201,46 @@ describe('database schema', () => {
     }
   });
 
+  it('rolling back migration 0002 removes only the hosting check’s columns and keeps the dates; migrating again restores them and marks existing dates as typed by hand', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const hostingId = newId();
+    await t.db.insert(appHosting).values({
+      id: hostingId,
+      workspaceId: w.workspaceId,
+      appId: w.appId,
+      provider: 'Azure',
+      service: 'SQL Server',
+      runtime: 'Node.js',
+      endOfSupportOn: '2027-02-04',
+      endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate,
+    });
+    await expect(
+      t.db.insert(appHosting).values({id: newId(), workspaceId: w.workspaceId, appId: w.appId, provider: 'AWS', service: 'S3', endOfSupportOn: '2027-02-04'}),
+    ).rejects.toThrow('app_hosting_end_of_support_has_source');
+    const columns = async () =>
+      (
+        await t.client.query<{column_name: string}>(
+          `select column_name from information_schema.columns where table_name = 'app_hosting' order by 1`,
+        )
+      ).rows.map((r) => r.column_name);
+    const before = await columns();
+
+    await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', '0002_hosting_health.down.sql'), 'utf8'));
+    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0002.includes(name)));
+    const kept = await t.client.query<{end_of_support_on: string}>(`select end_of_support_on::text from app_hosting`);
+    expect(kept.rows).toEqual([{end_of_support_on: '2027-02-04'}]);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await columns()).toEqual(before);
+    const [restored] = await t.db.select().from(appHosting).where(eq(appHosting.id, hostingId));
+    expect(restored).toMatchObject({endOfSupportOn: '2027-02-04', endOfSupportSource: END_OF_SUPPORT_SOURCE.manual, runtime: null, incidents: []});
+  });
+
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    const down = readFileSync(
-      path.join(MIGRATIONS_FOLDER, 'rollback', '0001_api_keys_idempotency_deps_hosting.down.sql'),
-      'utf8',
-    );
-    await t.client.exec(down);
+    // Newest first: 0002 only alters a table that 0001 created.
+    for (const file of ['0002_hosting_health.down.sql', '0001_api_keys_idempotency_deps_hosting.down.sql']) {
+      await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8'));
+    }
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );

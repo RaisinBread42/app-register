@@ -19,12 +19,16 @@ import {
 } from 'drizzle-orm/pg-core';
 import {
   APP_KINDS,
+  END_OF_SUPPORT_SOURCES,
   NOTICE_ALERT_STATUS,
   NOTICE_ALERT_STATUSES,
   OWNERSHIP_CHANGE_REASONS,
   OWNERSHIP_ROLES,
   PERSON_STATUS,
   PERSON_STATUSES,
+  type EndOfSupportSource,
+  type IncidentImpact,
+  type IncidentScope,
 } from '../constants';
 
 /** CHECK (column IN (...)) built from a constants array, so TS and DB share one list. */
@@ -334,7 +338,19 @@ export const appDependencies = pgTable(
   ],
 );
 
-/** Where an app runs: one row per provider service, e.g. Azure SQL Server in uksouth. */
+/** A provider incident or maintenance notice that reaches a hosting row, as the last check found it. */
+export type HostingIncident = {
+  title: string;
+  impact: IncidentImpact;
+  scope: IncidentScope;
+  url: string;
+  startedAt: string | null;
+};
+
+/**
+ * Where an app runs: one row per provider service, e.g. Azure SQL Server in uksouth.
+ * The last five columns are written by the hosting check (`services/hosting-monitor.ts`).
+ */
 export const appHosting = pgTable(
   'app_hosting',
   {
@@ -345,7 +361,16 @@ export const appHosting = pgTable(
     service: text('service').notNull(),
     region: text('region'),
     version: text('version'),
+    /** Language runtime the service runs, e.g. Node.js 22. */
+    runtime: text('runtime'),
+    runtimeVersion: text('runtime_version'),
     endOfSupportOn: date('end_of_support_on', {mode: 'string'}),
+    /** Who set the date: a person (`manual`, never overwritten) or a check. */
+    endOfSupportSource: text('end_of_support_source').$type<EndOfSupportSource>(),
+    incidents: jsonb('incidents').$type<HostingIncident[]>().notNull().default(sql`'[]'::jsonb`),
+    healthCheckedAt: timestamp('health_checked_at', {withTimezone: true}),
+    /** Which sources could not be read on the last check; null when all answered. */
+    healthError: text('health_error'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -359,6 +384,11 @@ export const appHosting = pgTable(
     unique('app_hosting_app_service_unique')
       .on(t.appId, t.provider, t.service, t.region)
       .nullsNotDistinct(),
+    check('app_hosting_end_of_support_source_allowed', oneOf(t.endOfSupportSource, END_OF_SUPPORT_SOURCES)),
+    check(
+      'app_hosting_end_of_support_has_source',
+      sql`(${t.endOfSupportOn} is null) = (${t.endOfSupportSource} is null)`,
+    ),
   ],
 );
 
