@@ -2,6 +2,7 @@ import {
   APP_KINDS,
   APP_LIST_SORT,
   CENTS_PER_UNIT,
+  HOSTING_HEALTH_STATUS,
   type AppKind,
   type AppListSort,
 } from "@/lib/constants";
@@ -54,3 +55,11 @@ export function formatCost(
   });
   return billingCycle ? `${amount} · ${billingCycle}` : amount;
 }
+
+/** The prototype's check pills. `na` is drawn as a grey dash instead. */
+export const STATUS_PILL = {
+  [HOSTING_HEALTH_STATUS.ok]: { label: "✓ OK", variant: "green" },
+  [HOSTING_HEALTH_STATUS.attention]: { label: "! Attention", variant: "yellow" },
+  [HOSTING_HEALTH_STATUS.critical]: { label: "! Critical", variant: "red" },
+} as const;
+export const NOT_MONITORED = "Not monitored";

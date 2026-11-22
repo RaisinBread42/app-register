@@ -2,37 +2,67 @@
 
 import {useState} from 'react';
 import {useImperativeAlertDialog} from '@astryxdesign/core/AlertDialog';
+import {Badge} from '@astryxdesign/core/Badge';
+import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {DateInput} from '@astryxdesign/core/DateInput';
+import {Divider} from '@astryxdesign/core/Divider';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {HStack} from '@astryxdesign/core/HStack';
+import {Link} from '@astryxdesign/core/Link';
+import {Selector} from '@astryxdesign/core/Selector';
 import {Table} from '@astryxdesign/core/Table';
+import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
-import type {AppDetail, Hosting} from '@/lib/ui/api-client';
+import {END_OF_SUPPORT_SOURCE} from '@/lib/constants';
+import type {AppDetail, Hosting, HostingCatalog} from '@/lib/ui/api-client';
 import {NOT_SET, orDash} from '@/lib/ui/copy';
-import {formatDate} from '@/lib/ui/register-view';
+import {
+  checkErrors,
+  endOfSupportNote,
+  formatDate,
+  formatDateTime,
+  hostingVersion,
+  lastChecked,
+  openIncidents,
+  type IncidentRow,
+} from '@/lib/ui/register-view';
 import {hostingToForm, type HostingFormValues} from '@/lib/ui/forms';
-import {removeHostingAction, saveHostingAction} from '../../actions';
-import {FootNote, PanelCard} from '../../_components/Cards';
+import {refreshHostingAction, removeHostingAction, saveHostingAction} from '../../actions';
+import {StatusPill} from '../../_components/AppIdentity';
+import {FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
 import {EditDialog} from '../../_components/EditDialog';
 import {FormError} from '../../_components/FormError';
 import {useAction} from '../../_components/use-action';
 import {isoDate} from '../../_components/iso-date';
 
-type Props = {app: AppDetail; addKey: string; editKeys: Record<string, string>; isReadOnly: boolean};
+type Props = {
+  app: AppDetail;
+  catalog: HostingCatalog;
+  today: string;
+  addKey: string;
+  refreshKey: string;
+  editKeys: Record<string, string>;
+  isReadOnly: boolean;
+};
 
 /** Which hosting entry the dialog edits: `null` adds a new one; `undefined` means closed. */
 type Editing = Hosting | null | undefined;
 
-export function HostingTab({app, addKey, editKeys, isReadOnly}: Props) {
+/** Selector choice that swaps the list for a free-text field. */
+const OTHER = 'Other';
+
+export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, isReadOnly}: Props) {
   const [editing, setEditing] = useState<Editing>(undefined);
   const [values, setValues] = useState<HostingFormValues>(hostingToForm());
   const save = useAction();
   const remove = useAction();
+  const refresh = useAction();
   const confirm = useImperativeAlertDialog();
-  const set = (key: keyof HostingFormValues) => (value: string | undefined) =>
-    setValues((current) => ({...current, [key]: value ?? ''}));
+  const incidents = openIncidents(app.hosting);
+  const checkedAt = lastChecked(app.hosting);
+  const errors = checkErrors(app.hosting);
 
   function open(hosting: Hosting | null) {
     save.clearError();
@@ -58,63 +88,265 @@ export function HostingTab({app, addKey, editKeys, isReadOnly}: Props) {
   }
 
   return (
-    <PanelCard
-      title="Hosting & infrastructure"
-      subtitle="Providers, services, regions and relevant platform notices"
-      action={!isReadOnly && <Button label="Add hosting" size="sm" onClick={() => open(null)} />}
-      >
-      <VStack gap={3}>
-      <FormError error={remove.error} />
-      <Table
-        data={app.hosting}
-        idKey="id"
-        hasHover
-        emptyState={<EmptyState title="No hosting recorded" description="Add where this application runs: provider, service and region." isCompact />}
-        columns={[
-          {key: 'provider', header: 'Provider'},
-          {key: 'service', header: 'Service'},
-          {key: 'region', header: 'Region', renderCell: (h: Hosting) => orDash(h.region)},
-          {key: 'version', header: 'Version', renderCell: (h: Hosting) => orDash(h.version)},
-          {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => (h.endOfSupportOn ? formatDate(h.endOfSupportOn) : NOT_SET)},
-          {
-            key: 'actions',
-            header: '',
-            renderCell: (h: Hosting) =>
-              !isReadOnly && (
-                <HStack gap={1} justify="end">
-                  <Button label="Edit" variant="ghost" size="sm" onClick={() => open(h)} />
-                  <Button label="Remove" variant="ghost" size="sm" onClick={() => askToRemove(h)} />
-                </HStack>
-              ),
-          },
-        ]}
-      />
-      <FootNote>Hosting is recorded by hand; provider status checks are coming soon.</FootNote>
-      </VStack>
-      <EditDialog
-        title={editing ? `Edit ${editing.provider} ${editing.service}` : 'Add hosting'}
-        isOpen={editing !== undefined}
+    <VStack gap={4}>
+      <PanelCard
+        title="Hosting & infrastructure"
+        subtitle="Providers, services, regions and relevant platform notices"
+        action={
+          !isReadOnly && (
+            <HStack gap={2}>
+              {app.hosting.length > 0 && (
+                <Button
+                  label="Check now"
+                  size="sm"
+                  isLoading={refresh.isPending}
+                  onClick={() => refresh.run(() => refreshHostingAction(refreshKey, app.id))}
+                />
+              )}
+              <Button label="Add hosting" variant="primary" size="sm" onClick={() => open(null)} />
+            </HStack>
+          )
+        }>
+        <VStack gap={3}>
+          <FormError error={remove.error ?? refresh.error} />
+          {errors.length > 0 && (
+            <Banner
+              status="warning"
+              title="Some sources could not be read on the last check"
+              description={`${errors.join('. ')}. What earlier checks found is still shown.`}
+              collapsible={false}
+            />
+          )}
+          <Table
+            data={app.hosting}
+            idKey="id"
+            hasHover
+            emptyState={<EmptyState title="No hosting recorded" description="Add where this application runs: provider, service and region." isCompact />}
+            columns={[
+              {key: 'provider', header: 'Provider'},
+              {key: 'service', header: 'Service'},
+              {key: 'region', header: 'Region', renderCell: (h: Hosting) => orDash(h.region)},
+              {key: 'version', header: 'Version / runtime', renderCell: (h: Hosting) => orDash(hostingVersion(h))},
+              {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => <EndOfSupport hosting={h} today={today} />},
+              {
+                key: 'actions',
+                header: '',
+                renderCell: (h: Hosting) =>
+                  !isReadOnly && (
+                    <HStack gap={1} justify="end">
+                      <Button label="Edit" variant="ghost" size="sm" onClick={() => open(h)} />
+                      <Button label="Remove" variant="ghost" size="sm" onClick={() => askToRemove(h)} />
+                    </HStack>
+                  ),
+              },
+            ]}
+          />
+          <KeyValueRows
+            rows={[
+              {label: 'Infrastructure status', value: <StatusPill status={app.hostingHealth.status} />},
+              {label: 'Monitoring sources', value: 'endoflife.date · provider status feeds'},
+              {label: 'Last checked', value: checkedAt ? formatDateTime(checkedAt) : 'Not checked yet'},
+            ]}
+          />
+          <FootNote>
+            End-of-support dates come from endoflife.date unless you set one by hand. Incidents come from each provider’s public status page. A provider or service typed as free text is not monitored.
+          </FootNote>
+        </VStack>
+      </PanelCard>
+
+      {app.hosting.length > 0 && (
+        <PanelCard title="Active incidents" subtitle="Open provider incidents and announced maintenance that reach this application">
+          <IncidentList incidents={incidents} />
+        </PanelCard>
+      )}
+
+      <HostingDialog
+        key={editing?.id ?? String(editing)}
+        editing={editing}
+        catalog={catalog}
+        values={values}
+        onChange={setValues}
         onClose={() => setEditing(undefined)}
         onSave={submit}
         isSaving={save.isPending}
-        error={save.error}>
-        <HStack gap={3}>
-          <TextInput label="Provider" value={values.provider} onChange={set('provider')} placeholder="e.g. Azure" isRequired />
-          <TextInput label="Service" value={values.service} onChange={set('service')} placeholder="e.g. App Service" isRequired />
-        </HStack>
-        <HStack gap={3}>
-          <TextInput label="Region" value={values.region} onChange={set('region')} isOptional />
-          <TextInput label="Version" value={values.version} onChange={set('version')} isOptional />
-        </HStack>
-        <DateInput
-          label="End of support"
-          value={isoDate(values.endOfSupportOn)}
-          onChange={set('endOfSupportOn')}
-          hasClear
-          isOptional
-        />
-      </EditDialog>
+        error={save.error}
+      />
       {confirm.element}
-    </PanelCard>
+    </VStack>
+  );
+}
+
+/** The date, where it came from, and the prototype's badge when support has ended or ends soon. */
+function EndOfSupport({hosting, today}: {hosting: Hosting; today: string}) {
+  if (!hosting.endOfSupportOn) {
+    return NOT_SET;
+  }
+  const note = endOfSupportNote(hosting.endOfSupportOn, today);
+  const source = hosting.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual ? 'Set by hand' : hosting.endOfSupportSource;
+  return (
+    <VStack gap={1} hAlign="start">
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <Text size="sm">{formatDate(hosting.endOfSupportOn)}</Text>
+        {note && <Badge label={note.label} variant={note.tone} />}
+      </HStack>
+      <Text type="supporting" color="secondary">
+        {source}
+      </Text>
+    </VStack>
+  );
+}
+
+function IncidentList({incidents}: {incidents: IncidentRow[]}) {
+  if (incidents.length === 0) {
+    return <EmptyState title="No open incidents" description="Nothing on the providers’ status pages reaches this application’s services or regions." isCompact />;
+  }
+  return (
+    <VStack gap={0}>
+      {incidents.map((incident, index) => (
+        <VStack key={incident.key} gap={0}>
+          {index > 0 && <Divider />}
+          <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3}>
+            <VStack gap={0.5} style={{flex: 1, minWidth: 0}}>
+              <Link href={incident.url} isExternalLink weight="bold" size="sm">
+                {incident.title}
+              </Link>
+              <Text type="supporting" color="secondary">
+                {[incident.affects, incident.startedAt && `since ${formatDateTime(incident.startedAt)}`].filter(Boolean).join(' · ')}
+              </Text>
+            </VStack>
+            <Badge label={incident.kind.label} variant={incident.kind.tone} />
+          </HStack>
+        </VStack>
+      ))}
+    </VStack>
+  );
+}
+
+type DialogProps = {
+  editing: Editing;
+  catalog: HostingCatalog;
+  values: HostingFormValues;
+  onChange: (values: HostingFormValues) => void;
+  onClose: () => void;
+  onSave: () => void;
+  isSaving: boolean;
+  error: string | null;
+};
+
+/**
+ * Pick a provider, then one of its services (or type either), then only the
+ * fields that service has: a version for databases and clusters, a runtime
+ * for app services. Free text shows every field.
+ */
+function HostingDialog({editing, catalog, values, onChange, onClose, onSave, isSaving, error}: DialogProps) {
+  const provider = catalog.providers.find((entry) => entry.name === values.provider);
+  const service = provider?.services.find((entry) => entry.name === values.service);
+  // Free text when the saved value is not in the catalog, or the user picks "Other".
+  const [isOtherProvider, setIsOtherProvider] = useState(values.provider !== '' && !provider);
+  const [isOtherService, setIsOtherService] = useState(values.service !== '' && !service);
+  const isFreeText = isOtherProvider || isOtherService;
+  const set = (key: keyof HostingFormValues) => (value: string | null | undefined) => onChange({...values, [key]: value ?? ''});
+
+  function pickProvider(name: string | null) {
+    setIsOtherProvider(name === OTHER);
+    setIsOtherService(false);
+    onChange({...values, provider: name === OTHER || !name ? '' : name, service: ''});
+  }
+
+  function pickService(name: string | null) {
+    setIsOtherService(name === OTHER);
+    const picked = provider?.services.find((entry) => entry.name === name);
+    // Drop what the picked service has no field for, so nothing stale is saved unseen.
+    onChange({
+      ...values,
+      service: picked?.name ?? '',
+      version: !picked || picked.hasVersion ? values.version : '',
+      runtime: !picked || picked.hasRuntime ? values.runtime : '',
+      runtimeVersion: !picked || picked.hasRuntime ? values.runtimeVersion : '',
+    });
+  }
+
+  return (
+    <EditDialog
+      title={editing ? `Edit ${editing.provider} ${editing.service}` : 'Add hosting'}
+      isOpen={editing !== undefined}
+      onClose={onClose}
+      onSave={onSave}
+      isSaving={isSaving}
+      error={error}>
+      <HStack gap={3} vAlign="start">
+        <Selector
+          label="Provider"
+          options={[...catalog.providers.map((entry) => entry.name), OTHER]}
+          value={isOtherProvider ? OTHER : (provider?.name ?? undefined)}
+          onChange={pickProvider}
+          placeholder="Choose a provider"
+          width="100%"
+          isRequired
+        />
+        {provider && (
+          <Selector
+            label="Service"
+            options={[...provider.services.map((entry) => entry.name), OTHER]}
+            value={isOtherService ? OTHER : (service?.name ?? undefined)}
+            onChange={pickService}
+            placeholder="Choose a service"
+            hasSearch
+            width="100%"
+            isRequired
+          />
+        )}
+      </HStack>
+      {isOtherProvider && (
+        <TextInput label="Provider name" value={values.provider} onChange={set('provider')} placeholder="e.g. Hetzner, on-premises" isRequired />
+      )}
+      {isFreeText && (
+        <TextInput
+          label="Service name"
+          description="Free text is recorded but not monitored."
+          value={values.service}
+          onChange={set('service')}
+          placeholder="e.g. Virtual server"
+          isRequired
+        />
+      )}
+      <HStack gap={3} vAlign="start">
+        <TextInput label="Region" value={values.region} onChange={set('region')} placeholder="e.g. centralus" isOptional />
+        {(isFreeText || service?.hasVersion) && (
+          <TextInput
+            label="Version"
+            description={service?.isEndOfSupportTracked ? 'Used to look up end of support.' : undefined}
+            value={values.version}
+            onChange={set('version')}
+            placeholder="e.g. 16"
+            isOptional
+          />
+        )}
+      </HStack>
+      {(isFreeText || service?.hasRuntime) && (
+        <HStack gap={3} vAlign="start">
+          <Selector
+            label="Runtime"
+            description="Used to look up end of support."
+            options={catalog.runtimes.map((entry) => entry.name)}
+            value={values.runtime || null}
+            onChange={set('runtime')}
+            placeholder="None"
+            hasClear
+            width="100%"
+            isOptional
+          />
+          <TextInput label="Runtime version" value={values.runtimeVersion} onChange={set('runtimeVersion')} placeholder="e.g. 22" isOptional />
+        </HStack>
+      )}
+      <DateInput
+        label="End of support (set by hand)"
+        description="Leave empty to have it looked up from the version or runtime."
+        value={isoDate(values.endOfSupportOn)}
+        onChange={set('endOfSupportOn')}
+        hasClear
+        isOptional
+      />
+    </EditDialog>
   );
 }

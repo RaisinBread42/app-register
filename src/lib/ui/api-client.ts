@@ -1,15 +1,21 @@
 import {
   API_HEADER,
   API_QUERY,
+  API_REFRESH_SEGMENT,
   API_ROUTES,
   API_SUB_ROUTE,
   BEARER_PREFIX,
   ENV,
+  HOSTING_API_ROUTES,
   HTTP_METHOD,
   HTTP_STATUS,
   JSON_CONTENT_TYPE,
   type AppKind,
   type AppSort,
+  type EndOfSupportSource,
+  type HostingHealthStatus,
+  type IncidentImpact,
+  type IncidentScope,
   type NoticeAlertStatus,
   type PersonStatus,
 } from '@/lib/constants';
@@ -39,10 +45,16 @@ type AppFields = {
   whatBreaksIfStopped: string | null;
 };
 
+/** One finding that takes points off the health score (`points` is negative). */
+export type Deduction = {dimension: string; label: string; detail: string; points: number};
+
+export type HostingHealth = {status: HostingHealthStatus; deductions: Deduction[]};
+
 export type App = AppFields & {
   id: string;
   owner: PersonRef;
   backupOwner: PersonRef;
+  hostingHealth: HostingHealth;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -78,10 +90,34 @@ type HostingFields = {
   service: string;
   region: string | null;
   version: string | null;
+  runtime: string | null;
+  runtimeVersion: string | null;
   endOfSupportOn: string | null;
 };
 
-export type Hosting = HostingFields & {id: string; appId: string; createdAt: string; updatedAt: string};
+export type HostingIncident = {
+  title: string;
+  impact: IncidentImpact;
+  scope: IncidentScope;
+  url: string;
+  startedAt: string | null;
+};
+
+/** What the hosting check stores on a row. */
+type HostingCheckFields = {
+  endOfSupportSource: EndOfSupportSource | null;
+  incidents: HostingIncident[];
+  healthCheckedAt: string | null;
+  healthError: string | null;
+};
+
+export type Hosting = HostingFields & HostingCheckFields & {id: string; appId: string; createdAt: string; updatedAt: string};
+
+export type HostingCatalogService = {name: string; hasVersion: boolean; hasRuntime: boolean; isEndOfSupportTracked: boolean};
+export type HostingCatalog = {
+  providers: {name: string; isStatusMonitored: boolean; services: HostingCatalogService[]}[];
+  runtimes: {name: string}[];
+};
 
 export type AppDetail = App & {alerts: NoticeAlert[]; dependencies: Dependency[]; hosting: Hosting[]};
 
@@ -204,6 +240,13 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     },
     removeHosting(appId: string, id: string): Promise<void> {
       return remove(`${appPath(appId)}/${API_SUB_ROUTE.hosting}/${segment(id)}`);
+    },
+    async refreshHosting(idempotencyKey: string, appId: string): Promise<Hosting[]> {
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.hosting}/${API_REFRESH_SEGMENT}`;
+      return (await post<{hosting: Hosting[]}>(path, idempotencyKey)).hosting;
+    },
+    async getHostingCatalog(): Promise<HostingCatalog> {
+      return (await get<{catalog: HostingCatalog}>(HOSTING_API_ROUTES.catalog)).catalog;
     },
     async listPeople(): Promise<Person[]> {
       return (await get<{people: Person[]}>(API_ROUTES.people)).people;

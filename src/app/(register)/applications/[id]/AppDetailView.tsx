@@ -17,12 +17,12 @@ import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {APP_TAB, ROUTES, editAppRoute, type AppTab} from '@/lib/constants';
-import type {AppDetail} from '@/lib/ui/api-client';
+import type {AppDetail, HostingCatalog} from '@/lib/ui/api-client';
 import {COMING_SOON, HEALTH_COMING_SOON, KIND_LABEL, NOT_SET, formatCost, orDash} from '@/lib/ui/copy';
 import {BackArrowIcon, PencilIcon} from '@/lib/ui/icons';
 import {formatDate, primaryHosting} from '@/lib/ui/register-view';
 import {archiveAppAction} from '../../actions';
-import {AppIcon, PendingPill} from '../../_components/AppIdentity';
+import {AppIcon, PendingPill, StatusPill} from '../../_components/AppIdentity';
 import {ComingSoon, FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
 import {FormError} from '../../_components/FormError';
 import {PageFrame} from '../../_components/PageFrame';
@@ -34,16 +34,17 @@ export type AppDetailKeys = {
   archive: string;
   addDependency: string;
   addHosting: string;
+  refreshHosting: string;
   dependencies: Record<string, string>;
   hosting: Record<string, string>;
 };
 
-type Props = {app: AppDetail; initialTab: AppTab; keys: AppDetailKeys};
+type Props = {app: AppDetail; initialTab: AppTab; keys: AppDetailKeys; catalog: HostingCatalog; today: string};
 
 const NOT_RECORDED = 'Not recorded';
 const dateOrDash = (iso: string | null) => (iso ? formatDate(iso) : NOT_SET);
 
-export function AppDetailView({app, initialTab, keys}: Props) {
+export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<string>(initialTab);
   const confirm = useImperativeAlertDialog();
@@ -98,7 +99,17 @@ export function AppDetailView({app, initialTab, keys}: Props) {
         {tab === APP_TAB.dependencies && (
           <DependenciesTab app={app} addKey={keys.addDependency} editKeys={keys.dependencies} isReadOnly={isArchived} />
         )}
-        {tab === APP_TAB.hosting && <HostingTab app={app} addKey={keys.addHosting} editKeys={keys.hosting} isReadOnly={isArchived} />}
+        {tab === APP_TAB.hosting && (
+          <HostingTab
+            app={app}
+            catalog={catalog}
+            today={today}
+            addKey={keys.addHosting}
+            refreshKey={keys.refreshHosting}
+            editKeys={keys.hosting}
+            isReadOnly={isArchived}
+          />
+        )}
         {tab === APP_TAB.licence && <LicenceTab app={app} />}
       </VStack>
       {confirm.element}
@@ -180,7 +191,7 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
               isLabelStrong
               rows={[
                 {label: 'Dependencies', value: <PendingPill />},
-                {label: 'Hosting & infrastructure', value: <PendingPill />},
+                {label: 'Hosting & infrastructure', value: <StatusPill status={app.hostingHealth.status} />},
                 {label: 'Licence', value: <PendingPill />},
                 {label: 'Pricing', value: <PendingPill />},
               ]}

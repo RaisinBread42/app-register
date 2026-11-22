@@ -17,7 +17,7 @@ import type {App} from '@/lib/ui/api-client';
 import {APP_LIST_SORT_LABEL, COMING_SOON, HEALTH_COMING_SOON, KIND_LABEL, KIND_OPTIONS, LIVE_DATA_NOTE, NOT_SET} from '@/lib/ui/copy';
 import {AppsIcon, CalendarIcon, ShieldIcon, WarningIcon} from '@/lib/ui/icons';
 import {applyAppListView, appsWithRenewal, formatDate} from '@/lib/ui/register-view';
-import {AppCell, PendingPill} from '../_components/AppIdentity';
+import {AppCell, PendingPill, StatusPill} from '../_components/AppIdentity';
 import {FootNote, MetricCard} from '../_components/Cards';
 import {PageFrame} from '../_components/PageFrame';
 import {PageHeader} from '../_components/PageHeader';
@@ -99,7 +99,7 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
               {key: 'owner', width: column(124), header: 'Owner', renderCell: (app: App) => app.owner.name},
               {key: 'health', width: column(92), header: 'Health ↑', renderCell: () => <PendingPill />},
               {key: 'dependencies', width: column(112), header: 'Dependencies', renderCell: () => <PendingPill />},
-              {key: 'hosting', width: column(100), header: 'Hosting', renderCell: () => <PendingPill />},
+              {key: 'hosting', width: column(100), header: 'Hosting', renderCell: (app: App) => <StatusPill status={app.hostingHealth.status} />},
               {key: 'licence', width: column(100), header: 'Licence', renderCell: () => <PendingPill />},
               {key: 'pricing', width: column(100), header: 'Pricing', renderCell: () => <PendingPill />},
               {

@@ -82,13 +82,20 @@ export async function saveHostingAction(
       ? apiClient().updateHosting(idempotencyKey, appId, hostingId, input)
       : apiClient().addHosting(idempotencyKey, appId, input);
   });
-  revalidatePath(appRoute(appId));
+  refreshApps();
+  return result;
+}
+
+/** Runs the hosting check for one app now: end-of-support dates and open provider incidents. */
+export async function refreshHostingAction(idempotencyKey: string, appId: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().refreshHosting(idempotencyKey, appId));
+  refreshApps();
   return result;
 }
 
 export async function removeHostingAction(appId: string, hostingId: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().removeHosting(appId, hostingId));
-  revalidatePath(appRoute(appId));
+  refreshApps();
   return result;
 }
 

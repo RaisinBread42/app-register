@@ -1,4 +1,4 @@
-import {CENTS_PER_UNIT} from '@/lib/constants';
+import {CENTS_PER_UNIT, END_OF_SUPPORT_SOURCE} from '@/lib/constants';
 import type {App, AppInput, Dependency, DependencyInput, Hosting, HostingInput} from './api-client';
 
 /**
@@ -120,6 +120,9 @@ export type HostingFormValues = {
   service: string;
   region: string;
   version: string;
+  runtime: string;
+  runtimeVersion: string;
+  /** Only a date typed by hand; blank lets the hosting check look the date up. */
   endOfSupportOn: string;
 };
 
@@ -129,7 +132,9 @@ export function hostingToForm(hosting?: Hosting): HostingFormValues {
     service: hosting?.service ?? '',
     region: hosting?.region ?? '',
     version: hosting?.version ?? '',
-    endOfSupportOn: hosting?.endOfSupportOn ?? '',
+    runtime: hosting?.runtime ?? '',
+    runtimeVersion: hosting?.runtimeVersion ?? '',
+    endOfSupportOn: hosting?.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual ? (hosting.endOfSupportOn ?? '') : '',
   };
 }
 
@@ -139,6 +144,8 @@ export function formToHostingInput(values: HostingFormValues): HostingInput {
     service: values.service,
     region: orNull(values.region),
     version: orNull(values.version),
+    runtime: orNull(values.runtime),
+    runtimeVersion: orNull(values.runtime) ? orNull(values.runtimeVersion) : null,
     endOfSupportOn: orNull(values.endOfSupportOn),
   };
 }

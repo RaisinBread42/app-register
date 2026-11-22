@@ -1,5 +1,13 @@
-import { APP_LIST_SORT, FILTER_ALL, type AppListSort } from "@/lib/constants";
-import type { App, Hosting } from "./api-client";
+import {
+  APP_LIST_SORT,
+  END_OF_SUPPORT_SOON_DAYS,
+  FILTER_ALL,
+  INCIDENT_IMPACT,
+  INCIDENT_SCOPE,
+  MS_PER_DAY,
+  type AppListSort,
+} from "@/lib/constants";
+import type { App, Hosting, HostingIncident } from "./api-client";
 
 /**
  * Display-only shaping of data the pages already loaded: search, filters,
@@ -105,4 +113,107 @@ const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
 /** "2026-12-12" → "12 Dec 2026", as the prototype shows dates. */
 export function formatDate(iso: string): string {
   return DATE_FORMAT.format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
+}
+
+const DATE_TIME_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+/** "2026-11-22T22:40:00Z" → "22 Nov 2026, 22:40 UTC". */
+export function formatDateTime(iso: string): string {
+  return `${DATE_TIME_FORMAT.format(new Date(iso))} UTC`;
+}
+
+export type StatusTone = "red" | "yellow";
+
+/** The badge next to an end-of-support date: past, or within 90 days of `today` (UTC YYYY-MM-DD); null when further away. */
+export function endOfSupportNote(
+  endOfSupportOn: string,
+  today: string,
+): { label: string; tone: StatusTone } | null {
+  const days = Math.round(
+    (Date.parse(endOfSupportOn) - Date.parse(today)) / MS_PER_DAY,
+  );
+  if (days < 0) {
+    return { label: "Past end of support", tone: "red" };
+  }
+  if (days > END_OF_SUPPORT_SOON_DAYS) {
+    return null;
+  }
+  if (days === 0) {
+    return { label: "EOS today", tone: "yellow" };
+  }
+  return { label: `EOS in ${days} ${days === 1 ? "day" : "days"}`, tone: "yellow" };
+}
+
+/** "12", "Node.js 18" or "12 · Node.js 18": what version of what a hosting row runs. */
+export function hostingVersion(hosting: Hosting): string | null {
+  const runtime = [hosting.runtime, hosting.runtimeVersion]
+    .filter(Boolean)
+    .join(" ");
+  return [hosting.version, runtime].filter(Boolean).join(" · ") || null;
+}
+
+export type IncidentRow = HostingIncident & {
+  key: string;
+  /** The hosting rows it reaches, e.g. "Azure App Service, Azure Storage". */
+  affects: string;
+  kind: { label: string; tone: StatusTone };
+};
+
+/** An app's open incidents, each once, with the hosting rows it reaches. Outages first. */
+export function openIncidents(hosting: Hosting[]): IncidentRow[] {
+  const rows = new Map<string, IncidentRow>();
+  for (const row of hosting) {
+    for (const incident of row.incidents) {
+      const key = `${incident.url} ${incident.title}`;
+      const name = `${row.provider} ${row.service}`;
+      const known = rows.get(key);
+      rows.set(key, {
+        ...incident,
+        key,
+        affects: known ? `${known.affects}, ${name}` : name,
+        kind: known?.kind === OUTAGE ? OUTAGE : incidentKind(incident),
+      });
+    }
+  }
+  return [...rows.values()].sort(
+    (a, b) =>
+      Number(b.kind === OUTAGE) - Number(a.kind === OUTAGE) ||
+      a.title.localeCompare(b.title),
+  );
+}
+
+const OUTAGE: IncidentRow["kind"] = { label: "Outage", tone: "red" };
+
+/** Only a major incident the feed ties to the row's own service or region is called an outage. */
+function incidentKind(incident: HostingIncident): IncidentRow["kind"] {
+  if (
+    incident.impact === INCIDENT_IMPACT.major &&
+    incident.scope === INCIDENT_SCOPE.service
+  ) {
+    return OUTAGE;
+  }
+  if (incident.impact === INCIDENT_IMPACT.maintenance) {
+    return { label: "Maintenance", tone: "yellow" };
+  }
+  return { label: "Notice", tone: "yellow" };
+}
+
+/** When the hosting check last ran for any of these rows, or null if it never has. */
+export function lastChecked(hosting: Hosting[]): string | null {
+  const times = hosting.flatMap((row) => row.healthCheckedAt ?? []).sort();
+  return times.at(-1) ?? null;
+}
+
+/** The sources the last check could not read, each named once. */
+export function checkErrors(hosting: Hosting[]): string[] {
+  return [
+    ...new Set(hosting.flatMap((row) => row.healthError?.split("; ") ?? [])),
+  ];
 }

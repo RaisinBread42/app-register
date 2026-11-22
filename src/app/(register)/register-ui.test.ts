@@ -1,12 +1,12 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {APP_LIST_SORT, ENV, FILTER_ALL, PERSON_STATUS} from '@/lib/constants';
+import {APP_LIST_SORT, END_OF_SUPPORT_SOURCE, ENV, FILTER_ALL, INCIDENT_IMPACT, INCIDENT_SCOPE, PERSON_STATUS} from '@/lib/constants';
 import {fetchFromRoutes} from '@/lib/api/test/client';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {createApiKey} from '@/lib/services/api-keys';
 import {ACTION_MESSAGE} from '@/lib/ui/action-result';
-import {createApiClient, type ApiClient} from '@/lib/ui/api-client';
-import {appToForm, emptyAppForm, type AppFormValues} from '@/lib/ui/forms';
-import {applyAppListView, appsWithRenewal, upcomingNoticeDeadlines} from '@/lib/ui/register-view';
+import {createApiClient, type ApiClient, type Hosting} from '@/lib/ui/api-client';
+import {appToForm, emptyAppForm, hostingToForm, type AppFormValues} from '@/lib/ui/forms';
+import {applyAppListView, appsWithRenewal, endOfSupportNote, openIncidents, upcomingNoticeDeadlines} from '@/lib/ui/register-view';
 import * as actions from './actions';
 
 let t: TestDb;
@@ -175,6 +175,8 @@ describe('App Register UI', () => {
       service: 'App Service',
       region: 'westeurope',
       version: '',
+      runtime: 'Node.js',
+      runtimeVersion: '22',
       endOfSupportOn: '2099-11-30',
     });
     const [hosting] = (await api.getApp(appId)).hosting;
@@ -183,14 +185,42 @@ describe('App Register UI', () => {
       service: 'App Service',
       region: 'northeurope',
       version: '',
+      runtime: '',
+      runtimeVersion: '22',
       endOfSupportOn: '',
     });
-    expect((await api.getApp(appId)).hosting[0]).toMatchObject({region: 'northeurope', endOfSupportOn: null});
+    expect((await api.getApp(appId)).hosting[0]).toMatchObject({region: 'northeurope', runtime: null, runtimeVersion: null, endOfSupportOn: null});
 
     expect(await actions.removeDependencyAction(appId, dependency.id)).toEqual({ok: true});
     expect(await actions.removeHostingAction(appId, hosting.id)).toEqual({ok: true});
     const after = await api.getApp(appId);
     expect([after.dependencies, after.hosting]).toEqual([[], []]);
+  });
+
+  it('the Hosting tab flags support that has ended or ends within 90 days, lists each open incident once with outages first, and its edit form leaves a looked-up date to the check', async () => {
+    const {appId} = await seedApp();
+    const today = '2026-11-22';
+    expect(endOfSupportNote('2026-07-31', today)).toEqual({label: 'Past end of support', tone: 'red'});
+    expect(endOfSupportNote('2027-02-04', today)).toEqual({label: 'EOS in 74 days', tone: 'yellow'});
+    expect(endOfSupportNote('2026-11-23', today)?.label).toBe('EOS in 1 day');
+    expect(endOfSupportNote('2027-02-21', today)).toBeNull();
+
+    await actions.saveHostingAction(key(), appId, null, {provider: 'Azure', service: 'Storage', region: 'centralus', version: '', runtime: '', runtimeVersion: '', endOfSupportOn: '2027-02-04'});
+    const [stored] = (await api.getApp(appId)).hosting;
+    expect(hostingToForm(stored).endOfSupportOn).toBe('2027-02-04');
+    const lookedUp: Hosting = {...stored, endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate};
+    expect(hostingToForm(lookedUp).endOfSupportOn).toBe('');
+
+    const outage = {title: 'Storage errors in Central US', impact: INCIDENT_IMPACT.major, scope: INCIDENT_SCOPE.service, url: 'https://status.example.test/1', startedAt: null};
+    const maintenance = {...outage, title: 'Planned network work', impact: INCIDENT_IMPACT.maintenance, url: 'https://status.example.test/2'};
+    const rows = [
+      {...stored, incidents: [maintenance, {...outage, scope: INCIDENT_SCOPE.provider}]},
+      {...stored, service: 'App Service', incidents: [outage]},
+    ];
+    expect(openIncidents(rows).map((incident) => [incident.kind.label, incident.title, incident.affects])).toEqual([
+      ['Outage', 'Storage errors in Central US', 'Azure Storage, Azure App Service'],
+      ['Maintenance', 'Planned network work', 'Azure Storage'],
+    ]);
   });
 
   it('AC7: archiving an app removes it from the apps list but keeps its page', async () => {
