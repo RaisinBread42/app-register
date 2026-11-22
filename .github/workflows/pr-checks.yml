@@ -11,6 +11,21 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    services:
+      # Unit tests use PGlite; this real Postgres only proves the migrations apply.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: app_register
+          POSTGRES_PASSWORD: app_register_ci
+          POSTGRES_DB: app_register
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_register -d app_register"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +40,15 @@ jobs:
 
       - name: Lint, type check, tests
         run: bash scripts/gate.sh
+
+      - name: Apply migrations to Postgres 18 (twice, to prove re-running is a no-op)
+        env:
+          DATABASE_URL: postgres://app_register:app_register_ci@localhost:5432/app_register
+        run: |
+          npm run db:migrate
+          npm run db:migrate
+          test "$(psql "$DATABASE_URL" -Atc 'select count(*) from drizzle.__drizzle_migrations')" = \
+               "$(node -p 'require("./drizzle/meta/_journal.json").entries.length')"
 
       - name: Flag magic strings
         if: github.event_name == 'pull_request'

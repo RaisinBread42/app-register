@@ -9,6 +9,8 @@ Obsidian Software product: a flat-priced register of the SaaS a company buys and
 - [Product brief](docs/product/brief.md)
 - [MVP scope](docs/product/mvp.md)
 - [Stack ADR](docs/adr/0001-stack.md)
+- [Postgres ADR](docs/adr/0002-postgres.md)
+- [JSON API](docs/api.md)
 - [Architecture](docs/architecture.md)
 - [Validation research](docs/research/saas-app-register-validation-2026-11-21.md)
 
@@ -25,9 +27,16 @@ npm run dev          # http://localhost:3000
 
 ## Database
 
+Postgres 18 only ([ADR 0002](docs/adr/0002-postgres.md)). Copy `DATABASE_URL` from `.env.example`.
+
 ```bash
-npm run db:migrate     # creates SQLite schema (DATABASE_URL, default file:./data/app-register.db)
+npm run db:up          # Postgres 18 in Docker (docker-compose.yml)
+npm run db:migrate     # apply drizzle/ migrations and ensure the default workspace (safe to re-run)
+npm run db:generate    # after editing src/lib/db/schema.ts: write a new migration
+npm run db:down        # stop the container (data stays in the named volume)
 ```
+
+Unit tests need no Docker: they run on PGlite. API shapes: [docs/api.md](docs/api.md).
 
 ## Checks
 

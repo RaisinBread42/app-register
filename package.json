@@ -2,7 +2,7 @@
   "name": "app-register",
   "version": "0.1.0",
   "private": true,
-  "description": "Obsidian Software — flat-priced SaaS and in-house app register for lean IT teams",
+  "description": "Obsidian Software \u2014 flat-priced SaaS and in-house app register for lean IT teams",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,21 +13,24 @@
     "test:watch": "vitest",
     "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs",
     "gate": "bash scripts/gate.sh",
-    "db:migrate": "tsx scripts/db-migrate.ts"
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.17",
     "@astryxdesign/theme-neutral": "0.7.17",
     "@stylexjs/stylex": "0.19.2",
-    "better-sqlite3": "11.10.0",
     "drizzle-orm": "0.43.1",
     "next": "16.4.6",
+    "postgres": "3.4.9",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@astryxdesign/cli": "0.7.17",
-    "@types/better-sqlite3": "7.6.13",
+    "@electric-sql/pglite": "0.4.6",
     "@types/node": "22.15.21",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

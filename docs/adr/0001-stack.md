@@ -1,6 +1,6 @@
 # ADR 0001 — Web stack for App Register
 
-**Status:** Accepted  
+**Status:** Accepted (Persistence superseded by [ADR 0002](0002-postgres.md))  
 **Date:** 2026-11-21  
 **Context:** Greenfield product; React 19+ required by Astryx; need a simple, cheap-to-run stack for a lean IT SaaS.
 
@@ -12,7 +12,7 @@
 | App framework | Next.js (App Router) | Matches Astryx’s official example; SSR + API routes in one deploy |
 | Design system | Meta Astryx (`@astryxdesign/core`) + `@astryxdesign/theme-neutral` + `@stylexjs/stylex` | **Pinned** exact versions; beta |
 | Language | TypeScript | Strict |
-| Persistence | SQLite via Drizzle ORM (file on disk; Postgres-compatible later) | Cheap single-node; no managed DB required for early UAT |
+| Persistence | ~~SQLite via Drizzle ORM~~ → **Postgres via Drizzle ORM** | Superseded by [ADR 0002](0002-postgres.md) |
 | Tests | Vitest (unit) | Fast, local, no network |
 | Lint / types | ESLint + `tsc --noEmit` | Fed by Dev-Agent-Skills `gate.sh` |
 | Email (later issues) | Provider behind a thin interface; start with a test sink | Email-first alerts per MVP |
@@ -20,7 +20,7 @@
 ## Why this stack
 
 - **Astryx forces React 19+.** Next.js App Router is the documented simplest consumer path (prebuilt CSS, no StyleX compiler required until we author our own StyleX).
-- **One process to run.** Next.js + SQLite keeps hosting cost near zero for early customers and for our own UAT.
+- **One process to run.** Next.js plus one Postgres keeps hosting cost low for early customers and for our own UAT (originally SQLite; see ADR 0002).
 - **Cheap to operate.** No Kubernetes, no separate API fleet, no mandatory managed Postgres for v1.
 - **Escape hatches.** Drizzle can move to Postgres without rewriting domain code; Astryx CLI (`theme add`, `component`) stays the API source of truth.
 

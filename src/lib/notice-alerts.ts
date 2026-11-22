@@ -57,3 +57,36 @@ function formatIsoDateOnly(date: Date): string {
   const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/** Today's calendar date in UTC (YYYY-MM-DD), the clock every alert rule uses. */
+export function todayIso(): string {
+  return formatIsoDateOnly(new Date());
+}
+
+export function addDaysIso(iso: string, days: number): string {
+  const date = parseIsoDateOnly(iso);
+  if (!date) {
+    throw new Error(`Invalid date: ${iso}`);
+  }
+  date.setUTCDate(date.getUTCDate() + days);
+  return formatIsoDateOnly(date);
+}
+
+export function isIsoDateOnly(value: string): boolean {
+  return parseIsoDateOnly(value) !== null;
+}
+
+/**
+ * The alerts to schedule for a notice deadline: one per offset whose due date
+ * is today or later. Offsets already in the past are skipped.
+ */
+export function upcomingAlertsForDeadline(
+  noticeDeadlineIso: string,
+  todayIsoDate: string,
+): {offsetDays: number; dueOn: string}[] {
+  const dueDates = alertDatesBeforeNoticeDeadline(noticeDeadlineIso);
+  return NOTICE_ALERT_OFFSET_DAYS.map((offsetDays, i) => ({
+    offsetDays,
+    dueOn: dueDates[i],
+  })).filter((alert) => alert.dueOn >= todayIsoDate);
+}
