@@ -1,4 +1,4 @@
-import {API_HEADER, IDEMPOTENT_METHODS} from '@/lib/constants';
+import {API_HEADER, HTTP_STATUS, IDEMPOTENT_METHODS} from '@/lib/constants';
 import {getDb, type AppDatabase} from '@/lib/db/client';
 import {findWorkspaceForApiKey} from '@/lib/services/api-keys';
 import {
@@ -8,17 +8,6 @@ import {
   ValidationError,
 } from '@/lib/services/errors';
 import {runOnce, type ApiResult} from '@/lib/services/idempotency';
-
-const HTTP_STATUS = {
-  ok: 200,
-  created: 201,
-  noContent: 204,
-  badRequest: 400,
-  unauthorized: 401,
-  notFound: 404,
-  unprocessable: 422,
-  serverError: 500,
-} as const;
 
 const BEARER_TOKEN = /^bearer\s+(\S+)$/i;
 
@@ -111,7 +100,7 @@ function errorResponse(error: unknown): Response {
   if (error instanceof UnauthorizedError) {
     return Response.json(
       {error: error.message},
-      {status: HTTP_STATUS.unauthorized, headers: {'www-authenticate': 'Bearer'}},
+      {status: HTTP_STATUS.unauthorized, headers: {[API_HEADER.wwwAuthenticate]: 'Bearer'}},
     );
   }
   if (error instanceof NotFoundError) {
