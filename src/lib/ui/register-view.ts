@@ -1,5 +1,16 @@
-import { APP_LIST_SORT, FILTER_ALL, type AppListSort } from "@/lib/constants";
-import type { App, Hosting } from "./api-client";
+import {
+  ADVISORY_SEVERITIES,
+  APP_HEALTH_FILTER,
+  APP_LIST_SORT,
+  FILTER_ALL,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_CRITICAL_BELOW,
+  HEALTH_MAX_SCORE,
+  HEALTH_STATUS,
+  type AppListSort,
+  type HealthStatus,
+} from "@/lib/constants";
+import type { Advisory, App, Dependency, Hosting } from "./api-client";
 
 /**
  * Display-only shaping of data the pages already loaded: search, filters,
@@ -17,19 +28,111 @@ export function filterAppsByName<T extends { name: string }>(
     : apps;
 }
 
-export type AppListView = { query: string; kind: string; sort: AppListSort };
+export type AppListView = {
+  query: string;
+  kind: string;
+  health: string;
+  sort: AppListSort;
+};
 
-/** The applications list as the filters ask: name search, kind, then sort. Health sorting has no data yet, so it keeps name order. */
+/** The applications list as the filters ask: name search, kind, health, then sort. */
 export function applyAppListView(apps: App[], view: AppListView): App[] {
   const byKind =
     view.kind === FILTER_ALL
       ? apps
       : apps.filter((app) => app.kind === view.kind);
-  const shown = [...filterAppsByName(byKind, view.query)];
+  const byHealth = byKind.filter((app) => matchesHealth(app, view.health));
+  const shown = [...filterAppsByName(byHealth, view.query)];
   if (view.sort === APP_LIST_SORT.renewal) {
     return shown.sort(byRenewalThenName);
   }
+  if (view.sort === APP_LIST_SORT.health) {
+    return shown.sort(byScoreThenName);
+  }
   return shown.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** "Needs attention" is a score below 95, "Healthy" is 95 or more; apps with no score match neither. */
+function matchesHealth(app: App, filter: string): boolean {
+  if (filter === FILTER_ALL) {
+    return true;
+  }
+  const { score } = app.health;
+  if (score === null) {
+    return false;
+  }
+  return filter === APP_HEALTH_FILTER.healthy
+    ? score >= HEALTH_ATTENTION_BELOW
+    : score < HEALTH_ATTENTION_BELOW;
+}
+
+/** Lowest score first; apps with no score last. */
+function byScoreThenName(a: App, b: App): number {
+  const [left, right] = [a.health.score, b.health.score];
+  if (left === right) {
+    return a.name.localeCompare(b.name);
+  }
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
+export type HealthStats = {
+  /** Rounded mean of the scored apps, or null when none has a score. */
+  average: number | null;
+  healthy: number;
+  needAttention: number;
+};
+
+export function healthStats(apps: App[]): HealthStats {
+  const scores = apps.flatMap((app) => app.health.score ?? []);
+  const total = scores.reduce((sum, score) => sum + score, 0);
+  const healthy = scores.filter((score) => score >= HEALTH_ATTENTION_BELOW).length;
+  return {
+    average: scores.length ? Math.round(total / scores.length) : null,
+    healthy,
+    needAttention: scores.length - healthy,
+  };
+}
+
+/** Apps that have lost points, lowest score first. */
+export function appsNeedingAttention(apps: App[]): App[] {
+  return apps
+    .filter((app) => app.health.score !== null && app.health.score < HEALTH_MAX_SCORE)
+    .sort(byScoreThenName);
+}
+
+/** The prototype's three score bands and how many scored apps fall in each. */
+export function healthDistribution(apps: App[]): { range: string; status: HealthStatus; count: number }[] {
+  const count = (status: HealthStatus) =>
+    apps.filter((app) => app.health.score !== null && app.health.status === status).length;
+  return [
+    { range: `${HEALTH_ATTENTION_BELOW}–${HEALTH_MAX_SCORE}`, status: HEALTH_STATUS.ok, count: count(HEALTH_STATUS.ok) },
+    { range: `${HEALTH_CRITICAL_BELOW}–${HEALTH_ATTENTION_BELOW - 1}`, status: HEALTH_STATUS.attention, count: count(HEALTH_STATUS.attention) },
+    { range: `Below ${HEALTH_CRITICAL_BELOW}`, status: HEALTH_STATUS.critical, count: count(HEALTH_STATUS.critical) },
+  ];
+}
+
+/** Advisory ids recorded by hand that monitoring did not find under any of its ids. */
+export function handRecordedAdvisories(dependency: Dependency): string[] {
+  const found = new Set(
+    dependency.advisories
+      .flatMap((advisory) => [advisory.id, ...advisory.aliases])
+      .map((id) => id.toUpperCase()),
+  );
+  return dependency.vulnerabilities.filter((id) => !found.has(id.toUpperCase()));
+}
+
+/** Advisories with the most severe first (critical, high, medium, low, unrated). */
+export function worstAdvisoriesFirst(advisories: Advisory[]): Advisory[] {
+  const rank = (advisory: Advisory) => ADVISORY_SEVERITIES.indexOf(advisory.severity);
+  return [...advisories].sort((a, b) => rank(a) - rank(b));
+}
+
+/** The most recent registry check among an app's dependencies, as YYYY-MM-DD, or null. */
+export function lastChecked(dependencies: Dependency[]): string | null {
+  const dates = dependencies.flatMap((dependency) => dependency.checkedAt ?? []).sort();
+  return dates.at(-1)?.slice(0, 10) ?? null;
 }
 
 function byRenewalThenName(a: App, b: App): number {

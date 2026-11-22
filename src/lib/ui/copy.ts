@@ -1,9 +1,18 @@
 import {
+  APP_HEALTH_FILTER,
   APP_KINDS,
   APP_LIST_SORT,
   CENTS_PER_UNIT,
+  DEPENDENCY_CHECK_ERROR,
+  FILTER_ALL,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_STATUS,
+  type AdvisorySeverity,
   type AppKind,
   type AppListSort,
+  type DependencyCheckError,
+  type HealthDimension,
+  type HealthStatus,
 } from "@/lib/constants";
 
 /** User-facing labels for the values the API uses. */
@@ -26,12 +35,69 @@ export const APP_LIST_SORT_LABEL: Record<AppListSort, string> = {
   [APP_LIST_SORT.renewal]: "Renewal (soonest)",
 };
 
+const HEALTHY = "Healthy";
+const NEEDS_ATTENTION = "Needs attention";
+
+export const HEALTH_FILTER_OPTIONS = [
+  { value: FILTER_ALL, label: "All health" },
+  { value: APP_HEALTH_FILTER.attention, label: NEEDS_ATTENTION },
+  { value: APP_HEALTH_FILTER.healthy, label: HEALTHY },
+];
+
 /** For parts of the prototype that have no API yet. */
 export const COMING_SOON = "Coming soon";
-export const HEALTH_COMING_SOON = 'Health scoring is coming soon';
 export const MONITORING_COMING_SOON = 'Source monitoring is coming soon';
 export const LIVE_DATA_NOTE =
-  "Health and status checks are coming soon; other data is live.";
+  "Health scores come from dependency checks; hosting, licence and pricing checks are coming soon.";
+
+/** Shown wherever a score is, while dependencies are the only monitored dimension. */
+export const HEALTH_BASIS_NOTE = "Based on dependencies; hosting checks coming soon.";
+export const NO_SCORE_TITLE = "No health score yet";
+export const NO_SCORE_HINT =
+  "Import a package.json or package-lock.json on an application's Dependencies tab to score it.";
+export const NOTHING_TO_CHECK = "Nothing recorded to check";
+
+/** Badge colours of the prototype's score and check pills. */
+export type StatusVariant = "green" | "yellow" | "red" | "neutral";
+export const HEALTH_STATUS_VARIANT: Record<HealthStatus, StatusVariant> = {
+  [HEALTH_STATUS.ok]: "green",
+  [HEALTH_STATUS.attention]: "yellow",
+  [HEALTH_STATUS.critical]: "red",
+  [HEALTH_STATUS.na]: "neutral",
+};
+
+/** The prototype's check pills: "✓ OK", "! Attention", "! Critical". */
+export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
+  [HEALTH_STATUS.ok]: "✓ OK",
+  [HEALTH_STATUS.attention]: "! Attention",
+  [HEALTH_STATUS.critical]: "! Critical",
+  [HEALTH_STATUS.na]: "—",
+};
+
+/** The badge under the big score on an application's page. */
+export const healthVerdict = (score: number) =>
+  score >= HEALTH_ATTENTION_BELOW ? HEALTHY : NEEDS_ATTENTION;
+
+export const DIMENSION_LABEL: Record<HealthDimension, string> = {
+  dependencies: "Dependencies",
+  hosting: "Hosting & infrastructure",
+  licence: "Licence",
+  pricing: "Pricing",
+};
+
+export const SEVERITY_VARIANT: Record<AdvisorySeverity, StatusVariant> = {
+  critical: "red",
+  high: "red",
+  medium: "yellow",
+  low: "neutral",
+  unknown: "yellow",
+};
+
+export const CHECK_ERROR_LABEL: Record<DependencyCheckError, string> = {
+  [DEPENDENCY_CHECK_ERROR.notFound]: "Not found in registry",
+  [DEPENDENCY_CHECK_ERROR.unavailable]: "Check failed; will retry",
+  [DEPENDENCY_CHECK_ERROR.invalidVersion]: "Version is not exact; advisories not checked",
+};
 
 export const NOT_SET = "—";
 
