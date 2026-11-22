@@ -1,8 +1,12 @@
 import {
   APP_KINDS,
   APP_SORTS,
+  END_OF_SUPPORT_SOURCES,
+  HOSTING_HEALTH_STATUSES,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
+  INCIDENT_IMPACTS,
+  INCIDENT_SCOPES,
   NOTICE_ALERT_STATUSES,
   NOTICE_WINDOW_MAX_DAYS,
   PERSON_STATUSES,
@@ -91,6 +95,7 @@ const appProperties = {
   ...appFields,
   owner: personRef,
   backupOwner: personRef,
+  hostingHealth: ref('HostingHealth'),
   archivedAt: nullable('string', {format: 'date-time'}),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -114,8 +119,23 @@ const hostingFields = {
   provider: {...text, examples: ['Azure', 'AWS', 'Vercel']},
   service: {...text, examples: ['SQL Server', 'App Service']},
   region: nullable('string'),
-  version: nullable('string'),
-  endOfSupportOn: nullable('string', {format: 'date'}),
+  version: {...nullable('string'), description: 'Version of the service itself, e.g. 16 for a database'},
+  runtime: {...nullable('string'), examples: ['Node.js', 'Python', '.NET']},
+  runtimeVersion: {...nullable('string'), examples: ['22']},
+  endOfSupportOn: {
+    ...nullable('string', {format: 'date'}),
+    description:
+      'Send a date to set it by hand (it is then never overwritten). Send null to let the hosting check ' +
+      'look it up on endoflife.date from the service version or the runtime version.',
+  },
+};
+
+/** What the hosting check stores on a row; read-only. */
+const hostingCheckFields = {
+  endOfSupportSource: {type: ['string', 'null'], enum: [...END_OF_SUPPORT_SOURCES, null]},
+  incidents: {type: 'array', items: ref('HostingIncident')},
+  healthCheckedAt: nullable('string', {format: 'date-time'}),
+  healthError: {...nullable('string'), description: 'Sources that could not be read on the last check'},
 };
 
 const schemas = {
@@ -162,7 +182,47 @@ const schemas = {
   Dependency: strict({id, appId: id, ...dependencyFields, createdAt: timestamp, updatedAt: timestamp}),
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
-  Hosting: strict({id, appId: id, ...hostingFields, createdAt: timestamp, updatedAt: timestamp}),
+  Hosting: strict({id, appId: id, ...hostingFields, ...hostingCheckFields, createdAt: timestamp, updatedAt: timestamp}),
+  HostingIncident: strict({
+    title: text,
+    impact: {type: 'string', enum: [...INCIDENT_IMPACTS]},
+    scope: {
+      type: 'string',
+      enum: [...INCIDENT_SCOPES],
+      description: 'service: the feed names this service or region. provider: it only names the provider.',
+    },
+    url: text,
+    startedAt: nullable('string', {format: 'date-time'}),
+  }),
+  HostingHealth: strict({
+    status: {type: 'string', enum: [...HOSTING_HEALTH_STATUSES], description: 'na: nothing monitored'},
+    deductions: {type: 'array', items: ref('Deduction')},
+  }),
+  Deduction: strict({
+    dimension: text,
+    label: text,
+    detail: text,
+    points: {type: 'integer', maximum: 0, description: 'Points off the 100-point health score'},
+  }),
+  HostingCatalog: strict({
+    providers: {
+      type: 'array',
+      items: strict({
+        name: text,
+        isStatusMonitored: {type: 'boolean'},
+        services: {
+          type: 'array',
+          items: strict({
+            name: text,
+            hasVersion: {type: 'boolean'},
+            hasRuntime: {type: 'boolean'},
+            isEndOfSupportTracked: {type: 'boolean'},
+          }),
+        },
+      }),
+    },
+    runtimes: {type: 'array', items: strict({name: text})},
+  }),
   HostingInput: input(hostingFields, ['provider', 'service']),
   HostingPatch: input(hostingFields),
 };
@@ -284,15 +344,22 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a hosting entry (one per provider + service + region)',
+        summary: 'Add a hosting entry (one per provider + service + region) and check it against the monitoring sources',
         parameters: [appId, idempotencyKey],
         requestBody: body('HostingInput'),
         responses: {201: json(strict({hosting: ref('Hosting')}), 'Added'), ...errors},
       },
     },
+    '/api/apps/{id}/hosting/refresh': {
+      post: {
+        summary: "Check an app's hosting now: end-of-support dates and open provider incidents",
+        parameters: [appId, idempotencyKey],
+        responses: {200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Checked'), ...errors},
+      },
+    },
     '/api/apps/{id}/hosting/{hostingId}': {
       patch: {
-        summary: 'Update a hosting entry',
+        summary: 'Update a hosting entry and check it again',
         parameters: [appId, pathId('hostingId', 'Hosting entry id'), idempotencyKey],
         requestBody: body('HostingPatch'),
         responses: {200: json(strict({hosting: ref('Hosting')}), 'Updated'), ...errors},
@@ -301,6 +368,31 @@ export const openApiSpec = {
         summary: 'Remove a hosting entry (a second delete answers 404)',
         parameters: [appId, pathId('hostingId', 'Hosting entry id')],
         responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
+      },
+    },
+    '/api/hosting/catalog': {
+      get: {
+        summary: 'Providers, services and runtimes the hosting check knows (anything else is free text, unmonitored)',
+        responses: {200: json(strict({catalog: ref('HostingCatalog')}), 'Catalog'), 401: errors[401]},
+      },
+    },
+    '/api/monitoring/hosting/refresh': {
+      post: {
+        summary: 'Check the hosting of every active app in the workspace (for a daily job)',
+        parameters: [idempotencyKey],
+        responses: {
+          200: json(
+            strict({
+              refreshed: strict({
+                apps: {type: 'integer'},
+                hosting: {type: 'integer'},
+                failedSources: {type: 'array', items: text},
+              }),
+            }),
+            'Checked',
+          ),
+          ...errors,
+        },
       },
     },
     '/api/people': {

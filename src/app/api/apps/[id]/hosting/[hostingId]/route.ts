@@ -1,5 +1,6 @@
 import {handle, jsonObject, noContent, ok} from '@/lib/api/http';
-import {removeHosting, updateHosting, type HostingInput} from '@/lib/services/hosting';
+import {removeHosting, type HostingInput} from '@/lib/services/hosting';
+import {updateHostingAndCheck} from '@/lib/services/hosting-monitor';
 
 type Context = {params: Promise<{id: string; hostingId: string}>};
 
@@ -8,7 +9,7 @@ export async function PATCH(request: Request, {params}: Context): Promise<Respon
   const {id, hostingId} = await params;
   return handle(request, async ({db, workspaceId, body}) =>
     ok({
-      hosting: await updateHosting(
+      hosting: await updateHostingAndCheck(
         db,
         workspaceId,
         id,

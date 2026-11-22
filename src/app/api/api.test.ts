@@ -2,12 +2,14 @@ import {readdirSync} from 'node:fs';
 import path from 'node:path';
 import {eq, sql} from 'drizzle-orm';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {END_OF_SUPPORT_SOURCE, HOSTING_HEALTH_STATUS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
 import {callApi, ROUTES, type RequestOptions} from '@/lib/api/test/client';
 import {openApiSpec} from '@/lib/api/openapi';
 import {newId} from '@/lib/db/ids';
 import {apiKeys, apps, idempotencyKeys, people, workspaces} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
+import {fetchText} from '@/lib/monitoring/http';
+import {ALL_CLEAR, FEED_URL, NODEJS, POSTGRES_ON_AZURE, azureStatusRss, endOfLifeUrlFor, fakeFeeds} from '@/lib/monitoring/test/feeds';
 import {createApiKey, revokeApiKey} from '@/lib/services/api-keys';
 
 let t: TestDb;
@@ -172,6 +174,45 @@ describe('JSON API', () => {
     expect(back.body.person).toMatchObject({status: PERSON_STATUS.active, leftOn: null});
   });
 
+  it('saving hosting checks it at once, apps carry their hosting health, and the check can be run again for one app or the whole workspace', async () => {
+    const {app} = await seedApp();
+    const feeds = fakeFeeds({
+      [endOfLifeUrlFor('azure-database-for-postgresql')]: POSTGRES_ON_AZURE,
+      [endOfLifeUrlFor('nodejs')]: NODEJS,
+      [FEED_URL.azure]: azureStatusRss([]),
+      [FEED_URL.vercel]: ALL_CLEAR,
+    });
+    vi.mocked(fetchText).mockImplementation(feeds.fetchText);
+    try {
+      expect((await api('GET', `/api/apps/${app.id}`)).body.app.hostingHealth).toEqual({status: HOSTING_HEALTH_STATUS.na, deductions: []});
+
+      const database = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', region: 'centralus', version: '12'}});
+      expect(database.body.hosting).toMatchObject({endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, incidents: [], healthError: null});
+      expect(database.body.hosting.healthCheckedAt).not.toBeNull();
+      const site = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'}});
+      expect(site.body.hosting.endOfSupportOn).toBe('2025-04-30');
+
+      const critical = {status: HOSTING_HEALTH_STATUS.critical, deductions: [{points: -25}, {points: -25}]};
+      expect((await api('GET', `/api/apps/${app.id}`)).body.app.hostingHealth).toMatchObject(critical);
+      expect((await api('GET', '/api/apps')).body.apps[0].hostingHealth).toMatchObject(critical);
+
+      const upgraded = await api('PATCH', `/api/apps/${app.id}/hosting/${site.body.hosting.id}`, {body: {runtimeVersion: '24'}});
+      expect(upgraded.body.hosting.endOfSupportOn).toBe('2028-04-30');
+
+      const one = await api('POST', `/api/apps/${app.id}/hosting/refresh`);
+      expect(one.status).toBe(200);
+      expect(one.body.hosting).toHaveLength(2);
+      const all = await api('POST', '/api/monitoring/hosting/refresh');
+      expect(all.body.refreshed).toEqual({apps: 1, hosting: 2, failedSources: []});
+
+      const catalog = await api('GET', '/api/hosting/catalog');
+      expect(catalog.body.catalog.providers.map((provider: {name: string}) => provider.name)).toContain('Azure');
+      expect((await api('GET', '/api/hosting/catalog', {key: null})).status).toBe(401);
+    } finally {
+      vi.mocked(fetchText).mockReset();
+    }
+  });
+
   it('every route is documented in the OpenAPI spec, and nothing in the spec is missing a route', () => {
     const apiDir = path.join(process.cwd(), 'src/app/api');
     const routeFiles = (readdirSync(apiDir, {recursive: true}) as string[])
@@ -245,6 +286,7 @@ describe('JSON API', () => {
       expect((await api('PATCH', `/api/apps/${id}`, {body: {vendor: 'X'}})).status).toBe(404);
       expect((await api('POST', `/api/apps/${id}/archive`)).status).toBe(404);
       expect((await api('GET', `/api/apps/${id}/hosting`)).status).toBe(404);
+      expect((await api('POST', `/api/apps/${id}/hosting/refresh`)).status).toBe(404);
       expect((await api('POST', `/api/apps/${id}/dependencies`, {body: {name: 'x', currentVersion: '1'}})).status).toBe(404);
     }
     for (const id of [newId(), 'nope', otherDependency.id]) {
