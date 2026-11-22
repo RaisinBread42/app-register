@@ -1,6 +1,7 @@
 # Deploy main to UAT on Azure Container Apps. Never PROD.
-# Auth: GitHub OIDC (no stored Azure secret). Repo variables AZURE_CLIENT_ID,
-# AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, ACR_NAME are set once (see docs/environments.md).
+# Auth: GitHub OIDC (no stored Azure secret). The ids below are identifiers, not secrets:
+# the Entra app "app-register-uat-deploy" only trusts this repo's `uat` environment and is
+# Contributor on the UAT resource group only.
 name: Deploy UAT
 
 on:
@@ -20,6 +21,10 @@ env:
   RESOURCE_GROUP: rg-app-register-uat
   APP_NAME: appreg-uat
   IMAGE: app-register
+  ACR_NAME: appreguatp3mf2hylihkpi
+  AZURE_CLIENT_ID: 429cb974-de5d-4621-a171-e4763264fa3d
+  AZURE_TENANT_ID: c1868a72-a9be-4493-8e97-ba4c1d64c30e
+  AZURE_SUBSCRIPTION_ID: 02e2a342-0d63-4fe6-8054-d8faa4d8618d
 
 jobs:
   deploy:
@@ -31,17 +36,17 @@ jobs:
       - name: Sign in to Azure (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build image in Azure Container Registry
-        run: az acr build --registry "${{ vars.ACR_NAME }}" --image "$IMAGE:${{ github.sha }}" .
+        run: az acr build --registry "$ACR_NAME" --image "$IMAGE:${{ github.sha }}" .
 
       - name: Roll out the new image (start-up applies migrations)
         run: |
           az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
-            --image "${{ vars.ACR_NAME }}.azurecr.io/$IMAGE:${{ github.sha }}"
+            --image "$ACR_NAME.azurecr.io/$IMAGE:${{ github.sha }}"
 
       - name: Smoke test
         run: |
