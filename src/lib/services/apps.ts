@@ -8,7 +8,8 @@ import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
-import {listHosting, type HostingView} from './hosting';
+import {hostingByApp, listHosting, type HostingView} from './hosting';
+import {hostingHealth, type HostingHealth} from './hosting-health';
 import {
   listAlertsForApp,
   removeScheduledAlerts,
@@ -53,6 +54,8 @@ export type AppView = Omit<ValidAppInput, 'ownerId' | 'backupOwnerId'> & {
   id: string;
   owner: {id: string; name: string};
   backupOwner: {id: string; name: string};
+  /** Hosting status and point deductions, from what the last hosting check stored. */
+  hostingHealth: HostingHealth;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -125,7 +128,8 @@ export async function listActiveApps(
   const rows = await selectAppViews(db)
     .where(and(...filters))
     .orderBy(...order);
-  return rows.map(toAppView);
+  const hosting = await hostingByApp(db, workspaceId);
+  return rows.map((row) => toAppView(row, hosting.get(row.app.id) ?? [], today));
 }
 
 /** One app (archived ones too, as history) with its alerts, dependencies and hosting. 404 outside the workspace. */
@@ -133,6 +137,7 @@ export async function getApp(
   db: AppDatabase,
   workspaceId: string,
   id: string,
+  today = todayIso(),
 ): Promise<AppDetailView> {
   const [row] = isUuid(id)
     ? await selectAppViews(db).where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, id)))
@@ -140,11 +145,12 @@ export async function getApp(
   if (!row) {
     throw new NotFoundError('App not found');
   }
+  const hosting = await listHosting(db, workspaceId, id);
   return {
-    ...toAppView(row),
+    ...toAppView(row, hosting, today),
     alerts: await listAlertsForApp(db, workspaceId, id),
     dependencies: await listDependencies(db, workspaceId, id),
-    hosting: await listHosting(db, workspaceId, id),
+    hosting,
   };
 }
 
@@ -282,11 +288,15 @@ function selectAppViews(db: AppDatabase) {
     .$dynamic();
 }
 
-function toAppView(row: {
-  app: typeof apps.$inferSelect;
-  owner: {id: string; name: string};
-  backupOwner: {id: string; name: string};
-}): AppView {
+function toAppView(
+  row: {
+    app: typeof apps.$inferSelect;
+    owner: {id: string; name: string};
+    backupOwner: {id: string; name: string};
+  },
+  hosting: HostingView[],
+  today: string,
+): AppView {
   const {app} = row;
   return {
     id: app.id,
@@ -304,6 +314,7 @@ function toAppView(row: {
     runtimeLocation: app.runtimeLocation,
     dataAndKeys: app.dataAndKeys,
     whatBreaksIfStopped: app.whatBreaksIfStopped,
+    hostingHealth: hostingHealth(hosting, today),
     archivedAt: app.archivedAt,
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,
