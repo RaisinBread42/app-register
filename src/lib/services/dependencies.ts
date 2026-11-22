@@ -1,8 +1,10 @@
 import {and, asc, eq} from 'drizzle-orm';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
+import type {HealthStatus} from '@/lib/constants';
 import {appDependencies, type AppDependencyRow} from '@/lib/db/schema';
 import {assertActiveApp} from './app-scope';
+import {dependencyStatus} from './dependency-health';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
 import {optionalText, requiredText} from './validation';
 
@@ -14,8 +16,8 @@ export type DependencyInput = {
   recommendedAction?: string | null;
 };
 
-/** JSON shape of an app dependency in the API. */
-export type DependencyView = Omit<AppDependencyRow, 'workspaceId'>;
+/** JSON shape of an app dependency in the API: the row plus its own status. */
+export type DependencyView = Omit<AppDependencyRow, 'workspaceId'> & {status: HealthStatus};
 
 /** An app's dependencies (archived apps too, as history), by name. */
 export async function listDependencies(
@@ -61,10 +63,13 @@ export async function updateDependency(
   await assertActiveApp(db, workspaceId, appId);
   const current = await findDependency(db, workspaceId, appId, id);
   const values = validateDependency({...current, ...patch});
+  // What monitoring found was about the old package or version.
+  const isSamePackage = values.name === current.name && values.currentVersion === current.currentVersion;
+  const monitoring = isSamePackage ? {} : {advisories: [], checkedAt: null, checkError: null};
   return withNameCheck(async () => {
     const [row] = await db
       .update(appDependencies)
-      .set(values)
+      .set({...values, ...monitoring})
       .where(eq(appDependencies.id, current.id))
       .returning();
     return toView(row);
@@ -148,6 +153,12 @@ function toView(row: AppDependencyRow): DependencyView {
     latestVersion: row.latestVersion,
     vulnerabilities: row.vulnerabilities,
     recommendedAction: row.recommendedAction,
+    source: row.source,
+    isDev: row.isDev,
+    advisories: row.advisories,
+    checkedAt: row.checkedAt,
+    checkError: row.checkError,
+    status: dependencyStatus(row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
