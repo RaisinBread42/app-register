@@ -90,6 +90,86 @@ export const API_SUB_ROUTE = {
   acknowledge: 'acknowledge',
 } as const;
 
+/** JSON API paths for the hosting catalog and the scheduled hosting check. */
+export const HOSTING_API_ROUTES = {
+  catalog: `${API_PATH_PREFIX}/hosting/catalog`,
+  refreshAll: `${API_PATH_PREFIX}/monitoring/hosting/refresh`,
+} as const;
+
+/** `POST /api/apps/:id/hosting/refresh` */
+export const API_REFRESH_SEGMENT = 'refresh';
+
+/** Who set a hosting row's end-of-support date. A manual date is never overwritten by a check. */
+export const END_OF_SUPPORT_SOURCE = {
+  manual: 'manual',
+  endOfLifeDate: 'endoflife.date',
+} as const;
+export const END_OF_SUPPORT_SOURCES = Object.values(END_OF_SUPPORT_SOURCE);
+export type EndOfSupportSource = (typeof END_OF_SUPPORT_SOURCES)[number];
+
+/** How bad a provider says an incident is (their words, normalised). */
+export const INCIDENT_IMPACT = {
+  major: 'major',
+  minor: 'minor',
+  maintenance: 'maintenance',
+} as const;
+export const INCIDENT_IMPACTS = Object.values(INCIDENT_IMPACT);
+export type IncidentImpact = (typeof INCIDENT_IMPACTS)[number];
+
+/** `service`: the feed names this row's service or region. `provider`: it only names the provider. */
+export const INCIDENT_SCOPE = {
+  service: 'service',
+  provider: 'provider',
+} as const;
+export const INCIDENT_SCOPES = Object.values(INCIDENT_SCOPE);
+export type IncidentScope = (typeof INCIDENT_SCOPES)[number];
+
+/** The shapes of provider status feed the hosting check can read. */
+export const STATUS_FEED_KIND = {
+  statuspage: 'statuspage',
+  azureRss: 'azure-rss',
+  awsHealth: 'aws-health',
+  gcpIncidents: 'gcp-incidents',
+} as const;
+export type StatusFeedKind = (typeof STATUS_FEED_KIND)[keyof typeof STATUS_FEED_KIND];
+
+/** Hosting status pill: ok / attention / critical, or `na` when nothing is monitored. */
+export const HOSTING_HEALTH_STATUS = {
+  ok: 'ok',
+  attention: 'attention',
+  critical: 'critical',
+  na: 'na',
+} as const;
+export const HOSTING_HEALTH_STATUSES = Object.values(HOSTING_HEALTH_STATUS);
+export type HostingHealthStatus = (typeof HOSTING_HEALTH_STATUSES)[number];
+
+/** The health dimension hosting deductions belong to. */
+export const HOSTING_DIMENSION = 'hosting';
+
+/** Points a hosting finding takes off the 100-point health score. */
+export const HOSTING_POINTS = {
+  pastEndOfSupport: -25,
+  endOfSupportSoon: -12,
+  outage: -8,
+  notice: -3,
+} as const;
+
+/** Findings that make hosting `critical`; any other finding makes it `attention`. */
+export const HOSTING_CRITICAL_POINTS: readonly number[] = [
+  HOSTING_POINTS.pastEndOfSupport,
+  HOSTING_POINTS.outage,
+];
+
+/** "End of support soon" means within this many days. */
+export const END_OF_SUPPORT_SOON_DAYS = 90;
+
+/** Outbound checks of public feeds: who we say we are, how long we wait, how many at once. */
+export const MONITOR_USER_AGENT = 'app-register';
+export const MONITOR_TIMEOUT_MS = 8_000;
+export const MONITOR_CONCURRENCY = 4;
+
+export const MS_PER_DAY = 86_400_000;
+
 /** What the UI's Basic auth check decides for a request. */
 export const BASIC_AUTH_VERDICT = {
   allow: 'allow',
