@@ -12,10 +12,33 @@ Obsidian Software product: a flat-priced register of the SaaS a company buys and
 - [Architecture](docs/architecture.md)
 - [Validation research](docs/research/saas-app-register-validation-2026-11-21.md)
 
-## Status
+## Stack
 
-Greenfield. Project skeleton and runtime instructions land in issue `[01]`.
+Next.js (App Router) · React 19 · Meta Astryx **0.7.17** (pinned) · TypeScript · Vitest. See [ADR 0001](docs/adr/0001-stack.md).
+
+## Run locally
+
+```bash
+npm ci
+npm run dev          # http://localhost:3000
+```
+
+## Checks
+
+```bash
+npm test             # Vitest
+npm run lint
+npm run typecheck
+bash scripts/gate.sh # lint + typecheck + tests (CI uses this)
+```
+
+## Astryx
+
+```bash
+npm run astryx -- component Button   # look up props; do not guess
+npx @astryxdesign/cli init           # refresh agent cheat sheet
+```
 
 ## Development process
 
-This repo follows [Dev-Agent-Skills](https://github.com/RaisinBread42/Dev-Agent-Skills): plan → tests → services → UI → `bash scripts/gate.sh` → PR template.
+Follows [Dev-Agent-Skills](https://github.com/RaisinBread42/Dev-Agent-Skills): plan → tests → services → UI → gate → PR. One PR per MVP issue.
