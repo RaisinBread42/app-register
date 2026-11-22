@@ -9,6 +9,7 @@ Variable **names** only, never values.
 | Auth | API: bearer API keys (hashed in `api_keys`, one workspace per key). UI: one shared password over HTTP Basic auth (`UI_PASSWORD`) until user sign-in | Same |
 | Database | Postgres 18 via `DATABASE_URL` | Postgres 18 via `DATABASE_URL` |
 | Other services | Email sink / provider via `EMAIL_*` | Real email provider |
+| Outbound HTTPS | `registry.npmjs.org` and `api.osv.dev` for dependency monitoring (free, no key). Blocked hosts only mark dependencies `unavailable` | Same |
 | Who deploys | Agent may deploy via CI to UAT | Human only |
 
 ## Environment variables

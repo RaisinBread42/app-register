@@ -36,7 +36,7 @@ Bodies are compared byte for byte, so send the same JSON text when retrying. Key
 
 How it works: the key is claimed inside the same database transaction as the write. A concurrent duplicate waits on that claim, then reads the committed response. Exactly one request does the work.
 
-`GET` and `DELETE` are naturally safe to repeat: a second `DELETE` of the same row answers `404`.
+`GET` and `DELETE` are naturally safe to repeat: a second `DELETE` of the same row answers `404`. The two dependency refresh endpoints are also safe to repeat (they only re-check), so they take no `Idempotency-Key`.
 
 ## Conventions
 
@@ -50,11 +50,14 @@ How it works: the key is claimed inside the same database transaction as the wri
 | --- | --- | --- |
 | GET | `/api/apps` | Active apps. `?kind=`, `?sort=name\|notice_deadline`, `?noticeDeadlineWithinDays=0–36500` |
 | POST | `/api/apps` | Create; schedules notice alerts |
-| GET | `/api/apps/:id` | One app (archived too) with `alerts`, `dependencies`, `hosting` |
+| GET | `/api/apps/:id` | One app (archived too) with `alerts`, `dependencies`, `hosting` and `health` |
 | PATCH | `/api/apps/:id` | Update an active app; a new deadline replaces scheduled alerts |
 | POST | `/api/apps/:id/archive` | Soft delete: hides it, frees its name, drops scheduled alerts |
-| GET / POST | `/api/apps/:id/dependencies` | List / add (name unique per app, case-insensitive) |
-| PATCH / DELETE | `/api/apps/:id/dependencies/:dependencyId` | Update / remove |
+| GET / POST | `/api/apps/:id/dependencies` | List / add (name unique per app, case-insensitive); a new one is checked straight away |
+| PATCH / DELETE | `/api/apps/:id/dependencies/:dependencyId` | Update (then checked again) / remove |
+| POST | `/api/apps/:id/dependencies/import` | Body is a `package.json` or `package-lock.json`; imports the direct dependencies, then checks them |
+| POST | `/api/apps/:id/dependencies/refresh` | Check this app's dependencies now (no Idempotency-Key) |
+| POST | `/api/monitoring/dependencies/refresh` | Check every active app's dependencies; the daily scheduled job calls this (no Idempotency-Key) |
 | GET / POST | `/api/apps/:id/hosting` | List / add (one row per provider + service + region) |
 | PATCH / DELETE | `/api/apps/:id/hosting/:hostingId` | Update / remove |
 | GET | `/api/people` | Active people, by name |
@@ -70,7 +73,46 @@ How it works: the key is claimed inside the same database transaction as the wri
 - Changing the deadline deletes the app's `scheduled` alerts and schedules new ones. `sent` and `acknowledged` alerts stay as history. Moving the deadline back to one that already has a sent alert for an offset does not schedule that offset again.
 - Two edits to the same app at once are serialized (row lock), so neither is lost.
 - Owners must be active people when newly assigned. An app whose owner has left can still be edited.
-- Dependencies and hosting are recorded by hand. There is no scanning, health score or outside source yet.
+- Hosting is recorded by hand. Dependencies are recorded by hand or imported, and monitored (below).
+
+## Dependency import
+
+`POST /api/apps/:id/dependencies/import` takes the file itself as the body: an npm `package.json`, or a `package-lock.json` made by npm 7 or newer (`lockfileVersion` 2 or 3). At most 5 MB. Answers `{ "import": { "added", "updated", "unchanged", "removed" } }`.
+
+A pipeline can post its lockfile on every build:
+
+```bash
+curl -fsS -X POST "$APP_REGISTER_URL/api/apps/$APP_ID/dependencies/import" -H "Authorization: Bearer $APP_REGISTER_API_KEY" -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" --data-binary @package-lock.json
+```
+
+- Only direct dependencies are taken: `dependencies` and `devDependencies` (dev ones are flagged `isDev`). Transitive packages are left out.
+- A lockfile gives the exact installed version (`packages["node_modules/<name>"].version`). A `package.json` gives its range with the operators stripped (`^16.4.6` → `16.4.6`); a tag such as `latest` is kept as written.
+- Matching is by name, ignoring case. New names are added with `source: "import"`. Known names get the file's version. A name the file no longer lists is removed only if an earlier import created it; dependencies added by hand (`source: "manual"`) are never removed.
+- Malformed JSON, a JSON file that is not a package file, an npm 6 lockfile, or a file over 5 MB answers `400` and changes nothing.
+
+## Dependency monitoring
+
+Two free sources, no account or key:
+
+| Source | Request | Used for |
+| --- | --- | --- |
+| npm registry | `GET https://registry.npmjs.org/<name>/latest` (a scoped name as `@scope%2Fname`) | `latestVersion`; a `404` marks the dependency `checkError: "not_found"` |
+| OSV.dev | `POST https://api.osv.dev/v1/querybatch` with `{package: {name, ecosystem: "npm"}, version}` per dependency, then `GET https://api.osv.dev/v1/vulns/<id>` | `advisories`: id, aliases, severity (GitHub's rating in `database_specific.severity`), summary, link |
+
+- A check runs after an import, after a dependency is added or edited by hand, and on the two refresh endpoints. It runs after the write has committed, never inside its transaction; if a source is down the write still succeeds.
+- Each dependency stores `latestVersion`, `advisories`, `checkedAt` and `checkError`. One package failing never fails the refresh: `not_found` (not on the public registry: private, misspelt, or not an npm package), `unavailable` (a source did not answer; the previous result is kept), `invalid_version` (the tracked version is a range or tag, so advisories cannot be matched).
+- Only package names and versions are sent, with `User-Agent: app-register`, at most 6 requests at a time with an 8 second timeout. A name that is not a valid npm package name is never sent. Names of private packages do reach the npm registry (as they would from `npm install`).
+- Every dependency is treated as an npm package. A hand-added name that happens to match an unrelated public package would show that package's versions and advisories.
+
+## Health score
+
+Every app carries `health: { score, status, dimensions }`.
+
+- The score starts at 100 and loses points per deduction, never going below 0: 10 per critical advisory, 5 per high, 2 per medium or unrated, 0 per low; 3 per runtime dependency a major version behind the latest, 1 per runtime dependency a minor version behind. Dev dependencies lose points for advisories only.
+- `status`: below 80 is `critical`, below 95 is `attention`, otherwise `ok`. An app with no dependencies recorded has `score: null` and status `na`.
+- `dimensions` has one entry per dimension: `dependencies` is `{ status, deductions[] }`; `hosting`, `licence` and `pricing` are `null` until they are monitored. Each deduction is `{ dimension, label, detail, points }`.
+- Each dependency also has its own `status`: `critical` with a critical or high advisory, `attention` with anything else that costs points, `na` until it has been checked.
+- An advisory id recorded by hand (`vulnerabilities`) counts once: not again when monitoring finds the same advisory under that id or an alias, and as unrated when monitoring does not know it.
 
 ## Example
 

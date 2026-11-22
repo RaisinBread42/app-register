@@ -12,7 +12,9 @@ JSON API: route handlers in `src/app/api/` ([api.md](api.md); OpenAPI spec in `s
 
 UI (`src/app/(register)/`): server components load data and server actions submit it, both through `src/lib/ui/api-client.ts`, which calls `${APP_URL}/api/*` over HTTP with `APP_REGISTER_API_KEY`. Client components never call the API and never see the key. Each POST/PATCH sends an `Idempotency-Key` that the page rendered for that user action, so a double-click or retry of one Save is one write. `src/proxy.ts` puts every non-API route behind HTTP Basic auth with `UI_PASSWORD` (fails closed when unset); `/api/*` keeps its bearer keys.
 
-UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, edited with the theme editor in `themes/obsidian/`). Screens mirror `docs/design/app-register-prototype.html`; parts with no API yet (health scores, status checks, sources) show a muted coming-soon state, never made-up numbers. Business rules live in services, not in React components.
+Dependency monitoring (`src/lib/services/dependency-health.ts`) reads two free, keyless sources: the npm registry for the latest version of each package and OSV.dev for known advisories. All outside calls go through one module, `src/lib/services/package-sources.ts` (tests pass it a fake `fetch`; `src/test-setup.ts` blocks the real network). Only package names and versions are sent. A check runs after an import or a manual change, and for every active app when the daily job posts to `/api/monitoring/dependencies/refresh`; it always runs after the write has committed (`afterCommit` in `handle()`), never inside a database transaction. The health score (`src/lib/services/health.ts`) is 100 minus each dimension's deductions; a dimension plugs in with one line in `REPORTERS`. Only `dependencies` reports so far.
+
+UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, edited with the theme editor in `themes/obsidian/`). Screens mirror `docs/design/app-register-prototype.html`; parts with no API yet (hosting, licence and pricing checks, sources) show a muted coming-soon state, never made-up numbers. Business rules live in services, not in React components.
 
 ## Where each kind of code lives
 
@@ -23,6 +25,8 @@ UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, e
 | UI → API client | `src/lib/ui/api-client.ts` (types mirror the OpenAPI schemas) | same |
 | Astryx providers | `src/app/providers.tsx` | same |
 | Domain services | `src/lib/services/` | `src/lib/services/apps.ts` |
+| Outside HTTP calls | `src/lib/services/package-sources.ts` only | same |
+| Health dimension | a reporter in `src/lib/services/health.ts`, deductions beside its service | `dependencyDeductions` in `src/lib/services/dependency-health.ts` |
 | JSON API route | `src/app/api/<resource>/route.ts` (and add it to `src/lib/api/openapi.ts` and `ROUTES` in `src/lib/api/test/client.ts`, or the tests fail) | `src/app/api/apps/route.ts` |
 | Constants / enums | `src/lib/constants.ts` | same |
 | DB schema + client | `src/lib/db/` | `src/lib/db/schema.ts` |
