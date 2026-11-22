@@ -1,6 +1,6 @@
 // Create or revoke an API key for the default workspace.
 //   npm run api-key:create -- "<name>"      prints the key once; store it in your secret manager
-//   npm run api-key:revoke -- <keyPrefix>   the prefix printed at creation, e.g. ar_AbC123
+//   npm run api-key:revoke -- <keyPrefix|id> the prefix or id printed at creation, e.g. ar_AbC123
 import {drizzle} from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../src/lib/db/schema';
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
     throw new Error('DATABASE_URL is not set (see .env.example)');
   }
   if (!argument || (command !== COMMAND.create && command !== COMMAND.revoke)) {
-    throw new Error('Usage: api-key.ts create "<name>" | api-key.ts revoke <keyPrefix>');
+    throw new Error('Usage: api-key.ts create "<name>" | api-key.ts revoke <keyPrefix|id>');
   }
   const client = postgres(url, {max: 1, onnotice: () => {}});
   try {
@@ -24,11 +24,11 @@ async function main(): Promise<void> {
     const workspaceId = await ensureDefaultWorkspace(db);
     if (command === COMMAND.create) {
       const created = await createApiKey(db, workspaceId, argument);
-      console.log(`API key "${created.name}" (prefix ${created.keyPrefix}). Shown once, store it now:`);
+      console.log(`API key "${created.name}" (prefix ${created.keyPrefix}, id ${created.id}). Shown once, store it now:`);
       console.log(created.key);
     } else {
       await revokeApiKey(db, workspaceId, argument);
-      console.log(`Revoked the active key with prefix ${argument}`);
+      console.log(`Revoked the active key ${argument}`);
     }
   } finally {
     await client.end();

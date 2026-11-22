@@ -13,9 +13,9 @@ Authorization: Bearer ar_…
 ```
 
 - The key decides the workspace. A key only ever reads or writes its own workspace's rows; an id from another workspace answers 404.
-- Keys are 256 random bits. Only their SHA-256 hash is stored (`api_keys.key_hash`), plus a short non-secret prefix (`ar_` + 6 characters) so a person can tell keys apart.
+- Keys are 256 random bits. Only their SHA-256 hash is stored (`api_keys.key_hash`), plus the first 9 characters (`ar_` + 6) in plain text so a person can tell keys apart. Those 6 characters are part of the key (36 of its 256 bits); the rest is never stored.
 - Create a key: `npm run api-key:create -- "Front end"`. It prints the key **once**; store it in a secret manager.
-- Revoke a key: `npm run api-key:revoke -- ar_AbC123` (the prefix printed at creation). Takes effect on the next request.
+- Revoke a key: `npm run api-key:revoke -- ar_AbC123` (the prefix printed at creation), or by its id. If two active keys ever share a prefix, it refuses and asks for the id. Takes effect on the next request.
 - Missing, malformed, unknown or revoked key → `401 { error }` with `WWW-Authenticate: Bearer`.
 - Until sign-in exists, the scripts create keys for the default workspace.
 
@@ -30,7 +30,7 @@ Authorization: Bearer ar_…
 | Same key, same method, path and body (a double-click, or a retry after a timeout) | The stored response is replayed. Nothing runs again. This holds even when both requests arrive at the same moment. |
 | Same key, different method, path or body | `422`, nothing written |
 | First request failed (4xx or 5xx) | Nothing is stored, so a retry with the same key runs normally |
-| More than 24 hours later | The key is forgotten; the request runs as new |
+| More than 24 hours later | The key is forgotten; the request runs as new. Expired rows (which hold a copy of the response, possibly names and emails) are deleted on the next POST/PATCH in any workspace. |
 
 Bodies are compared byte for byte, so send the same JSON text when retrying. Keys are scoped per workspace.
 

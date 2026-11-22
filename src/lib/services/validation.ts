@@ -6,7 +6,8 @@ export function optionalText(value: unknown, label: string): string | null {
   if (value === undefined || value === null) {
     return null;
   }
-  if (typeof value !== 'string') {
+  // Postgres text cannot hold a NUL character; refuse it here rather than fail in the DB.
+  if (typeof value !== 'string' || value.includes('\u0000')) {
     throw new ValidationError(`Invalid ${label}`);
   }
   const trimmed = value.trim();

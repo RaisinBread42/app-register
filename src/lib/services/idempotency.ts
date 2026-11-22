@@ -7,6 +7,9 @@ import {IdempotencyConflictError, ValidationError} from './errors';
 
 export type ApiResult = {status: number; body: unknown};
 
+/** Claim, or read what another request stored; twice covers a key swept in between. */
+const CLAIM_ATTEMPTS = 2;
+
 /**
  * Runs a write at most once per Idempotency-Key.
  *
@@ -14,6 +17,8 @@ export type ApiResult = {status: number; body: unknown};
  * with the same key waits on that claim; once the first commits it gets the
  * stored response instead of running again. If the first fails, nothing is
  * stored and a retry runs normally. Only successful (2xx) responses are stored.
+ * Expired keys are swept from every workspace on each write, so stored response
+ * bodies (which can hold names and emails) do not outlive the TTL for long.
  */
 export async function runOnce(
   db: AppDatabase,
@@ -33,46 +38,60 @@ export async function runOnce(
     await tx
       .delete(idempotencyKeys)
       .where(
-        and(
-          eq(idempotencyKeys.workspaceId, workspaceId),
-          lt(
-            idempotencyKeys.createdAt,
-            sql`now() - make_interval(hours => ${IDEMPOTENCY_KEY_TTL_HOURS})`,
-          ),
+        lt(
+          idempotencyKeys.createdAt,
+          sql`now() - make_interval(hours => ${IDEMPOTENCY_KEY_TTL_HOURS})`,
         ),
       );
 
-    const claimed = await tx
-      .insert(idempotencyKeys)
-      .values({workspaceId, key, requestHash, statusCode: 0, responseBody: {}})
-      .onConflictDoNothing()
-      .returning({key: idempotencyKeys.key});
-
-    if (claimed.length === 0) {
-      return replay(tx, workspaceId, key, requestHash);
+    // A stored key can expire and be swept by another request between our claim
+    // attempt and our read of it; then we claim it again and run as new.
+    for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt++) {
+      const claimed = await tx
+        .insert(idempotencyKeys)
+        .values({workspaceId, key, requestHash, statusCode: 0, responseBody: {}})
+        .onConflictDoNothing()
+        .returning({key: idempotencyKeys.key});
+      if (claimed.length > 0) {
+        return runAndStore(tx, workspaceId, key, write);
+      }
+      const stored = await findStored(tx, workspaceId, key);
+      if (stored) {
+        return replay(stored, requestHash);
+      }
     }
-
-    const result = await write(tx);
-    // Store exactly what the client receives (dates as ISO strings).
-    const body = JSON.parse(JSON.stringify(result.body));
-    await tx
-      .update(idempotencyKeys)
-      .set({statusCode: result.status, responseBody: body})
-      .where(and(eq(idempotencyKeys.workspaceId, workspaceId), eq(idempotencyKeys.key, key)));
-    return {status: result.status, body};
+    throw new Error('Could not claim the Idempotency-Key');
   });
 }
 
-async function replay(
-  db: AppDatabase,
+async function runAndStore(
+  tx: AppDatabase,
   workspaceId: string,
   key: string,
-  requestHash: string,
+  write: (tx: AppDatabase) => Promise<ApiResult>,
 ): Promise<ApiResult> {
+  const result = await write(tx);
+  // Store exactly what the client receives (dates as ISO strings).
+  const body = JSON.parse(JSON.stringify(result.body));
+  await tx
+    .update(idempotencyKeys)
+    .set({statusCode: result.status, responseBody: body})
+    .where(and(eq(idempotencyKeys.workspaceId, workspaceId), eq(idempotencyKeys.key, key)));
+  return {status: result.status, body};
+}
+
+async function findStored(db: AppDatabase, workspaceId: string, key: string) {
   const [stored] = await db
     .select()
     .from(idempotencyKeys)
     .where(and(eq(idempotencyKeys.workspaceId, workspaceId), eq(idempotencyKeys.key, key)));
+  return stored;
+}
+
+function replay(
+  stored: typeof idempotencyKeys.$inferSelect,
+  requestHash: string,
+): ApiResult {
   if (stored.requestHash !== requestHash) {
     throw new IdempotencyConflictError(
       'This Idempotency-Key was already used for a different request',

@@ -4,7 +4,7 @@ import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
 import {people, type PersonRow} from '@/lib/db/schema';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
-import {optionalDate} from './validation';
+import {optionalDate, requiredText} from './validation';
 
 export type CreatePersonInput = {name: string; email: string};
 
@@ -100,11 +100,8 @@ export async function assertActivePeople(
 }
 
 function validateNameAndEmail(input: {name?: unknown; email?: unknown}) {
-  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const name = requiredText(input.name, 'name');
   const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
-  if (!name) {
-    throw new ValidationError('Name is required');
-  }
   if (!EMAIL_PATTERN.test(email)) {
     throw new ValidationError('A valid email is required');
   }

@@ -195,6 +195,7 @@ describe('JSON API', () => {
     expect((await api('POST', '/api/people', {body: 'not json'})).status).toBe(400);
     expect((await api('GET', '/api/people')).status).toBe(200);
     expect((await api('PATCH', `/api/people/${ben.id}`, {body: {email: 'not-an-email'}})).status).toBe(400);
+    expect((await api('PATCH', `/api/people/${ben.id}`, {body: {name: 'Ben\u0000'}})).status).toBe(400);
 
     const input = {name: 'Other', kind: 'saas', ownerId: ada.id, backupOwnerId: ben.id};
     expect((await api('POST', '/api/apps', {body: {...input, costCents: -5}})).status).toBe(400);
@@ -217,6 +218,7 @@ describe('JSON API', () => {
     expect(hosting.status).toBe(201);
     expect((await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'SQL Server', region: 'uksouth'}})).status).toBe(400);
     expect((await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure'}})).status).toBe(400);
+    expect((await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'S\u00003'}})).status).toBe(400);
     expect((await api('PATCH', `/api/apps/${app.id}/hosting/${hosting.body.hosting.id}`, {body: {endOfSupportOn: 'soon'}})).status).toBe(400);
     expect((await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting).toHaveLength(1);
     expect((await api('GET', `/api/apps/${app.id}`)).body.app).toMatchObject({dependencies: [{name: 'contoso-sdk'}], hosting: [{provider: 'Azure'}]});
