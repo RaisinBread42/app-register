@@ -1,6 +1,6 @@
 import {and, asc, between, eq, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
-import {APP_KINDS, APP_SORT, APP_SORTS, type AppKind} from '@/lib/constants';
+import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
 import {apps, people} from '@/lib/db/schema';
@@ -19,9 +19,6 @@ import {assertActivePeople} from './people';
 import {optionalDate, optionalText} from './validation';
 
 const IN_HOUSE_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
-
-/** Widest `noticeDeadlineWithinDays` window (100 years); wider is a 400. */
-const MAX_NOTICE_WINDOW_DAYS = 36_500;
 
 /** Largest value the `cost_cents integer` column holds. */
 const MAX_COST_CENTS = 2_147_483_647;
@@ -110,9 +107,9 @@ export async function listActiveApps(
 
   if (query.noticeDeadlineWithinDays) {
     const days = Number(query.noticeDeadlineWithinDays);
-    if (!Number.isInteger(days) || days < 0 || days > MAX_NOTICE_WINDOW_DAYS) {
+    if (!Number.isInteger(days) || days < 0 || days > NOTICE_WINDOW_MAX_DAYS) {
       throw new ValidationError(
-        `noticeDeadlineWithinDays must be a whole number of days from 0 to ${MAX_NOTICE_WINDOW_DAYS}`,
+        `noticeDeadlineWithinDays must be a whole number of days from 0 to ${NOTICE_WINDOW_MAX_DAYS}`,
       );
     }
     filters.push(between(apps.noticeDeadline, today, addDaysIso(today, days)));

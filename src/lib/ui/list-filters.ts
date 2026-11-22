@@ -5,6 +5,7 @@ import {
   APP_TAB,
   APP_TABS,
   NOTICE_ALERT_STATUSES,
+  NOTICE_WINDOW_MAX_DAYS,
   type AppSort,
   type AppTab,
 } from '@/lib/constants';
@@ -22,7 +23,8 @@ function oneOf<T extends string>(allowed: readonly T[], value: string | undefine
 /** `/apps?kind=&sort=&noticeDeadlineWithinDays=` → the API filter. Unknown values are dropped. */
 export function appListFilter(params: SearchParams): AppListFilter {
   const days = first(params[API_QUERY.noticeDeadlineWithinDays]);
-  const within = days && /^\d+$/.test(days) ? Number(days) : undefined;
+  const within =
+    days && /^\d+$/.test(days) && Number(days) <= NOTICE_WINDOW_MAX_DAYS ? Number(days) : undefined;
   return {
     kind: oneOf(APP_KINDS, first(params[API_QUERY.kind])),
     sort: oneOf<AppSort>(APP_SORTS, first(params[API_QUERY.sort])),

@@ -23,7 +23,12 @@ type PeopleKeys = {add: string; reactivate: string; edit: Record<string, string>
 /** `null` adds a new person; `undefined` means the dialog is closed. */
 type Editing = Person | null | undefined;
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/** Today in the user's own time zone (not UTC), as YYYY-MM-DD. */
+const todayIso = () => {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
 
 export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys}) {
   const [editing, setEditing] = useState<Editing>(undefined);

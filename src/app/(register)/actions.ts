@@ -53,12 +53,13 @@ export async function saveDependencyAction(
   dependencyId: string | null,
   values: DependencyFormValues,
 ): Promise<ActionResult> {
-  const input = formToDependencyInput(values);
-  const result = await runAction(() =>
-    dependencyId
+  // Mapping runs inside runAction so forged form values become a message, not a 500.
+  const result = await runAction(() => {
+    const input = formToDependencyInput(values);
+    return dependencyId
       ? apiClient().updateDependency(idempotencyKey, appId, dependencyId, input)
-      : apiClient().addDependency(idempotencyKey, appId, input),
-  );
+      : apiClient().addDependency(idempotencyKey, appId, input);
+  });
   revalidatePath(appRoute(appId));
   return result;
 }
@@ -75,12 +76,12 @@ export async function saveHostingAction(
   hostingId: string | null,
   values: HostingFormValues,
 ): Promise<ActionResult> {
-  const input = formToHostingInput(values);
-  const result = await runAction(() =>
-    hostingId
+  const result = await runAction(() => {
+    const input = formToHostingInput(values);
+    return hostingId
       ? apiClient().updateHosting(idempotencyKey, appId, hostingId, input)
-      : apiClient().addHosting(idempotencyKey, appId, input),
-  );
+      : apiClient().addHosting(idempotencyKey, appId, input);
+  });
   revalidatePath(appRoute(appId));
   return result;
 }

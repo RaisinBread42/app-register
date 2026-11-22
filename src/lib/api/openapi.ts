@@ -4,6 +4,7 @@ import {
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
   NOTICE_ALERT_STATUSES,
+  NOTICE_WINDOW_MAX_DAYS,
   PERSON_STATUSES,
 } from '@/lib/constants';
 
@@ -202,7 +203,7 @@ export const openApiSpec = {
             name: 'noticeDeadlineWithinDays',
             in: 'query',
             description: 'Only apps whose notice deadline is between today and today + N (inclusive)',
-            schema: {type: 'integer', minimum: 0, maximum: 36500},
+            schema: {type: 'integer', minimum: 0, maximum: NOTICE_WINDOW_MAX_DAYS},
           },
         ],
         responses: {

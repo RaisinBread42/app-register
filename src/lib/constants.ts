@@ -56,6 +56,14 @@ export const API_ROUTES = {
   noticeAlerts: `${API_PATH_PREFIX}/notice-alerts`,
 } as const;
 
+/** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
+export const API_SUB_ROUTE = {
+  archive: 'archive',
+  dependencies: 'dependencies',
+  hosting: 'hosting',
+  acknowledge: 'acknowledge',
+} as const;
+
 /** What the UI's Basic auth check decides for a request. */
 export const BASIC_AUTH_VERDICT = {
   allow: 'allow',
@@ -165,8 +173,18 @@ export const API_KEY_PREFIX = 'ar_';
 export const IDEMPOTENCY_KEY_TTL_HOURS = 24;
 export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 
+export const HTTP_METHOD = {
+  get: 'GET',
+  post: 'POST',
+  patch: 'PATCH',
+  delete: 'DELETE',
+} as const;
+
 /** Methods that must send an Idempotency-Key. */
-export const IDEMPOTENT_METHODS = ['POST', 'PATCH'] as const;
+export const IDEMPOTENT_METHODS = [HTTP_METHOD.post, HTTP_METHOD.patch] as const;
+
+/** Widest `noticeDeadlineWithinDays` window (100 years); wider is a 400 from the API. */
+export const NOTICE_WINDOW_MAX_DAYS = 36_500;
 
 /** Selector value meaning "no filter" on list pages. */
 export const FILTER_ALL = 'all';

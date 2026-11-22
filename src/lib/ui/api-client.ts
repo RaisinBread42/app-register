@@ -2,8 +2,10 @@ import {
   API_HEADER,
   API_QUERY,
   API_ROUTES,
+  API_SUB_ROUTE,
   BEARER_PREFIX,
   ENV,
+  HTTP_METHOD,
   HTTP_STATUS,
   JSON_CONTENT_TYPE,
   type AppKind,
@@ -154,12 +156,12 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     return json as T;
   }
 
-  const get = <T>(path: string) => request<T>('GET', path);
+  const get = <T>(path: string) => request<T>(HTTP_METHOD.get, path);
   const post = <T>(path: string, idempotencyKey: string, body?: unknown) =>
-    request<T>('POST', path, {idempotencyKey, body});
+    request<T>(HTTP_METHOD.post, path, {idempotencyKey, body});
   const patch = <T>(path: string, idempotencyKey: string, body: unknown) =>
-    request<T>('PATCH', path, {idempotencyKey, body});
-  const remove = (path: string) => request<void>('DELETE', path);
+    request<T>(HTTP_METHOD.patch, path, {idempotencyKey, body});
+  const remove = (path: string) => request<void>(HTTP_METHOD.delete, path);
 
   return {
     async listApps(filter: AppListFilter = {}): Promise<App[]> {
@@ -181,27 +183,27 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
       return (await patch<{app: AppDetail}>(appPath(id), idempotencyKey, input)).app;
     },
     async archiveApp(idempotencyKey: string, id: string): Promise<AppDetail> {
-      return (await post<{app: AppDetail}>(`${appPath(id)}/archive`, idempotencyKey)).app;
+      return (await post<{app: AppDetail}>(`${appPath(id)}/${API_SUB_ROUTE.archive}`, idempotencyKey)).app;
     },
     async addDependency(idempotencyKey: string, appId: string, input: DependencyInput): Promise<Dependency> {
-      return (await post<{dependency: Dependency}>(`${appPath(appId)}/dependencies`, idempotencyKey, input)).dependency;
+      return (await post<{dependency: Dependency}>(`${appPath(appId)}/${API_SUB_ROUTE.dependencies}`, idempotencyKey, input)).dependency;
     },
     async updateDependency(idempotencyKey: string, appId: string, id: string, input: DependencyInput): Promise<Dependency> {
-      const path = `${appPath(appId)}/dependencies/${segment(id)}`;
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${segment(id)}`;
       return (await patch<{dependency: Dependency}>(path, idempotencyKey, input)).dependency;
     },
     removeDependency(appId: string, id: string): Promise<void> {
-      return remove(`${appPath(appId)}/dependencies/${segment(id)}`);
+      return remove(`${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${segment(id)}`);
     },
     async addHosting(idempotencyKey: string, appId: string, input: HostingInput): Promise<Hosting> {
-      return (await post<{hosting: Hosting}>(`${appPath(appId)}/hosting`, idempotencyKey, input)).hosting;
+      return (await post<{hosting: Hosting}>(`${appPath(appId)}/${API_SUB_ROUTE.hosting}`, idempotencyKey, input)).hosting;
     },
     async updateHosting(idempotencyKey: string, appId: string, id: string, input: HostingInput): Promise<Hosting> {
-      const path = `${appPath(appId)}/hosting/${segment(id)}`;
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.hosting}/${segment(id)}`;
       return (await patch<{hosting: Hosting}>(path, idempotencyKey, input)).hosting;
     },
     removeHosting(appId: string, id: string): Promise<void> {
-      return remove(`${appPath(appId)}/hosting/${segment(id)}`);
+      return remove(`${appPath(appId)}/${API_SUB_ROUTE.hosting}/${segment(id)}`);
     },
     async listPeople(): Promise<Person[]> {
       return (await get<{people: Person[]}>(API_ROUTES.people)).people;
@@ -219,7 +221,7 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
       return (await get<{alerts: NoticeAlert[]}>(`${API_ROUTES.noticeAlerts}?${query}`)).alerts;
     },
     async acknowledgeAlert(idempotencyKey: string, id: string): Promise<NoticeAlert> {
-      return (await post<{alert: NoticeAlert}>(`${API_ROUTES.noticeAlerts}/${segment(id)}/acknowledge`, idempotencyKey)).alert;
+      return (await post<{alert: NoticeAlert}>(`${API_ROUTES.noticeAlerts}/${segment(id)}/${API_SUB_ROUTE.acknowledge}`, idempotencyKey)).alert;
     },
   };
 }
