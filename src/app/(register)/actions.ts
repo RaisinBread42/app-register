@@ -19,6 +19,11 @@ import {
  * so a double-click or a retry of the same Save sends the same key.
  */
 
+/** Apps list, every app page and its edit page show app data. */
+function refreshApps() {
+  revalidatePath(ROUTES.apps, 'layout');
+}
+
 export type CreateAppResult = ActionResult & {appId?: string};
 
 export async function createAppAction(idempotencyKey: string, values: AppFormValues): Promise<CreateAppResult> {
@@ -26,19 +31,19 @@ export async function createAppAction(idempotencyKey: string, values: AppFormVal
   const result = await runAction(async () => {
     appId = (await apiClient().createApp(idempotencyKey, formToAppInput(values))).id;
   });
-  revalidatePath(ROUTES.apps);
+  refreshApps();
   return {...result, appId};
 }
 
 export async function updateAppAction(idempotencyKey: string, id: string, values: AppFormValues): Promise<ActionResult> {
   const result = await runAction(() => apiClient().updateApp(idempotencyKey, id, formToAppInput(values)));
-  revalidatePath(ROUTES.apps, 'layout');
+  refreshApps();
   return result;
 }
 
 export async function archiveAppAction(idempotencyKey: string, id: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().archiveApp(idempotencyKey, id));
-  revalidatePath(ROUTES.apps, 'layout');
+  refreshApps();
   return result;
 }
 
@@ -89,7 +94,7 @@ export async function removeHostingAction(appId: string, hostingId: string): Pro
 export async function acknowledgeAlertAction(idempotencyKey: string, alertId: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().acknowledgeAlert(idempotencyKey, alertId));
   revalidatePath(ROUTES.notices);
-  revalidatePath(ROUTES.apps, 'layout');
+  refreshApps();
   return result;
 }
 

@@ -1,6 +1,7 @@
 import {
   API_HEADER,
   API_QUERY,
+  API_ROUTES,
   BEARER_PREFIX,
   ENV,
   HTTP_STATUS,
@@ -126,7 +127,7 @@ function segment(id: string): string {
   }
   return id;
 }
-const appPath = (id: string) => `/api/apps/${segment(id)}`;
+const appPath = (id: string) => `${API_ROUTES.apps}/${segment(id)}`;
 
 export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClientConfig) {
   async function request<T>(method: string, path: string, options: {body?: unknown; idempotencyKey?: string} = {}): Promise<T> {
@@ -168,13 +169,13 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
       if (filter.noticeDeadlineWithinDays !== undefined) {
         query.set(API_QUERY.noticeDeadlineWithinDays, String(filter.noticeDeadlineWithinDays));
       }
-      return (await get<{apps: App[]}>(`/api/apps?${query}`)).apps;
+      return (await get<{apps: App[]}>(`${API_ROUTES.apps}?${query}`)).apps;
     },
     async getApp(id: string): Promise<AppDetail> {
       return (await get<{app: AppDetail}>(appPath(id))).app;
     },
     async createApp(idempotencyKey: string, input: AppInput): Promise<AppDetail> {
-      return (await post<{app: AppDetail}>('/api/apps', idempotencyKey, input)).app;
+      return (await post<{app: AppDetail}>(API_ROUTES.apps, idempotencyKey, input)).app;
     },
     async updateApp(idempotencyKey: string, id: string, input: Partial<AppInput>): Promise<AppDetail> {
       return (await patch<{app: AppDetail}>(appPath(id), idempotencyKey, input)).app;
@@ -203,22 +204,22 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
       return remove(`${appPath(appId)}/hosting/${segment(id)}`);
     },
     async listPeople(): Promise<Person[]> {
-      return (await get<{people: Person[]}>('/api/people')).people;
+      return (await get<{people: Person[]}>(API_ROUTES.people)).people;
     },
     async createPerson(idempotencyKey: string, input: PersonInput): Promise<Person> {
-      return (await post<{person: Person}>('/api/people', idempotencyKey, input)).person;
+      return (await post<{person: Person}>(API_ROUTES.people, idempotencyKey, input)).person;
     },
     async updatePerson(idempotencyKey: string, id: string, input: PersonPatch): Promise<Person> {
-      return (await patch<{person: Person}>(`/api/people/${segment(id)}`, idempotencyKey, input)).person;
+      return (await patch<{person: Person}>(`${API_ROUTES.people}/${segment(id)}`, idempotencyKey, input)).person;
     },
     async listAlerts(filter: AlertListFilter = {}): Promise<NoticeAlert[]> {
       const query = new URLSearchParams();
       if (filter.status) query.set(API_QUERY.status, filter.status);
       if (filter.appId) query.set(API_QUERY.appId, filter.appId);
-      return (await get<{alerts: NoticeAlert[]}>(`/api/notice-alerts?${query}`)).alerts;
+      return (await get<{alerts: NoticeAlert[]}>(`${API_ROUTES.noticeAlerts}?${query}`)).alerts;
     },
     async acknowledgeAlert(idempotencyKey: string, id: string): Promise<NoticeAlert> {
-      return (await post<{alert: NoticeAlert}>(`/api/notice-alerts/${segment(id)}/acknowledge`, idempotencyKey)).alert;
+      return (await post<{alert: NoticeAlert}>(`${API_ROUTES.noticeAlerts}/${segment(id)}/acknowledge`, idempotencyKey)).alert;
     },
   };
 }

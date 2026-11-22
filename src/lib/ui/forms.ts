@@ -1,3 +1,4 @@
+import {CENTS_PER_UNIT} from '@/lib/constants';
 import type {App, AppInput, Dependency, DependencyInput, Hosting, HostingInput} from './api-client';
 
 /**
@@ -22,8 +23,6 @@ export type AppFormValues = {
   dataAndKeys: string;
   whatBreaksIfStopped: string;
 };
-
-const CENTS_PER_UNIT = 100;
 
 /** Blank text becomes null, so clearing a field clears it in the register. */
 const orNull = (value: string): string | null => (value.trim() === '' ? null : value);

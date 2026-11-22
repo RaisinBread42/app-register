@@ -1,6 +1,6 @@
 import {NextResponse, type NextRequest} from 'next/server';
-import {API_HEADER, ENV, HTTP_STATUS, UI_BASIC_AUTH_REALM} from '@/lib/constants';
-import {BASIC_AUTH_VERDICT, checkBasicAuth, isApiPath} from '@/lib/ui/basic-auth';
+import {API_HEADER, BASIC_AUTH_VERDICT, ENV, HTTP_STATUS, UI_BASIC_AUTH_REALM} from '@/lib/constants';
+import {checkBasicAuth, isApiPath} from '@/lib/ui/basic-auth';
 
 /**
  * Every UI route (pages, server actions, assets) needs the shared UI_PASSWORD

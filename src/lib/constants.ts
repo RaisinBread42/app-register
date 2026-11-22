@@ -49,6 +49,21 @@ export const ENV = {
 /** Every JSON API path starts with this; the UI's Basic auth never applies to it. */
 export const API_PATH_PREFIX = '/api';
 
+/** JSON API collections the UI's API client calls (item paths add `/:id`). */
+export const API_ROUTES = {
+  apps: `${API_PATH_PREFIX}/apps`,
+  people: `${API_PATH_PREFIX}/people`,
+  noticeAlerts: `${API_PATH_PREFIX}/notice-alerts`,
+} as const;
+
+/** What the UI's Basic auth check decides for a request. */
+export const BASIC_AUTH_VERDICT = {
+  allow: 'allow',
+  refuse: 'refuse',
+  notConfigured: 'not-configured',
+} as const;
+export type BasicAuthVerdict = (typeof BASIC_AUTH_VERDICT)[keyof typeof BASIC_AUTH_VERDICT];
+
 /** Realm named in the browser's Basic auth prompt. Any username is accepted; only the password is checked. */
 export const UI_BASIC_AUTH_REALM = 'App Register';
 export const BASIC_PREFIX = 'Basic ';
@@ -152,3 +167,9 @@ export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 
 /** Methods that must send an Idempotency-Key. */
 export const IDEMPOTENT_METHODS = ['POST', 'PATCH'] as const;
+
+/** Selector value meaning "no filter" on list pages. */
+export const FILTER_ALL = 'all';
+
+/** The API stores money as whole cents; the UI shows and takes currency units. */
+export const CENTS_PER_UNIT = 100;

@@ -1,18 +1,10 @@
 import {createHash, timingSafeEqual} from 'node:crypto';
-import {API_PATH_PREFIX, BASIC_PREFIX} from '@/lib/constants';
+import {API_PATH_PREFIX, BASIC_AUTH_VERDICT, BASIC_PREFIX, type BasicAuthVerdict} from '@/lib/constants';
 
 /**
  * Shared-password HTTP Basic auth for the UI, until real sign-in exists.
  * Any username is accepted; only the password is checked.
  */
-
-export type BasicAuthVerdict = 'allow' | 'refuse' | 'not-configured';
-
-export const BASIC_AUTH_VERDICT = {
-  allow: 'allow',
-  refuse: 'refuse',
-  notConfigured: 'not-configured',
-} as const satisfies Record<string, BasicAuthVerdict>;
 
 /** `/api` and `/api/*` keep their own bearer auth; `/apifoo` is a UI path like any other. */
 export function isApiPath(pathname: string): boolean {
