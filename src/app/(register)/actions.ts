@@ -19,9 +19,9 @@ import {
  * so a double-click or a retry of the same Save sends the same key.
  */
 
-/** Apps list, every app page and its edit page show app data. */
+/** The overview, the applications list and every application page show app data. */
 function refreshApps() {
-  revalidatePath(ROUTES.apps, 'layout');
+  revalidatePath(ROUTES.home, 'layout');
 }
 
 export type CreateAppResult = ActionResult & {appId?: string};
@@ -89,13 +89,6 @@ export async function saveHostingAction(
 export async function removeHostingAction(appId: string, hostingId: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().removeHosting(appId, hostingId));
   revalidatePath(appRoute(appId));
-  return result;
-}
-
-export async function acknowledgeAlertAction(idempotencyKey: string, alertId: string): Promise<ActionResult> {
-  const result = await runAction(() => apiClient().acknowledgeAlert(idempotencyKey, alertId));
-  revalidatePath(ROUTES.notices);
-  refreshApps();
   return result;
 }
 

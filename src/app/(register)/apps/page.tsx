@@ -1,9 +1,7 @@
-import {apiClient} from '@/lib/ui/api-client';
-import {appListFilter, type SearchParams} from '@/lib/ui/list-filters';
-import {AppsList} from './AppsList';
+import {redirect} from 'next/navigation';
+import {ROUTES} from '@/lib/constants';
 
-export default async function AppsPage({searchParams}: {searchParams: Promise<SearchParams>}) {
-  const filter = appListFilter(await searchParams);
-  const apps = await apiClient().listApps(filter);
-  return <AppsList apps={apps} filter={filter} />;
+/** The first UI's apps list moved to /applications. */
+export default function LegacyAppsPage() {
+  redirect(ROUTES.applications);
 }

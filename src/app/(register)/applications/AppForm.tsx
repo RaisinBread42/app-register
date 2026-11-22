@@ -12,10 +12,10 @@ import {Selector} from '@astryxdesign/core/Selector';
 import {TextArea} from '@astryxdesign/core/TextArea';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
-import {NOTICE_ALERT_OFFSET_DAYS, ROUTES, appRoute} from '@/lib/constants';
+import {NOTICE_ALERT_OFFSET_DAYS, appRoute} from '@/lib/constants';
 import {KIND_OPTIONS} from '@/lib/ui/copy';
 import type {AppFormValues} from '@/lib/ui/forms';
-import {createAppAction, updateAppAction} from '../actions';
+import {updateAppAction} from '../actions';
 import {FormError} from '../_components/FormError';
 import {useAction} from '../_components/use-action';
 import {isoDate} from '../_components/iso-date';
@@ -27,8 +27,7 @@ type AppFormProps = {
   idempotencyKey: string;
   initial: AppFormValues;
   people: PersonOption[];
-  /** Set when editing an existing app. */
-  appId?: string;
+  appId: string;
 };
 
 export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) {
@@ -40,22 +39,15 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
   const text = (key: keyof AppFormValues) => (value: string | undefined) => set(key)(value ?? '');
 
   function save() {
-    if (appId) {
-      run(() => updateAppAction(idempotencyKey, appId, values), () => router.push(appRoute(appId)));
-    } else {
-      run(
-        () => createAppAction(idempotencyKey, values),
-        (result) => router.push(result.appId ? appRoute(result.appId) : ROUTES.apps),
-      );
-    }
+    run(() => updateAppAction(idempotencyKey, appId, values), () => router.push(appRoute(appId)));
   }
 
   return (
     <VStack gap={6} maxWidth={640}>
       <FormLayout defaultOptionality="optional">
         <Heading level={2}>Identity and ownership</Heading>
-        <TextInput label="App name" value={values.name} onChange={text('name')} placeholder="e.g. Atlas Board" isRequired />
-        <Selector label="Kind" options={KIND_OPTIONS} value={values.kind} onChange={text('kind')} isRequired />
+        <TextInput label="Application name" value={values.name} onChange={text('name')} placeholder="e.g. Atlas Board" isRequired />
+        <Selector label="Application type" options={KIND_OPTIONS} value={values.kind} onChange={text('kind')} isRequired />
         <Selector
           label="Owner"
           options={people}
@@ -125,8 +117,8 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
       </FormLayout>
       <FormError error={error} />
       <HStack gap={2}>
-        <Button label={appId ? 'Save changes' : 'Save app'} variant="primary" isLoading={isPending} onClick={save} />
-        <Button label="Cancel" variant="ghost" href={appId ? appRoute(appId) : ROUTES.apps} />
+        <Button label="Save changes" variant="primary" isLoading={isPending} onClick={save} />
+        <Button label="Cancel" href={appRoute(appId)} />
       </HStack>
     </VStack>
   );

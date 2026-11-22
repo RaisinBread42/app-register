@@ -1,6 +1,6 @@
 import {and, asc, between, eq, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
-import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, type AppKind} from '@/lib/constants';
+import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
 import {apps, people} from '@/lib/db/schema';
@@ -17,8 +17,6 @@ import {
 } from './notice-alerts';
 import {assertActivePeople} from './people';
 import {optionalDate, optionalText} from './validation';
-
-const IN_HOUSE_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
 
 /** Largest value the `cost_cents integer` column holds. */
 const MAX_COST_CENTS = 2_147_483_647;
@@ -245,7 +243,7 @@ export function validateCreateAppInput(input: CreateAppInput) {
   const runtimeLocation = optionalText(input.runtimeLocation, 'runtime location');
   const dataAndKeys = optionalText(input.dataAndKeys, 'data and keys');
   const whatBreaksIfStopped = optionalText(input.whatBreaksIfStopped, 'what breaks if stopped');
-  if (IN_HOUSE_KINDS.includes(kind)) {
+  if (RUNTIME_DETAIL_KINDS.includes(kind)) {
     if (!runtimeLocation || !dataAndKeys || !whatBreaksIfStopped) {
       throw new ValidationError(
         'In-house apps require where it runs, data and keys touched, and what breaks if it stops',

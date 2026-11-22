@@ -9,11 +9,12 @@ import {HStack} from '@astryxdesign/core/HStack';
 import {Table} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
-import {VStack} from '@astryxdesign/core/VStack';
 import type {Person, PersonInput} from '@/lib/ui/api-client';
 import {markPersonActiveAction, markPersonLeftAction, savePersonAction} from '../actions';
 import {EditDialog} from '../_components/EditDialog';
 import {FormError} from '../_components/FormError';
+import {PanelCard} from '../_components/Cards';
+import {PageFrame} from '../_components/PageFrame';
 import {PageHeader} from '../_components/PageHeader';
 import {useAction} from '../_components/use-action';
 import {isoDate} from '../_components/iso-date';
@@ -68,11 +69,11 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
   }
 
   return (
-    <VStack gap={5}>
+    <PageFrame crumbs={[{label: 'People'}]}>
       <PageHeader
         title="People"
-        description="Active people who can own apps. Mark someone as left when they go; their apps keep them until reassigned."
-        actions={<Button label="Add person" variant="primary" onClick={() => openEdit(null)} />}
+        description="Active people who can own applications. Mark someone as left when they go; their applications keep them until reassigned."
+        actions={<Button label="+ Add person" variant="primary" onClick={() => openEdit(null)} />}
       />
       {justLeft && (
         <Banner
@@ -92,11 +93,11 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
         />
       )}
       <FormError error={reactivate.error} />
+      <PanelCard title="Owners and backup owners" subtitle={`${people.length} active ${people.length === 1 ? 'person' : 'people'}`} isFlush>
       <Table
         data={people}
         idKey="id"
         hasHover
-        density="balanced"
         emptyState={<EmptyState title="No people yet" description="Add the people who own and back up your apps." isCompact />}
         columns={[
           {key: 'name', header: 'Name'},
@@ -113,6 +114,7 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
           },
         ]}
       />
+      </PanelCard>
       <EditDialog
         title={editing ? `Edit ${editing.name}` : 'Add person'}
         isOpen={editing !== undefined}
@@ -142,6 +144,6 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
         </Text>
         <DateInput label="Left on" value={isoDate(leftOn)} onChange={(value) => setLeftOn(value ?? '')} isRequired />
       </EditDialog>
-    </VStack>
+    </PageFrame>
   );
 }

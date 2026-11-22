@@ -7,34 +7,60 @@ export const PRODUCT_TAGLINE =
 
 export const ROUTES = {
   home: '/',
-  apps: '/apps',
-  newApp: '/apps/new',
+  applications: '/applications',
+  sources: '/sources',
+  settings: '/settings',
   people: '/people',
+} as const;
+
+/** Paths from the first UI; each page there redirects to its new home. */
+export const LEGACY_ROUTES = {
+  apps: '/apps',
   notices: '/notices',
 } as const;
 
-/** `/apps/:id` and `/apps/:id/edit`; the id is encoded so it can never leave its path segment. */
+/** `/applications/:id` and `/applications/:id/edit`; the id is encoded so it can never leave its path segment. */
 export function appRoute(id: string): string {
-  return `${ROUTES.apps}/${encodeURIComponent(id)}`;
+  return `${ROUTES.applications}/${encodeURIComponent(id)}`;
 }
 export function editAppRoute(id: string): string {
   return `${appRoute(id)}/edit`;
 }
+export function appTabRoute(id: string, tab: AppTab): string {
+  return `${appRoute(id)}?${new URLSearchParams({[UI_QUERY.tab]: tab})}`;
+}
 
-/** Query parameters the UI pages read (the apps list also forwards API_QUERY names). */
+/** Query parameters the UI pages read. */
 export const UI_QUERY = {
   tab: 'tab',
+  /** Search text the topbar hands to the applications list. */
+  search: 'q',
+  /** `?add=1` opens the add-application dialog on the applications list. */
+  add: 'add',
 } as const;
+export const UI_QUERY_ON = '1';
 
-/** Tabs on the app detail page. */
+/** Tabs on the application detail page. */
 export const APP_TAB = {
   overview: 'overview',
   dependencies: 'dependencies',
   hosting: 'hosting',
-  alerts: 'alerts',
+  licence: 'licence',
 } as const;
 export const APP_TABS = Object.values(APP_TAB);
 export type AppTab = (typeof APP_TABS)[number];
+
+/** Sort orders of the applications list (sorted in the browser over the loaded apps). */
+export const APP_LIST_SORT = {
+  health: 'health',
+  name: 'name',
+  renewal: 'renewal',
+} as const;
+export const APP_LIST_SORTS = Object.values(APP_LIST_SORT);
+export type AppListSort = (typeof APP_LIST_SORTS)[number];
+
+/** How many rows the overview's short lists show. */
+export const OVERVIEW_LIST_LIMIT = 5;
 
 /** Environment variables the UI server reads. Never exposed to the browser. */
 export const ENV = {
@@ -87,6 +113,9 @@ export const APP_KINDS = [
 ] as const;
 
 export type AppKind = (typeof APP_KINDS)[number];
+
+/** Kinds that must record where they run, the data and keys they touch, and what breaks if they stop. */
+export const RUNTIME_DETAIL_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
 
 /** The one workspace every request uses until sign-in exists. */
 export const DEFAULT_WORKSPACE_SLUG = 'default';

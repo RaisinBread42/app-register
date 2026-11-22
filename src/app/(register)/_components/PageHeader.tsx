@@ -1,17 +1,15 @@
-'use client';
-
 import {HStack} from '@astryxdesign/core/HStack';
 import {Heading} from '@astryxdesign/core/Heading';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 
-type PageHeaderProps = {title: string; description?: string; actions?: React.ReactNode; back?: React.ReactNode};
+type PageHeaderProps = {title: string; description?: string; actions?: React.ReactNode};
 
-export function PageHeader({title, description, actions, back}: PageHeaderProps) {
+/** The prototype's page heading: title and subtitle on the left, actions on the right. */
+export function PageHeader({title, description, actions}: PageHeaderProps) {
   return (
-    <HStack gap={4} vAlign="end" justify="between" wrap="wrap">
+    <HStack gap={4} vAlign="center" hAlign="between" wrap="wrap">
       <VStack gap={1} hAlign="start">
-        {back}
         <Heading level={1}>{title}</Heading>
         {description && (
           <Text color="secondary" display="block">

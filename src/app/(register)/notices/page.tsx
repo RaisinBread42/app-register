@@ -1,10 +1,7 @@
-import {apiClient} from '@/lib/ui/api-client';
-import {alertListFilter, type SearchParams} from '@/lib/ui/list-filters';
-import {keysFor} from '../_components/idempotency-keys';
-import {NoticesView} from './NoticesView';
+import {redirect} from 'next/navigation';
+import {ROUTES} from '@/lib/constants';
 
-export default async function NoticesPage({searchParams}: {searchParams: Promise<SearchParams>}) {
-  const filter = alertListFilter(await searchParams);
-  const alerts = await apiClient().listAlerts(filter);
-  return <NoticesView alerts={alerts} status={filter.status} keys={keysFor(alerts)} />;
+/** Notices are email-only now; the old page sends people to the overview. */
+export default function LegacyNoticesPage() {
+  redirect(ROUTES.home);
 }

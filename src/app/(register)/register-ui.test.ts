@@ -1,12 +1,12 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {APP_SORT, ENV, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {APP_LIST_SORT, ENV, FILTER_ALL, PERSON_STATUS} from '@/lib/constants';
 import {fetchFromRoutes} from '@/lib/api/test/client';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {createApiKey} from '@/lib/services/api-keys';
 import {ACTION_MESSAGE} from '@/lib/ui/action-result';
 import {createApiClient, type ApiClient} from '@/lib/ui/api-client';
 import {appToForm, emptyAppForm, type AppFormValues} from '@/lib/ui/forms';
-import {appListFilter, alertListFilter} from '@/lib/ui/list-filters';
+import {applyAppListView, appsWithRenewal, upcomingNoticeDeadlines} from '@/lib/ui/register-view';
 import * as actions from './actions';
 
 let t: TestDb;
@@ -66,7 +66,7 @@ describe('App Register UI', () => {
 
   // Acceptance criteria.
 
-  it('AC1: the apps list shows each app with name, kind, owner and notice deadline, filtered and sorted as the page asks', async () => {
+  it('AC1: the applications list shows each app with name, kind, owner and renewal, filtered by type and search and sorted as chosen', async () => {
     const {priya, marcus} = await seedPeople();
     await actions.createAppAction(key(), atlasBoard(priya.id, marcus.id));
     await actions.createAppAction(key(), {
@@ -74,20 +74,37 @@ describe('App Register UI', () => {
       name: 'Badge Printer',
       ownerId: marcus.id,
       backupOwnerId: priya.id,
-      noticeDeadline: '2098-01-15',
+      renewalDate: '2098-01-15',
       runtimeLocation: 'Reception PC, Building 2',
       dataAndKeys: 'Visitor names; printer admin password',
       whatBreaksIfStopped: 'Visitors get handwritten badges',
     });
+    const apps = await api.listApps();
 
-    const filter = appListFilter({sort: APP_SORT.noticeDeadline, kind: 'not-a-kind'});
-    const apps = await api.listApps(filter);
-    expect(apps.map((app) => [app.name, app.kind, app.owner.name, app.noticeDeadline])).toEqual([
+    const bySoonestRenewal = applyAppListView(apps, {query: '', kind: FILTER_ALL, sort: APP_LIST_SORT.renewal});
+    expect(bySoonestRenewal.map((app) => [app.name, app.kind, app.owner.name, app.renewalDate])).toEqual([
       ['Badge Printer', 'in_house', 'Marcus Okonkwo', '2098-01-15'],
-      ['Atlas Board', 'saas', 'Priya Chen', '2099-03-31'],
+      ['Atlas Board', 'saas', 'Priya Chen', '2099-06-30'],
     ]);
-    expect((await api.listApps(appListFilter({kind: 'saas'}))).map((app) => app.name)).toEqual(['Atlas Board']);
-    expect(await api.listApps(appListFilter({noticeDeadlineWithinDays: '30'}))).toEqual([]);
+    const saasOnly = applyAppListView(apps, {query: '', kind: 'saas', sort: APP_LIST_SORT.name});
+    expect(saasOnly.map((app) => app.name)).toEqual(['Atlas Board']);
+    const searched = applyAppListView(apps, {query: '  printer ', kind: FILTER_ALL, sort: APP_LIST_SORT.name});
+    expect(searched.map((app) => app.name)).toEqual(['Badge Printer']);
+  });
+
+  it('the overview lists renewals and upcoming notice deadlines from real app dates, soonest first, leaving out deadlines already passed', async () => {
+    const {priya, marcus} = await seedPeople();
+    await actions.createAppAction(key(), atlasBoard(priya.id, marcus.id));
+    await actions.createAppAction(key(), {...atlasBoard(marcus.id, priya.id), name: 'Slate Chat', noticeDeadline: '2098-11-30', renewalDate: '2098-12-31'});
+    await actions.createAppAction(key(), {...atlasBoard(marcus.id, priya.id), name: 'No Dates', noticeDeadline: '', renewalDate: ''});
+    const apps = await api.listApps();
+
+    expect(appsWithRenewal(apps).map((app) => app.name)).toEqual(['Slate Chat', 'Atlas Board']);
+    expect(upcomingNoticeDeadlines(apps, '2098-11-30').map((app) => [app.name, app.noticeDeadline])).toEqual([
+      ['Slate Chat', '2098-11-30'],
+      ['Atlas Board', '2099-03-31'],
+    ]);
+    expect(upcomingNoticeDeadlines(apps, '2098-12-01').map((app) => app.name)).toEqual(['Atlas Board']);
   });
 
   it('AC2: saving the add-app form twice with the same idempotency key creates one app', async () => {
@@ -174,18 +191,6 @@ describe('App Register UI', () => {
     expect(await actions.removeHostingAction(appId, hosting.id)).toEqual({ok: true});
     const after = await api.getApp(appId);
     expect([after.dependencies, after.hosting]).toEqual([[], []]);
-  });
-
-  it('AC6: acknowledging an alert moves it from scheduled to acknowledged in the notices feed', async () => {
-    const {appId} = await seedApp();
-    const scheduled = await api.listAlerts(alertListFilter({status: NOTICE_ALERT_STATUS.scheduled}));
-    expect(scheduled.map((alert) => alert.offsetDays)).toEqual([90, 60, 30]);
-
-    expect(await actions.acknowledgeAlertAction(key(), scheduled[0].id)).toEqual({ok: true});
-
-    const acknowledged = await api.listAlerts(alertListFilter({status: NOTICE_ALERT_STATUS.acknowledged}));
-    expect(acknowledged.map((alert) => [alert.appId, alert.offsetDays])).toEqual([[appId, 90]]);
-    expect(await api.listAlerts(alertListFilter({status: NOTICE_ALERT_STATUS.scheduled}))).toHaveLength(2);
   });
 
   it('AC7: archiving an app removes it from the apps list but keeps its page', async () => {

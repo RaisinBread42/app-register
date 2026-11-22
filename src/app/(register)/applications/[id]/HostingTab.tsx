@@ -7,13 +7,14 @@ import {DateInput} from '@astryxdesign/core/DateInput';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Table} from '@astryxdesign/core/Table';
-import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import type {AppDetail, Hosting} from '@/lib/ui/api-client';
-import {orDash} from '@/lib/ui/copy';
+import {NOT_SET, orDash} from '@/lib/ui/copy';
+import {formatDate} from '@/lib/ui/register-view';
 import {hostingToForm, type HostingFormValues} from '@/lib/ui/forms';
 import {removeHostingAction, saveHostingAction} from '../../actions';
+import {FootNote, PanelCard} from '../../_components/Cards';
 import {EditDialog} from '../../_components/EditDialog';
 import {FormError} from '../../_components/FormError';
 import {useAction} from '../../_components/use-action';
@@ -57,24 +58,24 @@ export function HostingTab({app, addKey, editKeys, isReadOnly}: Props) {
   }
 
   return (
-    <VStack gap={4}>
-      <HStack gap={3} justify="between" vAlign="center">
-        <Text color="secondary">Where this app runs: provider, service, region and support dates.</Text>
-        {!isReadOnly && <Button label="Add hosting" variant="secondary" onClick={() => open(null)} />}
-      </HStack>
+    <PanelCard
+      title="Hosting & infrastructure"
+      subtitle="Providers, services, regions and relevant platform notices"
+      action={!isReadOnly && <Button label="Add hosting" size="sm" onClick={() => open(null)} />}
+      >
+      <VStack gap={3}>
       <FormError error={remove.error} />
       <Table
         data={app.hosting}
         idKey="id"
         hasHover
-        density="balanced"
-        emptyState={<EmptyState title="No hosting recorded" isCompact />}
+        emptyState={<EmptyState title="No hosting recorded" description="Add where this application runs: provider, service and region." isCompact />}
         columns={[
           {key: 'provider', header: 'Provider'},
           {key: 'service', header: 'Service'},
           {key: 'region', header: 'Region', renderCell: (h: Hosting) => orDash(h.region)},
           {key: 'version', header: 'Version', renderCell: (h: Hosting) => orDash(h.version)},
-          {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => orDash(h.endOfSupportOn)},
+          {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => (h.endOfSupportOn ? formatDate(h.endOfSupportOn) : NOT_SET)},
           {
             key: 'actions',
             header: '',
@@ -88,6 +89,8 @@ export function HostingTab({app, addKey, editKeys, isReadOnly}: Props) {
           },
         ]}
       />
+      <FootNote>Hosting is recorded by hand; provider status checks are coming soon.</FootNote>
+      </VStack>
       <EditDialog
         title={editing ? `Edit ${editing.provider} ${editing.service}` : 'Add hosting'}
         isOpen={editing !== undefined}
@@ -112,6 +115,6 @@ export function HostingTab({app, addKey, editKeys, isReadOnly}: Props) {
         />
       </EditDialog>
       {confirm.element}
-    </VStack>
+    </PanelCard>
   );
 }

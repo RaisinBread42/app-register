@@ -46,4 +46,24 @@ describe('UI boundaries', () => {
       }
     }
   });
+
+  it('screens with no API yet (sources, settings) render placeholders without calling the API or any server action', () => {
+    const placeholderScreens = uiFiles.filter(({file}) => /^app\/\(register\)\/(sources|settings)\//.test(file));
+    expect(placeholderScreens.map(({file}) => path.basename(file)).sort()).toEqual([
+      'SettingsView.tsx',
+      'SourcesView.tsx',
+      'page.tsx',
+      'page.tsx',
+    ]);
+    for (const {file, text} of placeholderScreens) {
+      expect(text, file).not.toMatch(/api-client|actions['"]|fetch\(/);
+    }
+  });
+
+  it('the notices screens are gone from the UI: no route renders them and the sidebar does not link to them', () => {
+    const noticeScreens = uiFiles.filter(({file}) => /^app\/\(register\)\/notices\//.test(file));
+    expect(noticeScreens.map(({text}) => /redirect\(ROUTES\.home\)/.test(text))).toEqual([true]);
+    const shell = uiFiles.find(({file}) => file.endsWith('RegisterShell.tsx'));
+    expect(shell?.text).not.toMatch(/notice/i);
+  });
 });

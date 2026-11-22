@@ -1,43 +1,26 @@
-import {
-  API_QUERY,
-  APP_KINDS,
-  APP_SORTS,
-  APP_TAB,
-  APP_TABS,
-  NOTICE_ALERT_STATUSES,
-  NOTICE_WINDOW_MAX_DAYS,
-  type AppSort,
-  type AppTab,
-} from '@/lib/constants';
-import type {AlertListFilter, AppListFilter} from './api-client';
+import { APP_TAB, APP_TABS, type AppTab } from "@/lib/constants";
 
 /** A page's `searchParams`, as Next.js hands them over. */
 export type SearchParams = Record<string, string | string[] | undefined>;
 
-const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+const first = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
 
-function oneOf<T extends string>(allowed: readonly T[], value: string | undefined): T | undefined {
-  return (allowed as readonly string[]).includes(value ?? '') ? (value as T) : undefined;
+function oneOf<T extends string>(
+  allowed: readonly T[],
+  value: string | undefined,
+): T | undefined {
+  return (allowed as readonly string[]).includes(value ?? "")
+    ? (value as T)
+    : undefined;
 }
 
-/** `/apps?kind=&sort=&noticeDeadlineWithinDays=` → the API filter. Unknown values are dropped. */
-export function appListFilter(params: SearchParams): AppListFilter {
-  const days = first(params[API_QUERY.noticeDeadlineWithinDays]);
-  const within =
-    days && /^\d+$/.test(days) && Number(days) <= NOTICE_WINDOW_MAX_DAYS ? Number(days) : undefined;
-  return {
-    kind: oneOf(APP_KINDS, first(params[API_QUERY.kind])),
-    sort: oneOf<AppSort>(APP_SORTS, first(params[API_QUERY.sort])),
-    noticeDeadlineWithinDays: within,
-  };
-}
-
-/** `/notices?status=` → the API filter. */
-export function alertListFilter(params: SearchParams): AlertListFilter {
-  return {status: oneOf(NOTICE_ALERT_STATUSES, first(params[API_QUERY.status]))};
-}
-
-/** `/apps/:id?tab=` → the tab to open first. */
+/** `/applications/:id?tab=` → the tab to open first; anything unknown opens the overview. */
 export function appTab(value: string | string[] | undefined): AppTab {
   return oneOf(APP_TABS, first(value)) ?? APP_TAB.overview;
+}
+
+/** One text query parameter, or an empty string. */
+export function textParam(params: SearchParams, name: string): string {
+  return first(params[name]) ?? "";
 }

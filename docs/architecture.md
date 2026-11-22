@@ -12,13 +12,13 @@ JSON API: route handlers in `src/app/api/` ([api.md](api.md); OpenAPI spec in `s
 
 UI (`src/app/(register)/`): server components load data and server actions submit it, both through `src/lib/ui/api-client.ts`, which calls `${APP_URL}/api/*` over HTTP with `APP_REGISTER_API_KEY`. Client components never call the API and never see the key. Each POST/PATCH sends an `Idempotency-Key` that the page rendered for that user action, so a double-click or retry of one Save is one write. `src/proxy.ts` puts every non-API route behind HTTP Basic auth with `UI_PASSWORD` (fails closed when unset); `/api/*` keeps its bearer keys.
 
-UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, edited with the theme editor in `themes/obsidian/`). Business rules live in services, not in React components.
+UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, edited with the theme editor in `themes/obsidian/`). Screens mirror `docs/design/app-register-prototype.html`; parts with no API yet (health scores, status checks, sources) show a muted coming-soon state, never made-up numbers. Business rules live in services, not in React components.
 
 ## Where each kind of code lives
 
 | Kind | Folder | Example to copy |
 | --- | --- | --- |
-| Page / route | `src/app/(register)/<route>/page.tsx` (server: loads via the API client) + a client view beside it | `src/app/(register)/apps/page.tsx` |
+| Page / route | `src/app/(register)/<route>/page.tsx` (server: loads via the API client) + a client view beside it | `src/app/(register)/applications/page.tsx` |
 | UI server action | `src/app/(register)/actions.ts` | `createAppAction` |
 | UI → API client | `src/lib/ui/api-client.ts` (types mirror the OpenAPI schemas) | same |
 | Astryx providers | `src/app/providers.tsx` | same |

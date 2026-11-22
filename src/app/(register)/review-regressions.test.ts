@@ -1,10 +1,9 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {ENV} from '@/lib/constants';
+import {APP_TAB, ENV} from '@/lib/constants';
 import {fetchFromRoutes} from '@/lib/api/test/client';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {createApiKey} from '@/lib/services/api-keys';
-import {createApiClient} from '@/lib/ui/api-client';
-import {appListFilter} from '@/lib/ui/list-filters';
+import {appTab} from '@/lib/ui/list-filters';
 import type {DependencyFormValues} from '@/lib/ui/forms';
 import * as actions from './actions';
 
@@ -30,10 +29,11 @@ describe('adversarial: UI', () => {
     vi.unstubAllGlobals();
   });
 
-  it('an out-of-range deadline window in the URL is dropped, not forwarded to the API (which 400s and breaks the page)', async () => {
-    const filter = appListFilter({noticeDeadlineWithinDays: '99999999'});
-    const api = createApiClient({baseUrl: 'http://register.test', apiKey: process.env[ENV.apiKey]!, fetch: fetchFromRoutes});
-    await expect(api.listApps(filter)).resolves.toBeDefined();
+  it('a forged or old tab in the URL opens the overview tab instead of an empty page', () => {
+    expect(appTab(['licence', 'overview'])).toBe(APP_TAB.licence);
+    expect(appTab('alerts')).toBe(APP_TAB.overview);
+    expect(appTab('../../people')).toBe(APP_TAB.overview);
+    expect(appTab(undefined)).toBe(APP_TAB.overview);
   });
 
   it('a forged saveDependencyAction call gets an ActionResult, not an unhandled exception', async () => {

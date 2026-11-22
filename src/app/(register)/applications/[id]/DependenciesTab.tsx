@@ -2,17 +2,18 @@
 
 import {useState} from 'react';
 import {useImperativeAlertDialog} from '@astryxdesign/core/AlertDialog';
+import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Table} from '@astryxdesign/core/Table';
-import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import type {AppDetail, Dependency} from '@/lib/ui/api-client';
 import {NOT_SET, orDash} from '@/lib/ui/copy';
 import {dependencyToForm, type DependencyFormValues} from '@/lib/ui/forms';
 import {removeDependencyAction, saveDependencyAction} from '../../actions';
+import {FootNote, PanelCard} from '../../_components/Cards';
 import {EditDialog} from '../../_components/EditDialog';
 import {FormError} from '../../_components/FormError';
 import {useAction} from '../../_components/use-action';
@@ -54,28 +55,37 @@ export function DependenciesTab({app, addKey, editKeys, isReadOnly}: Props) {
   }
 
   return (
-    <VStack gap={4}>
-      <HStack gap={3} justify="between" vAlign="center">
-        <Text color="secondary">Packages and libraries this app is built on, recorded by hand.</Text>
-        {!isReadOnly && <Button label="Add dependency" variant="secondary" onClick={() => open(null)} />}
-      </HStack>
+    <PanelCard
+      title="Dependencies"
+      subtitle="Frameworks, packages, versions, security advisories and end-of-life notices"
+      action={!isReadOnly && <Button label="Add dependency" size="sm" onClick={() => open(null)} />}
+      >
+      <VStack gap={3}>
       <FormError error={remove.error} />
       <Table
         data={app.dependencies}
         idKey="id"
         hasHover
-        density="balanced"
-        emptyState={<EmptyState title="No dependencies recorded" isCompact />}
+        emptyState={<EmptyState title="No dependencies recorded" description="Add the frameworks and packages this application is built on." isCompact />}
         columns={[
-          {key: 'name', header: 'Package'},
-          {key: 'currentVersion', header: 'Current'},
-          {key: 'latestVersion', header: 'Latest', renderCell: (d: Dependency) => orDash(d.latestVersion)},
+          {key: 'name', header: 'Dependency'},
+          {key: 'currentVersion', header: 'Tracked version'},
+          {key: 'latestVersion', header: 'Latest available', renderCell: (d: Dependency) => orDash(d.latestVersion)},
           {
             key: 'vulnerabilities',
-            header: 'Known advisories',
-            renderCell: (d: Dependency) => (d.vulnerabilities.length ? d.vulnerabilities.join(', ') : NOT_SET),
+            header: 'Advisories',
+            renderCell: (d: Dependency) =>
+              d.vulnerabilities.length ? (
+                <HStack gap={1} wrap="wrap">
+                  {d.vulnerabilities.map((id) => (
+                    <Badge key={id} label={id} variant="red" />
+                  ))}
+                </HStack>
+              ) : (
+                NOT_SET
+              ),
           },
-          {key: 'recommendedAction', header: 'Action', renderCell: (d: Dependency) => orDash(d.recommendedAction)},
+          {key: 'recommendedAction', header: 'Recommended action', renderCell: (d: Dependency) => orDash(d.recommendedAction)},
           {
             key: 'actions',
             header: '',
@@ -89,6 +99,8 @@ export function DependenciesTab({app, addKey, editKeys, isReadOnly}: Props) {
           },
         ]}
       />
+      <FootNote>Versions and advisories are recorded by hand; registry checks are coming soon.</FootNote>
+      </VStack>
       <EditDialog
         title={editing ? `Edit ${editing.name}` : 'Add dependency'}
         isOpen={editing !== undefined}
@@ -111,6 +123,6 @@ export function DependenciesTab({app, addKey, editKeys, isReadOnly}: Props) {
         <TextInput label="Recommended action" value={values.recommendedAction} onChange={set('recommendedAction')} isOptional />
       </EditDialog>
       {confirm.element}
-    </VStack>
+    </PanelCard>
   );
 }
