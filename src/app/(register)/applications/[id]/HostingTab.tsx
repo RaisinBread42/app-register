@@ -311,7 +311,7 @@ function HostingDialog({editing, catalog, values, onChange, onClose, onSave, isS
         />
       )}
       <HStack gap={3} vAlign="start">
-        <TextInput label="Region" value={values.region} onChange={set('region')} placeholder="e.g. centralus" isOptional />
+        <TextInput label="Region" value={values.region} onChange={set('region')} placeholder="e.g. centralus" width="100%" isOptional />
         {(isFreeText || service?.hasVersion) && (
           <TextInput
             label="Version"
@@ -319,6 +319,7 @@ function HostingDialog({editing, catalog, values, onChange, onClose, onSave, isS
             value={values.version}
             onChange={set('version')}
             placeholder="e.g. 16"
+            width="100%"
             isOptional
           />
         )}
@@ -336,7 +337,7 @@ function HostingDialog({editing, catalog, values, onChange, onClose, onSave, isS
             width="100%"
             isOptional
           />
-          <TextInput label="Runtime version" value={values.runtimeVersion} onChange={set('runtimeVersion')} placeholder="e.g. 22" isOptional />
+          <TextInput label="Runtime version" value={values.runtimeVersion} onChange={set('runtimeVersion')} placeholder="e.g. 22" width="100%" isOptional />
         </HStack>
       )}
       <DateInput
