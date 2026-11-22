@@ -6,7 +6,7 @@ Variable **names** only, never values.
 | --- | --- | --- |
 | URL | TBD (preview / single VM) | TBD |
 | Hosting | Single Node process (Next.js) | Same shape; human-promoted |
-| Auth | API: bearer API keys (hashed in `api_keys`, one workspace per key). User sign-in TBD | Same |
+| Auth | API: bearer API keys (hashed in `api_keys`, one workspace per key). UI: one shared password over HTTP Basic auth (`UI_PASSWORD`) until user sign-in | Same |
 | Database | Postgres 18 via `DATABASE_URL` | Postgres 18 via `DATABASE_URL` |
 | Other services | Email sink / provider via `EMAIL_*` | Real email provider |
 | Who deploys | Agent may deploy via CI to UAT | Human only |
@@ -18,7 +18,9 @@ Variable **names** only, never values.
 | `DATABASE_URL` | Postgres connection URL (`postgres://user:password@host:5432/db`) | Host env / secrets; local value in `.env.example` matches `docker-compose.yml` |
 | `EMAIL_FROM` | From-address for notice alerts | Host env / secrets |
 | `EMAIL_PROVIDER` | `sink` (tests) or provider id | Host env |
-| `APP_URL` | Public base URL for links in email | Host env |
+| `APP_URL` | Base URL of this app: links in email, and the address the UI server calls for `/api/*` | Host env |
+| `APP_REGISTER_API_KEY` | Bearer key the UI server sends to the JSON API. Server side only, never `NEXT_PUBLIC_*`. Create it with `npm run api-key:create -- "UI"` | Host secrets |
+| `UI_PASSWORD` | Shared password for every UI page (HTTP Basic auth; any username). Unset means the UI answers 503 to everyone. `/api/*` is not behind it | Host secrets |
 
 Copy names into `.env.example` when the skeleton lands. Never commit `.env` files.
 
