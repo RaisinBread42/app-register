@@ -1,17 +1,12 @@
-import {errorResponse, ok} from '@/lib/api/http';
-import {getDb} from '@/lib/db/client';
+import {handle, ok} from '@/lib/api/http';
 import {acknowledgeAlert} from '@/lib/services/notice-alerts';
-import {getCurrentWorkspaceId} from '@/lib/services/workspaces';
 
 type Context = {params: Promise<{id: string}>};
 
-/** POST /api/notice-alerts/:id/acknowledge → `{ alert: NoticeAlertView }` */
-export async function POST(_request: Request, {params}: Context): Promise<Response> {
-  try {
-    const db = getDb();
-    const alert = await acknowledgeAlert(db, await getCurrentWorkspaceId(db), (await params).id);
-    return ok({alert});
-  } catch (error) {
-    return errorResponse(error);
-  }
+/** POST /api/notice-alerts/:id/acknowledge → `{ alert: NoticeAlert }` (never changes the app) */
+export async function POST(request: Request, {params}: Context): Promise<Response> {
+  const {id} = await params;
+  return handle(request, async ({db, workspaceId}) =>
+    ok({alert: await acknowledgeAlert(db, workspaceId, id)}),
+  );
 }

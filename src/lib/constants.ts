@@ -73,3 +73,21 @@ export const API_QUERY = {
 export const PG_ERROR_CODE = {
   uniqueViolation: '23505',
 } as const;
+
+/** HTTP headers the API reads. */
+export const API_HEADER = {
+  authorization: 'authorization',
+  idempotencyKey: 'idempotency-key',
+} as const;
+
+export const BEARER_PREFIX = 'Bearer ';
+
+/** Every API key starts with this, so a leaked one is easy to spot in code or logs. */
+export const API_KEY_PREFIX = 'ar_';
+
+/** How long a stored Idempotency-Key replays its first response. */
+export const IDEMPOTENCY_KEY_TTL_HOURS = 24;
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+
+/** Methods that must send an Idempotency-Key. */
+export const IDEMPOTENT_METHODS = ['POST', 'PATCH'] as const;

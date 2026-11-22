@@ -16,6 +16,22 @@ export class NotFoundError extends Error {
   }
 }
 
+/** An Idempotency-Key reused for a different request: the API answers 422. */
+export class IdempotencyConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+/** No valid bearer API key: the API answers 401. */
+export class UnauthorizedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}
+
 export function isUniqueViolation(error: unknown): boolean {
   return errorCode(error) === PG_ERROR_CODE.uniqueViolation;
 }

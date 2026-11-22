@@ -13,11 +13,6 @@ export async function ensureDefaultWorkspace(db: AppDatabase): Promise<string> {
   return (await findDefaultWorkspaceId(db)) as string;
 }
 
-/** The workspace a request acts on. Until sign-in exists this is always the default one. */
-export async function getCurrentWorkspaceId(db: AppDatabase): Promise<string> {
-  return (await findDefaultWorkspaceId(db)) ?? ensureDefaultWorkspace(db);
-}
-
 async function findDefaultWorkspaceId(db: AppDatabase): Promise<string | undefined> {
   const [row] = await db
     .select({id: workspaces.id})

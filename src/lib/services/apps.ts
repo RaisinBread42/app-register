@@ -1,11 +1,14 @@
-import {and, asc, between, eq, isNull, sql, type SQL} from 'drizzle-orm';
+import {and, asc, between, eq, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
 import {APP_KINDS, APP_SORT, APP_SORTS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
 import {apps, people} from '@/lib/db/schema';
-import {addDaysIso, isIsoDateOnly, todayIso} from '@/lib/notice-alerts';
+import {addDaysIso, todayIso} from '@/lib/notice-alerts';
+import {activeAppsIn} from './app-scope';
+import {listDependencies, type DependencyView} from './dependencies';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
+import {listHosting, type HostingView} from './hosting';
 import {
   listAlertsForApp,
   removeScheduledAlerts,
@@ -13,6 +16,7 @@ import {
   type NoticeAlertView,
 } from './notice-alerts';
 import {assertActivePeople} from './people';
+import {optionalDate, optionalText} from './validation';
 
 const IN_HOUSE_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
 
@@ -59,15 +63,14 @@ export type AppView = Omit<ValidAppInput, 'ownerId' | 'backupOwnerId'> & {
   updatedAt: Date;
 };
 
-export type AppDetailView = AppView & {alerts: NoticeAlertView[]};
+export type AppDetailView = AppView & {
+  alerts: NoticeAlertView[];
+  dependencies: DependencyView[];
+  hosting: HostingView[];
+};
 
 const owner = alias(people, 'owner');
 const backupOwner = alias(people, 'backup_owner');
-
-/** The one "active apps" filter every query shares. */
-function activeAppsIn(workspaceId: string): SQL {
-  return and(eq(apps.workspaceId, workspaceId), isNull(apps.archivedAt)) as SQL;
-}
 
 export async function createApp(
   db: AppDatabase,
@@ -130,7 +133,7 @@ export async function listActiveApps(
   return rows.map(toAppView);
 }
 
-/** One app (archived ones too, as history) with its alerts. 404 outside the workspace. */
+/** One app (archived ones too, as history) with its alerts, dependencies and hosting. 404 outside the workspace. */
 export async function getApp(
   db: AppDatabase,
   workspaceId: string,
@@ -142,7 +145,12 @@ export async function getApp(
   if (!row) {
     throw new NotFoundError('App not found');
   }
-  return {...toAppView(row), alerts: await listAlertsForApp(db, workspaceId, id)};
+  return {
+    ...toAppView(row),
+    alerts: await listAlertsForApp(db, workspaceId, id),
+    dependencies: await listDependencies(db, workspaceId, id),
+    hosting: await listHosting(db, workspaceId, id),
+  };
 }
 
 /**
@@ -321,25 +329,6 @@ async function withNameCheck(write: () => Promise<void>): Promise<void> {
 
 function isAppKind(value: unknown): value is AppKind {
   return (APP_KINDS as readonly unknown[]).includes(value);
-}
-
-function optionalText(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== 'string') {
-    throw new ValidationError(`Invalid ${label}`);
-  }
-  const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
-}
-
-function optionalDate(value: unknown, label: string): string | null {
-  const text = optionalText(value, label);
-  if (text && !isIsoDateOnly(text)) {
-    throw new ValidationError(`Invalid ${label}: ${text}`);
-  }
-  return text;
 }
 
 function optionalCents(value: unknown): number | null {

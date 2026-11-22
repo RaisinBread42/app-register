@@ -1,29 +1,18 @@
-import {errorResponse, ok, readJsonObject} from '@/lib/api/http';
-import {getDb} from '@/lib/db/client';
+import {handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp, updateApp, type UpdateAppInput} from '@/lib/services/apps';
-import {getCurrentWorkspaceId} from '@/lib/services/workspaces';
 
 type Context = {params: Promise<{id: string}>};
 
-/** GET /api/apps/:id → `{ app: AppDetailView }` */
-export async function GET(_request: Request, {params}: Context): Promise<Response> {
-  try {
-    const db = getDb();
-    const app = await getApp(db, await getCurrentWorkspaceId(db), (await params).id);
-    return ok({app});
-  } catch (error) {
-    return errorResponse(error);
-  }
+/** GET /api/apps/:id → `{ app: AppDetail }` */
+export async function GET(request: Request, {params}: Context): Promise<Response> {
+  const {id} = await params;
+  return handle(request, async ({db, workspaceId}) => ok({app: await getApp(db, workspaceId, id)}));
 }
 
-/** PATCH /api/apps/:id → `{ app: AppDetailView }` */
+/** PATCH /api/apps/:id → `{ app: AppDetail }` */
 export async function PATCH(request: Request, {params}: Context): Promise<Response> {
-  try {
-    const db = getDb();
-    const patch = await readJsonObject<UpdateAppInput>(request);
-    const app = await updateApp(db, await getCurrentWorkspaceId(db), (await params).id, patch);
-    return ok({app});
-  } catch (error) {
-    return errorResponse(error);
-  }
+  const {id} = await params;
+  return handle(request, async ({db, workspaceId, body}) =>
+    ok({app: await updateApp(db, workspaceId, id, jsonObject<UpdateAppInput>(body))}),
+  );
 }
