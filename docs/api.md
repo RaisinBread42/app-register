@@ -143,10 +143,20 @@ The check (`src/lib/services/hosting-monitor.ts`) writes, per row:
 
 | Field | Meaning |
 | --- | --- |
-| `endOfSupportOn`, `endOfSupportSource` | The date and who set it. `manual`: sent by a client, never overwritten. `endoflife.date`: looked up from the service's `version` and/or the `runtimeVersion` (the earlier of the two). Send `endOfSupportOn: null` to hand a manual date back to the check. A looked-up date is cleared when the row's provider, service, version or runtime changes. |
+| `endOfSupportOn`, `endOfSupportSource` | The date and who set it. `manual`: sent by a client, never overwritten. `endoflife.date`: looked up from the service's `version` and/or the `runtimeVersion` (the earlier of the two). A looked-up date is cleared when the row's provider, service, version or runtime changes, and only then (see the date rule below). |
 | `incidents[]` | Open provider incidents and announced maintenance that reach the row (at most 20): `title`, `impact` (`major` / `minor` / `maintenance`), `scope` (`service` / `provider`), `url` (or `null`), `startedAt`. |
 | `healthCheckedAt` | When the check last ran for the row as it is now; `null` until then. |
 | `healthError` | Sources that could not be read last time, e.g. `Cloudflare status could not be reached (HTTP 503)`. What the row had from that source is kept. |
+
+**The date rule on `PATCH`** (what the edit form relies on):
+
+| `endOfSupportOn` in the body | A date set by hand (`manual`) | A looked-up date (`endoflife.date`) or none |
+| --- | --- | --- |
+| left out | kept | kept, unless provider, service, version or runtime changed (then cleared and looked up again) |
+| a date | replaced; stays `manual` | becomes `manual`, also when it equals the looked-up date |
+| `null` | handed back to the check: date cleared, row unchecked (`na`) until a check completes | nothing changes |
+
+The edit form leaves the field out unless the user changed it, so saving a row (to fix its region, say) never wipes a looked-up date. On `POST`, a date makes it `manual`; no date (or `null`) leaves it to the check.
 
 Each row also carries two read-only fields worked out when it is read: `isMonitored` (it has an end-of-support date, or its provider's status feed is watched) and its own `status`: `critical` past end of support or in an outage, `attention` for any other finding, `ok` only when the row is monitored and its last check read every source, otherwise `na`. **A row that was never checked, or whose last check failed, is never `ok`**: it is `na`, and `healthError` (or `healthCheckedAt: null`) says why. The Hosting tab shows that reason beside the status.
 
@@ -156,7 +166,7 @@ Which incidents reach a row: the feed names the row's service or region → `sco
 - The check that follows a write holds up its response for at most 15 seconds (the same budget as the dependency check). A row whose sources have not answered by then stays unchecked (status `na`) until the next refresh. It does not run again when a stored response is replayed for an `Idempotency-Key`.
 - One source failing never fails the check or wipes earlier results: it is named in `healthError`, and the date or incidents the row already had from it are kept.
 - An answer is only stored while the row still has the provider, service, region, version, runtime and end-of-support date that were checked, and while its app is still active. An edit made while the sources were being asked wins; the workspace refresh skips an app that is archived while it runs and does not count it.
-- Changing a row's provider, service, region, version or runtime clears its incidents, `healthCheckedAt` and `healthError` (and a looked-up date, unless only the region changed): they were about something else.
+- Changing a row's provider, service, region, version or runtime clears its incidents, `healthCheckedAt` and `healthError` (and a looked-up date, unless only the region changed): they were about something else. Handing a manual date back to the check clears them too, so the row is `na`, never `ok`, until the date has been looked up.
 - Nothing a source says is trusted. An answer over 4 MB, a redirect, or an answer not in the documented shape counts as no answer and never replaces an earlier result. At most 200 incidents are read from a feed (50 from Azure's free-text feed, 2,000 characters of each searched for service and region names) and 500 releases from an endoflife.date document. Titles are cut at 200 characters and control characters removed; an end-of-support date is used only if it is a real calendar date. Stored incidents are read back the same way, so a bad row is skipped rather than failing the page.
 - An incident link is kept only if it is an `https:` URL on the status host the catalog lists for the row's provider (for Statuspage it is built from the incident id on that host). Anything else is dropped and `url` is `null`: the incident still shows, without a link.
 - Only catalog values are sent: the endoflife.date product and the fixed feed URLs, with `User-Agent: app-register`, at most 6 requests at a time with an 8 second timeout. Nothing a person typed (provider, service, version, region) leaves the server.

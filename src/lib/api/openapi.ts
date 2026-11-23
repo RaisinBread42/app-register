@@ -203,8 +203,11 @@ const hostingFields = {
   endOfSupportOn: {
     ...nullable('string', {format: 'date'}),
     description:
-      'Send a date to set it by hand (it is then never overwritten). Send null to let the hosting check ' +
-      'look it up on endoflife.date from the service version or the runtime version.',
+      'Send a date to set it by hand: any date a client sends is kept as `manual` and never overwritten, ' +
+      'also when it equals the date the check had found. On PATCH, leave the field out to keep the date as it is ' +
+      '(looked up or set by hand). Send null to hand a date set by hand back to the hosting check, which looks it up on ' +
+      'endoflife.date from the service version or the runtime version; the row is then unchecked (status na) until ' +
+      'that check completes. null does nothing to a looked-up date.',
   },
 };
 

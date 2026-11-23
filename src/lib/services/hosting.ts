@@ -3,7 +3,6 @@ import {
   END_OF_SUPPORT_SOURCE,
   HOSTING_NAME_MAX_LENGTH,
   HOSTING_VERSION_MAX_LENGTH,
-  type EndOfSupportSource,
   type HealthStatus,
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
@@ -24,7 +23,11 @@ export type HostingInput = {
   /** Language runtime the service runs, e.g. `Node.js` with runtimeVersion `22`. */
   runtime?: string | null;
   runtimeVersion?: string | null;
-  /** A date sent here is kept as typed; leave it null to have the hosting check look it up. */
+  /**
+   * A date sent here is a date set by hand, whatever it is: the hosting check never overwrites it.
+   * On an edit, leave the field out to keep the date as it is, and send null to
+   * hand a date set by hand back to the check. null does nothing to a looked-up date.
+   */
   endOfSupportOn?: string | null;
 };
 
@@ -35,9 +38,10 @@ const IDENTITY_FIELDS = ['provider', 'service', 'version', 'runtime', 'runtimeVe
 export const CHECKED_FIELDS = [...IDENTITY_FIELDS, 'region'] as const;
 
 /**
- * A hosting row the check has not looked at. Every edit that changes one of
- * CHECKED_FIELDS puts the row back here (and forgets its incidents): what the
- * check found was about another service, version or region.
+ * A hosting row the check has not looked at. An edit that changes one of
+ * CHECKED_FIELDS, or hands the date back to the check, puts the row back here
+ * (and forgets its incidents): what the check found was about another service,
+ * version or region, or the date has yet to be looked up.
  */
 const UNCHECKED: Pick<AppHostingRow, 'healthCheckedAt' | 'healthError'> = {
   healthCheckedAt: null,
@@ -110,14 +114,16 @@ export async function updateHosting(
   await assertActiveApp(db, workspaceId, appId);
   const current = await findHosting(db, workspaceId, appId, id);
   const values = validateHosting({...current, ...patch});
-  const isSameThing = CHECKED_FIELDS.every((field) => values[field] === current[field]);
+  const endOfSupport = endOfSupportAfterEdit(current, values, patch.endOfSupportOn !== undefined);
+  const isHandedBack = current.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual && endOfSupport.endOfSupportSource === null;
+  const needsCheck = isHandedBack || CHECKED_FIELDS.some((field) => values[field] !== current[field]);
   await withServiceCheck(() =>
     db.transaction(async (tx) => {
       await tx
         .update(appHosting)
-        .set({...values, ...endOfSupportAfterEdit(current, values), ...(isSameThing ? {} : UNCHECKED)})
+        .set({...values, ...endOfSupport, ...(needsCheck ? UNCHECKED : {})})
         .where(eq(appHosting.id, current.id));
-      if (!isSameThing) {
+      if (needsCheck) {
         await replaceIncidents(tx, current, []);
       }
     }),
@@ -160,25 +166,30 @@ async function findHosting(
   return row;
 }
 
+type EndOfSupport = Pick<AppHostingRow, 'endOfSupportOn' | 'endOfSupportSource' | 'isVersionInexact'>;
+
+const NO_END_OF_SUPPORT: EndOfSupport = {endOfSupportOn: null, endOfSupportSource: null, isVersionInexact: false};
+
 /**
- * A date the edit changes becomes a manual date (or none). A looked-up date
- * stays until the row turns into a different service, version or runtime.
+ * The end-of-support date after an edit.
+ * - A date the client sent is a date set by hand, also when it equals the one looked up.
+ * - null sent for a date set by hand hands it back to the check.
+ * - Otherwise the date is left alone: a date set by hand always stays, and a
+ *   looked-up one stays until the row turns into a different service, version or runtime.
  */
-function endOfSupportAfterEdit(
-  current: AppHostingRow,
-  values: ReturnType<typeof validateHosting>,
-): {endOfSupportOn: string | null; endOfSupportSource: EndOfSupportSource | null} {
-  if (values.endOfSupportOn !== current.endOfSupportOn) {
-    return {
-      endOfSupportOn: values.endOfSupportOn,
-      endOfSupportSource: values.endOfSupportOn ? END_OF_SUPPORT_SOURCE.manual : null,
-    };
+function endOfSupportAfterEdit(current: AppHostingRow, values: ReturnType<typeof validateHosting>, isDateSent: boolean): EndOfSupport {
+  if (isDateSent && values.endOfSupportOn !== null) {
+    return {endOfSupportOn: values.endOfSupportOn, endOfSupportSource: END_OF_SUPPORT_SOURCE.manual, isVersionInexact: false};
+  }
+  const isManual = current.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual;
+  if (isDateSent && isManual) {
+    return NO_END_OF_SUPPORT;
   }
   const isSameThing = IDENTITY_FIELDS.every((field) => values[field] === current[field]);
-  if (isSameThing || current.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual) {
-    return {endOfSupportOn: current.endOfSupportOn, endOfSupportSource: current.endOfSupportSource};
+  if (isManual || isSameThing) {
+    return {endOfSupportOn: current.endOfSupportOn, endOfSupportSource: current.endOfSupportSource, isVersionInexact: current.isVersionInexact};
   }
-  return {endOfSupportOn: null, endOfSupportSource: null};
+  return NO_END_OF_SUPPORT;
 }
 
 function validateHosting(input: HostingInput) {

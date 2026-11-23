@@ -91,9 +91,11 @@ describe('hosting check', () => {
     const [lookedUp] = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText});
     expect(lookedUp).toMatchObject({endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate});
 
-    // Sending the looked-up date back unchanged (an edit form does) does not make it manual.
-    const edited = await updateHosting(t.db, t.workspaceId, appId, database.id, {region: 'centralus', endOfSupportOn: '2026-07-31'});
-    expect(edited.endOfSupportSource).toBe(END_OF_SUPPORT_SOURCE.endOfLifeDate);
+    // An edit that leaves the date out (as the edit form does), or sends null, leaves a looked-up date alone.
+    const edited = await updateHosting(t.db, t.workspaceId, appId, database.id, {region: 'centralus'});
+    expect(edited).toMatchObject({endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate});
+    const nulled = await updateHosting(t.db, t.workspaceId, appId, database.id, {endOfSupportOn: null});
+    expect(nulled).toMatchObject({endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate});
     // A looked-up date does not outlive the version it was for.
     const upgraded = await updateHosting(t.db, t.workspaceId, appId, database.id, {version: '16'});
     expect(upgraded).toMatchObject({endOfSupportOn: null, endOfSupportSource: null});

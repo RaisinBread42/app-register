@@ -124,9 +124,12 @@ export type HostingFormValues = {
   runtimeVersion: string;
   /** Only a date typed by hand; blank lets the hosting check look the date up. */
   endOfSupportOn: string;
+  /** What `endOfSupportOn` held when the form opened, so an untouched date is not sent at all. */
+  endOfSupportOnAtOpen: string;
 };
 
 export function hostingToForm(hosting?: Hosting): HostingFormValues {
+  const endOfSupportOn = hosting?.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual ? (hosting.endOfSupportOn ?? '') : '';
   return {
     provider: hosting?.provider ?? '',
     service: hosting?.service ?? '',
@@ -134,11 +137,18 @@ export function hostingToForm(hosting?: Hosting): HostingFormValues {
     version: hosting?.version ?? '',
     runtime: hosting?.runtime ?? '',
     runtimeVersion: hosting?.runtimeVersion ?? '',
-    endOfSupportOn: hosting?.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual ? (hosting.endOfSupportOn ?? '') : '',
+    endOfSupportOn,
+    endOfSupportOnAtOpen: endOfSupportOn,
   };
 }
 
+/**
+ * The date is only sent when the user changed it: a date typed in becomes a date
+ * set by hand, a date cleared is handed back to the hosting check, and an
+ * untouched field leaves the date (looked up or set by hand) as it is.
+ */
 export function formToHostingInput(values: HostingFormValues): HostingInput {
+  const isDateTouched = values.endOfSupportOn !== values.endOfSupportOnAtOpen;
   return {
     provider: values.provider,
     service: values.service,
@@ -146,6 +156,6 @@ export function formToHostingInput(values: HostingFormValues): HostingInput {
     version: orNull(values.version),
     runtime: orNull(values.runtime),
     runtimeVersion: orNull(values.runtime) ? orNull(values.runtimeVersion) : null,
-    endOfSupportOn: orNull(values.endOfSupportOn),
+    ...(isDateTouched ? {endOfSupportOn: orNull(values.endOfSupportOn)} : {}),
   };
 }

@@ -215,6 +215,7 @@ describe('App Register UI', () => {
       runtime: 'Node.js',
       runtimeVersion: '22',
       endOfSupportOn: '2099-11-30',
+      endOfSupportOnAtOpen: '',
     });
     const [hosting] = (await api.getApp(appId)).hosting;
     await actions.saveHostingAction(key(), appId, hosting.id, {
@@ -224,7 +225,9 @@ describe('App Register UI', () => {
       version: '',
       runtime: '',
       runtimeVersion: '22',
+      // The user cleared the date the form opened with: it goes back to the check.
       endOfSupportOn: '',
+      endOfSupportOnAtOpen: '2099-11-30',
     });
     expect((await api.getApp(appId)).hosting[0]).toMatchObject({region: 'northeurope', runtime: null, runtimeVersion: null, endOfSupportOn: null});
 
@@ -242,7 +245,7 @@ describe('App Register UI', () => {
     expect(endOfSupportNote('2026-11-23', today)?.label).toBe('EOS in 1 day');
     expect(endOfSupportNote('2027-02-21', today)).toBeNull();
 
-    await actions.saveHostingAction(key(), appId, null, {provider: 'Azure', service: 'Storage', region: 'centralus', version: '', runtime: '', runtimeVersion: '', endOfSupportOn: '2027-02-04'});
+    await actions.saveHostingAction(key(), appId, null, {provider: 'Azure', service: 'Storage', region: 'centralus', version: '', runtime: '', runtimeVersion: '', endOfSupportOn: '2027-02-04', endOfSupportOnAtOpen: ''});
     const [stored] = (await api.getApp(appId)).hosting;
     expect(hostingToForm(stored).endOfSupportOn).toBe('2027-02-04');
     const lookedUp: Hosting = {...stored, endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate};
@@ -262,7 +265,7 @@ describe('App Register UI', () => {
 
   it('a hosting row with no status says why beside it: the check failed, it has not been checked yet, or it is not monitored; "Check now" needs no Idempotency-Key', async () => {
     const {appId} = await seedApp();
-    await actions.saveHostingAction(key(), appId, null, {provider: 'Azure', service: 'Storage', region: '', version: '', runtime: '', runtimeVersion: '', endOfSupportOn: ''});
+    await actions.saveHostingAction(key(), appId, null, {provider: 'Azure', service: 'Storage', region: '', version: '', runtime: '', runtimeVersion: '', endOfSupportOn: '', endOfSupportOnAtOpen: ''});
     const [stored] = (await api.getApp(appId)).hosting;
     const unchecked: Hosting = {...stored, status: HEALTH_STATUS.na, healthError: null, healthCheckedAt: null, isMonitored: true};
 

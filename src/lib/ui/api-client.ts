@@ -164,7 +164,8 @@ export type Person = {
 
 export type AppInput = Omit<AppFields, 'kind'> & {kind: string; ownerId: string; backupOwnerId: string};
 export type DependencyInput = DependencyFields;
-export type HostingInput = HostingFields;
+/** `endOfSupportOn` left out keeps the date as it is; null hands a date set by hand back to the hosting check. */
+export type HostingInput = Omit<HostingFields, 'endOfSupportOn'> & {endOfSupportOn?: string | null};
 export type PersonInput = {name: string; email: string};
 export type PersonPatch = Partial<PersonInput> & {status?: PersonStatus; leftOn?: string | null};
 
