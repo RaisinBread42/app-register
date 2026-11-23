@@ -244,16 +244,25 @@ export const DEPENDENCY_SOURCE = {
 export const DEPENDENCY_SOURCES = Object.values(DEPENDENCY_SOURCE);
 export type DependencySource = (typeof DEPENDENCY_SOURCES)[number];
 
+export const BYTES_PER_MB = 1024 * 1024;
+
 /** Largest package.json / package-lock.json the import accepts (5 MB of text). */
-export const DEPENDENCY_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+export const DEPENDENCY_IMPORT_MAX_BYTES = 5 * BYTES_PER_MB;
+
+/** npm's own limit for a package name; also the longest dependency name the register stores. */
+export const DEPENDENCY_NAME_MAX_LENGTH = 214;
+/** Longest version (or range, tag, URL) the register stores; semver's own limit. */
+export const DEPENDENCY_VERSION_MAX_LENGTH = 256;
+/** The range that means "any version"; an empty range in a package.json means the same. */
+export const ANY_VERSION_RANGE = '*';
 
 /** Why the last registry check of a dependency gave no full answer. */
 export const DEPENDENCY_CHECK_ERROR = {
   /** Not on the public npm registry: private, misspelt, or not an npm package. */
   notFound: 'not_found',
-  /** The registry or advisory source did not answer; the previous result is kept. */
+  /** The registry or advisory source did not answer (or answered nonsense); the previous result is kept. */
   unavailable: 'unavailable',
-  /** The tracked version is a range or tag, so advisories cannot be matched to it. */
+  /** The tracked version is a range or tag, so advisories cannot be checked for it. */
   invalidVersion: 'invalid_version',
 } as const;
 export const DEPENDENCY_CHECK_ERRORS = Object.values(DEPENDENCY_CHECK_ERROR);
@@ -308,6 +317,8 @@ export const ADVISORY_POINTS: Record<AdvisorySeverity, number> = {
 /** Points a runtime dependency costs when its tracked version is a major / a minor version behind the latest. */
 export const MAJOR_BEHIND_POINTS = 3;
 export const MINOR_BEHIND_POINTS = 1;
+/** Points a dependency costs when its tracked version is a range or tag: its advisories cannot be checked. */
+export const RANGE_VERSION_POINTS = 1;
 
 export const VERSION_LAG = {
   major: 'major',
@@ -327,3 +338,16 @@ export const MONITORING_TIMEOUT_MS = 8_000;
 export const MONITORING_CONCURRENCY = 6;
 /** OSV accepts up to 1000 queries per batch. */
 export const OSV_BATCH_SIZE = 500;
+/** Most pages of advisory ids followed for one batch (OSV pages long answers with `next_page_token`). */
+export const OSV_MAX_PAGES = 10;
+/** Largest answer read from the registry or OSV; anything longer counts as no answer. */
+export const MONITORING_MAX_RESPONSE_BYTES = BYTES_PER_MB;
+/**
+ * Longest the check that follows a write (import, add, edit) may hold up its response.
+ * Whatever is not checked by then stays unchecked until the next refresh.
+ */
+export const DEPENDENCY_FOLLOW_UP_BUDGET_MS = 15_000;
+/** Limits on what is stored of one advisory; anything longer is cut (or, for an id, dropped). */
+export const ADVISORY_ID_MAX_LENGTH = 100;
+export const ADVISORY_SUMMARY_MAX_LENGTH = 300;
+export const ADVISORY_MAX_ALIASES = 20;
