@@ -1,3 +1,4 @@
+import {RESOURCE_KIND} from '@/lib/constants';
 import {handle, ok} from '@/lib/api/http';
 import {archiveApp, getApp} from '@/lib/services/apps';
 
@@ -8,6 +9,7 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
   const {id} = await params;
   return handle(request, async ({db, workspaceId}) => {
     await archiveApp(db, workspaceId, id);
-    return ok({app: await getApp(db, workspaceId, id)});
+    const app = await getApp(db, workspaceId, id);
+    return ok({app}, {kind: RESOURCE_KIND.app, id: app.id});
   });
 }

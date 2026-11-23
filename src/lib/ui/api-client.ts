@@ -131,6 +131,8 @@ export type HostingIncident = {
 /** What the hosting check stores on a row. */
 type HostingCheckFields = {
   endOfSupportSource: EndOfSupportSource | null;
+  /** The version matched several releases; the date is the earliest among them. */
+  isVersionInexact: boolean;
   incidents: HostingIncident[];
   healthCheckedAt: string | null;
   healthError: string | null;

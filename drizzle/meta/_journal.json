@@ -26,8 +26,22 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1795397082809,
-      "tag": "0003_hosting_health",
+      "when": 1795400007687,
+      "tag": "0003_relational_advisories",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795400610403,
+      "tag": "0004_relational_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795401980030,
+      "tag": "0005_hosting_health",
       "breakpoints": true
     }
   ]

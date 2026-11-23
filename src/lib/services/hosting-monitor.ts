@@ -2,7 +2,7 @@ import {and, eq, inArray, isNull, type SQL} from 'drizzle-orm';
 import type {AnyPgColumn} from 'drizzle-orm/pg-core';
 import {END_OF_SUPPORT_SOURCE, HOSTING_CHECK_ERROR_MAX_LENGTH, MONITORING_FOLLOW_UP_BUDGET_MS} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
-import {appHosting, apps, type AppHostingRow, type HostingIncident} from '@/lib/db/schema';
+import {appHosting, apps} from '@/lib/db/schema';
 import {findProvider, findRuntime, findService, type StatusFeed} from '@/lib/hosting-catalog';
 import {endOfLifeUrl, endOfSupportDate} from '@/lib/monitoring/end-of-life';
 import {cleanText} from '@/lib/monitoring/feed-values';
@@ -10,7 +10,7 @@ import {createFetchText, type FetchText} from '@/lib/monitoring/http';
 import {incidentScope, parseStatusFeed, type FeedIncident} from '@/lib/monitoring/status-feeds';
 import {activeAppsIn, assertActiveApp} from './app-scope';
 import {listHosting, type HostingView} from './hosting';
-import {normaliseIncidents} from './hosting-incidents';
+import {loadHosting, normaliseIncidents, replaceIncidents, type HostingIncident, type HostingRecord} from './hosting-incidents';
 import {mapWithLimit} from './package-sources';
 
 /**
@@ -22,7 +22,8 @@ import {mapWithLimit} from './package-sources';
  * in the row's healthError and what the row already had from it is kept, so
  * one broken feed never fails the run or wipes earlier findings. Nothing is
  * fetched inside a database transaction, and an answer is only stored while the
- * row still is what was checked and its app is still active.
+ * row still is what was checked and its app is still active. A row's incidents
+ * are replaced in the same transaction as that conditional update.
  */
 
 export type RefreshOptions = {
@@ -50,7 +51,7 @@ export async function refreshHostingHealth(
   if (options.only) {
     filters.push(inArray(appHosting.id, options.only));
   }
-  const rows = await db.select().from(appHosting).where(and(...filters));
+  const rows = await loadHosting(db, and(...filters));
   await checkRows(db, workspaceId, rows, options);
   return listHosting(db, workspaceId, appId);
 }
@@ -73,12 +74,8 @@ export async function refreshWorkspaceHostingHealth(
   workspaceId: string,
   options: RefreshOptions = {},
 ): Promise<RefreshSummary> {
-  const found = await db
-    .select({row: appHosting})
-    .from(appHosting)
-    .innerJoin(apps, eq(apps.id, appHosting.appId))
-    .where(activeAppsIn(workspaceId));
-  const {stored, failedSources} = await checkRows(db, workspaceId, found.map(({row}) => row), options);
+  const rows = await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, activeAppIds(db, workspaceId))));
+  const {stored, failedSources} = await checkRows(db, workspaceId, rows, options);
   return {apps: new Set(stored.map((row) => row.appId)).size, hosting: stored.length, failedSources};
 }
 
@@ -93,9 +90,9 @@ type Lookup = {product: string; version: string};
 async function checkRows(
   db: AppDatabase,
   workspaceId: string,
-  rows: AppHostingRow[],
+  rows: HostingRecord[],
   options: RefreshOptions,
-): Promise<{stored: AppHostingRow[]; failedSources: string[]}> {
+): Promise<{stored: HostingRecord[]; failedSources: string[]}> {
   const {fetchText = createFetchText(), now = new Date()} = options;
   const outOfTime = options.budgetMs === undefined ? undefined : AbortSignal.timeout(options.budgetMs);
   const feeds = uniqueByUrl(rows.flatMap(statusFeed));
@@ -105,22 +102,18 @@ async function checkRows(
     feeds.map((feed) => [feed.url, read(answers.get(feed.url), feed.name, (body) => parseStatusFeed(feed, body))]),
   );
 
-  const stored: AppHostingRow[] = [];
+  const stored: HostingRecord[] = [];
   const failed = new Set<string>();
   // Rows whose sources were all asked in time; the rest are left as they were.
   for (const row of rows.filter((row) => sourceUrls(row).every((url) => answers.has(url)))) {
     const errors: string[] = [];
-    const written = await db
-      .update(appHosting)
-      .set({
-        ...endOfSupport(row, answers, errors),
-        incidents: incidents(row, openByFeed, errors),
-        healthCheckedAt: now,
-        healthError: errors.length > 0 ? cleanText(errors.join('; '), HOSTING_CHECK_ERROR_MAX_LENGTH) : null,
-      })
-      .where(and(eq(appHosting.id, row.id), ...stillAsChecked(row), inArray(appHosting.appId, activeAppIds(db, workspaceId))))
-      .returning({id: appHosting.id});
-    if (written.length > 0) {
+    const found = {
+      ...endOfSupport(row, answers, errors),
+      incidents: incidents(row, openByFeed, errors),
+      healthCheckedAt: now,
+      healthError: errors.length > 0 ? cleanText(errors.join('; '), HOSTING_CHECK_ERROR_MAX_LENGTH) : null,
+    };
+    if (await store(db, workspaceId, row, found)) {
       stored.push(row);
       errors.forEach((error) => failed.add(error));
     }
@@ -128,12 +121,40 @@ async function checkRows(
   return {stored, failedSources: [...failed]};
 }
 
+type Found = Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource' | 'healthCheckedAt' | 'healthError'> & {
+  /** Null when the provider's feed could not be read: the incidents the row had are kept. */
+  incidents: HostingIncident[] | null;
+};
+
+/**
+ * Stores what a check found on one row, and its incidents with it, in one
+ * transaction. Answers false, storing nothing, when the row is no longer what
+ * was checked or its app is no longer active.
+ */
+function store(db: AppDatabase, workspaceId: string, row: HostingRecord, found: Found): Promise<boolean> {
+  const {incidents: open, ...columns} = found;
+  return db.transaction(async (tx) => {
+    const written = await tx
+      .update(appHosting)
+      .set(columns)
+      .where(and(eq(appHosting.id, row.id), ...stillAsChecked(row), inArray(appHosting.appId, activeAppIds(tx, workspaceId))))
+      .returning({id: appHosting.id});
+    if (written.length === 0) {
+      return false;
+    }
+    if (open !== null) {
+      await replaceIncidents(tx, row, open);
+    }
+    return true;
+  });
+}
+
 /**
  * True only while the row still has what was checked. An edit made while the
  * sources were being asked wins: the answer was about another service, version,
  * region or (hand-set) date, so it is dropped.
  */
-function stillAsChecked(row: AppHostingRow): SQL[] {
+function stillAsChecked(row: HostingRecord): SQL[] {
   const same = (column: AnyPgColumn, value: string | null) => (value === null ? isNull(column) : eq(column, value));
   return [
     same(appHosting.provider, row.provider),
@@ -193,18 +214,18 @@ function read<T>(answer: Answer | undefined, source: string, parse: (body: strin
   }
 }
 
-function statusFeed(row: AppHostingRow): StatusFeed[] {
+function statusFeed(row: HostingRecord): StatusFeed[] {
   const feed = findProvider(row.provider)?.statusFeed;
   return feed ? [feed] : [];
 }
 
 /** Every URL the check reads for a row. Only catalog values go into them; nothing a person typed leaves the server. */
-function sourceUrls(row: AppHostingRow): string[] {
+function sourceUrls(row: HostingRecord): string[] {
   return [...statusFeed(row).map((feed) => feed.url), ...endOfLifeLookups(row).map(({product}) => endOfLifeUrl(product))];
 }
 
 /** What to ask endoflife.date for a row: its service's version and its runtime's version, when the catalog knows them. */
-function endOfLifeLookups(row: AppHostingRow): Lookup[] {
+function endOfLifeLookups(row: HostingRecord): Lookup[] {
   const lookups: Lookup[] = [];
   const serviceProduct = findService(row.provider, row.service)?.eolProduct;
   if (serviceProduct && row.version) {
@@ -219,10 +240,10 @@ function endOfLifeLookups(row: AppHostingRow): Lookup[] {
 
 /** The earliest end-of-support date found. A manual date, or a lookup that failed, leaves the row as it is. */
 function endOfSupport(
-  row: AppHostingRow,
+  row: HostingRecord,
   answers: Map<string, Answer>,
   errors: string[],
-): Pick<AppHostingRow, 'endOfSupportOn' | 'endOfSupportSource'> {
+): Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource'> {
   const unchanged = {endOfSupportOn: row.endOfSupportOn, endOfSupportSource: row.endOfSupportSource};
   if (row.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual) {
     return unchanged;
@@ -244,12 +265,12 @@ function endOfSupport(
     : {endOfSupportOn: null, endOfSupportSource: null};
 }
 
-/** The open incidents that reach this row; what it had before when its provider's feed could not be read. */
+/** The open incidents that reach this row; null (keep what it had) when its provider's feed could not be read. */
 function incidents(
-  row: AppHostingRow,
+  row: HostingRecord,
   openByFeed: Map<string, Result<FeedIncident[]>>,
   errors: string[],
-): HostingIncident[] {
+): HostingIncident[] | null {
   const [feed] = statusFeed(row);
   if (!feed) {
     return [];
@@ -257,7 +278,7 @@ function incidents(
   const open = openByFeed.get(feed.url);
   if (!open || isFailure(open)) {
     errors.push(open?.error ?? `${feed.name} was not fetched`);
-    return normaliseIncidents(row.incidents, row.provider);
+    return null;
   }
   const target = {components: findService(row.provider, row.service)?.statusComponents, region: row.region};
   const reaching = open.value.flatMap((incident) => {

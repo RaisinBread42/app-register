@@ -1,4 +1,5 @@
 import {
+  ADVISORY_ID_MAX_LENGTH,
   ADVISORY_SEVERITIES,
   BYTES_PER_MB,
   APP_KINDS,
@@ -87,8 +88,9 @@ const idempotencyKey = {
   required: true,
   description:
     `Any unique string (a UUID is ideal), 1–${IDEMPOTENCY_KEY_MAX_LENGTH} characters. ` +
-    `Repeating a request with the same key and the same body replays the first response ` +
-    `for ${IDEMPOTENCY_KEY_TTL_HOURS} hours instead of running it again.`,
+    `Repeating a request with the same key and the same body within ${IDEMPOTENCY_KEY_TTL_HOURS} hours does not run it again: ` +
+    `a replay returns the same status and the resource's current state (404 if it has been deleted since). ` +
+    `An import replays the counts of its first run.`,
   schema: {type: 'string', minLength: 1, maxLength: IDEMPOTENCY_KEY_MAX_LENGTH},
 };
 
@@ -134,7 +136,11 @@ const dependencyFields = {
     description: 'Changing it clears the advisories and check state, which were about the old version',
   },
   latestVersion: nullable('string', {maxLength: DEPENDENCY_VERSION_MAX_LENGTH}),
-  vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
+  vulnerabilities: {
+    type: 'array',
+    items: {...text, maxLength: ADVISORY_ID_MAX_LENGTH},
+    description: 'Advisory ids, e.g. CVE-2026-1234',
+  },
   recommendedAction: nullable('string'),
 };
 
@@ -205,6 +211,12 @@ const hostingFields = {
 /** What the hosting check stores on a row; read-only. */
 const hostingCheckFields = {
   endOfSupportSource: {type: ['string', 'null'], enum: [...END_OF_SUPPORT_SOURCES, null]},
+  isVersionInexact: {
+    type: 'boolean',
+    description:
+      'true when the version or runtime version matched more than one release on endoflife.date (e.g. MySQL "8" is 8.0 and 8.4), ' +
+      'so endOfSupportOn is the earliest date among them. Always false for a date set by hand.',
+  },
   incidents: {
     type: 'array',
     items: ref('HostingIncident'),
@@ -503,7 +515,7 @@ export const openApiSpec = {
           'two entries of one list have the same name after trimming (ignoring case), ' +
           `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
           `The check afterwards takes at most ${MONITORING_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
-          'Replaying a stored response (same Idempotency-Key) does not check again.',
+          'A replay (same Idempotency-Key) does not check again.',
         parameters: [appId, idempotencyKey],
         requestBody: body('PackageFile'),
         responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},

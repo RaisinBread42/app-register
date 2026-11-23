@@ -1,5 +1,5 @@
 {
-  "id": "608592ad-35f4-435c-92ea-8256c8a0cd00",
+  "id": "41bfa055-c7f2-428f-a6e0-29e2106f5566",
   "prevId": "ab31f7c8-8995-40b7-9dd4-78374f94ebd5",
   "version": "7",
   "dialect": "postgresql",
@@ -138,13 +138,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "vulnerabilities": {
-          "name": "vulnerabilities",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
         "recommended_action": {
           "name": "recommended_action",
           "type": "text",
@@ -164,13 +157,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "advisories": {
-          "name": "advisories",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         },
         "checked_at": {
           "name": "checked_at",
@@ -253,7 +239,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "app_dependencies_id_workspace_unique": {
+          "name": "app_dependencies_id_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workspace_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "app_dependencies_source_allowed": {
@@ -313,46 +308,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "runtime": {
-          "name": "runtime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "runtime_version": {
-          "name": "runtime_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "end_of_support_on": {
           "name": "end_of_support_on",
           "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_of_support_source": {
-          "name": "end_of_support_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "incidents": {
-          "name": "incidents",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "health_checked_at": {
-          "name": "health_checked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "health_error": {
-          "name": "health_error",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -416,16 +374,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "app_hosting_end_of_support_source_allowed": {
-          "name": "app_hosting_end_of_support_source_allowed",
-          "value": "\"app_hosting\".\"end_of_support_source\" in ('manual', 'endoflife.date')"
-        },
-        "app_hosting_end_of_support_has_source": {
-          "name": "app_hosting_end_of_support_has_source",
-          "value": "(\"app_hosting\".\"end_of_support_on\" is null) = (\"app_hosting\".\"end_of_support_source\" is null)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.apps": {
@@ -827,6 +776,205 @@
           "value": "\"attachments\".\"size_bytes\" >= 0"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.dependency_advisories": {
+      "name": "dependency_advisories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dependency_id": {
+          "name": "dependency_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "advisory_id": {
+          "name": "advisory_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "severity": {
+          "name": "severity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dependency_advisories_workspace_id_workspaces_id_fk": {
+          "name": "dependency_advisories_workspace_id_workspaces_id_fk",
+          "tableFrom": "dependency_advisories",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "dependency_advisories_dependency_fk": {
+          "name": "dependency_advisories_dependency_fk",
+          "tableFrom": "dependency_advisories",
+          "tableTo": "app_dependencies",
+          "columnsFrom": [
+            "dependency_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dependency_advisories_id_workspace_unique": {
+          "name": "dependency_advisories_id_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "workspace_id"
+          ]
+        },
+        "dependency_advisories_dependency_advisory_source_unique": {
+          "name": "dependency_advisories_dependency_advisory_source_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "dependency_id",
+            "advisory_id",
+            "source"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dependency_advisories_source_allowed": {
+          "name": "dependency_advisories_source_allowed",
+          "value": "\"dependency_advisories\".\"source\" in ('manual', 'osv')"
+        },
+        "dependency_advisories_severity_allowed": {
+          "name": "dependency_advisories_severity_allowed",
+          "value": "\"dependency_advisories\".\"severity\" in ('critical', 'high', 'medium', 'low', 'unknown')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dependency_advisory_aliases": {
+      "name": "dependency_advisory_aliases",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "advisory_row_id": {
+          "name": "advisory_row_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alias": {
+          "name": "alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dependency_advisory_aliases_workspace_id_workspaces_id_fk": {
+          "name": "dependency_advisory_aliases_workspace_id_workspaces_id_fk",
+          "tableFrom": "dependency_advisory_aliases",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "dependency_advisory_aliases_advisory_fk": {
+          "name": "dependency_advisory_aliases_advisory_fk",
+          "tableFrom": "dependency_advisory_aliases",
+          "tableTo": "dependency_advisories",
+          "columnsFrom": [
+            "advisory_row_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dependency_advisory_aliases_pk": {
+          "name": "dependency_advisory_aliases_pk",
+          "columns": [
+            "advisory_row_id",
+            "alias"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.idempotency_keys": {

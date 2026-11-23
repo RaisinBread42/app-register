@@ -3,13 +3,15 @@ import {alias} from 'drizzle-orm/pg-core';
 import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appDependencies, appHosting, apps, people, type AppDependencyRow, type AppHostingRow} from '@/lib/db/schema';
+import {appDependencies, appHosting, apps, people} from '@/lib/db/schema';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
+import {loadDependencies, type DependencyRecord} from './dependency-advisories';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
 import {appHealth, type AppHealth, type HealthFacts} from './health';
 import {listHosting, type HostingView} from './hosting';
+import {loadHosting, type HostingRecord} from './hosting-incidents';
 import {
   listAlertsForApp,
   removeScheduledAlerts,
@@ -140,14 +142,11 @@ async function dependenciesByApp(
   db: AppDatabase,
   workspaceId: string,
   appIds: string[],
-): Promise<Map<string, AppDependencyRow[]>> {
+): Promise<Map<string, DependencyRecord[]>> {
   const rows = appIds.length
-    ? await db
-        .select()
-        .from(appDependencies)
-        .where(and(eq(appDependencies.workspaceId, workspaceId), inArray(appDependencies.appId, appIds)))
+    ? await loadDependencies(db, and(eq(appDependencies.workspaceId, workspaceId), inArray(appDependencies.appId, appIds)))
     : [];
-  const byApp = new Map<string, AppDependencyRow[]>();
+  const byApp = new Map<string, DependencyRecord[]>();
   for (const row of rows) {
     byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row]);
   }
@@ -159,14 +158,11 @@ async function hostingByApp(
   db: AppDatabase,
   workspaceId: string,
   appIds: string[],
-): Promise<Map<string, AppHostingRow[]>> {
+): Promise<Map<string, HostingRecord[]>> {
   const rows = appIds.length
-    ? await db
-        .select()
-        .from(appHosting)
-        .where(and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, appIds)))
+    ? await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, appIds)))
     : [];
-  const byApp = new Map<string, AppHostingRow[]>();
+  const byApp = new Map<string, HostingRecord[]>();
   for (const row of rows) {
     byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row]);
   }

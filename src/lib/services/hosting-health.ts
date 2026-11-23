@@ -7,11 +7,10 @@ import {
   INCIDENT_SCOPE,
   type HealthStatus,
 } from '@/lib/constants';
-import type {AppHostingRow, HostingIncident} from '@/lib/db/schema';
 import {findProvider} from '@/lib/hosting-catalog';
 import {addDaysIso} from '@/lib/notice-alerts';
 import type {Deduction} from './health';
-import {normaliseCheckError, normaliseIncidents} from './hosting-incidents';
+import type {HostingIncident, HostingRecord} from './hosting-incidents';
 
 /**
  * Hosting's share of an app's health: what the last hosting check stored on
@@ -21,7 +20,7 @@ import {normaliseCheckError, normaliseIncidents} from './hosting-incidents';
 
 /** What scoring reads from a hosting row. */
 export type HostingFacts = Pick<
-  AppHostingRow,
+  HostingRecord,
   'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion' | 'endOfSupportOn' | 'incidents' | 'healthCheckedAt' | 'healthError'
 >;
 
@@ -50,7 +49,7 @@ export function hostingDeductions(rows: HostingFacts[], today: string): Deductio
  * monitored, was never checked, or whose last check failed is `na`.
  */
 export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
-  const incidents = storedIncidents(row);
+  const {incidents} = row;
   const [endOfSupport] = endOfSupportDeduction(row, today);
   if (endOfSupport?.points === HOSTING_POINTS.pastEndOfSupport || incidents.some(isOutage)) {
     return HEALTH_STATUS.critical;
@@ -58,7 +57,7 @@ export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
   if (endOfSupport || incidents.length > 0) {
     return HEALTH_STATUS.attention;
   }
-  return isMonitored(row) && row.healthCheckedAt && !normaliseCheckError(row.healthError) ? HEALTH_STATUS.ok : HEALTH_STATUS.na;
+  return isMonitored(row) && row.healthCheckedAt && !row.healthError ? HEALTH_STATUS.ok : HEALTH_STATUS.na;
 }
 
 /** Monitored: the row has an end-of-support date, or its provider's status feed is watched. */
@@ -69,11 +68,6 @@ export function isMonitored(row: HostingFacts): boolean {
 /** Only a major incident the feed ties to the row's own service or region counts as an outage. */
 export function isOutage(incident: HostingIncident): boolean {
   return incident.impact === INCIDENT_IMPACT.major && incident.scope === INCIDENT_SCOPE.service;
-}
-
-/** A row's stored incidents, with whatever is not a usable incident left out rather than failing the read. */
-function storedIncidents(row: HostingFacts): HostingIncident[] {
-  return normaliseIncidents(row.incidents, row.provider);
 }
 
 function endOfSupportDeduction(row: HostingFacts, today: string): Deduction[] {
@@ -94,7 +88,7 @@ function endOfSupportDeduction(row: HostingFacts, today: string): Deduction[] {
 function incidentDeductions(rows: HostingFacts[]): Deduction[] {
   const byIncident = new Map<string, Deduction>();
   for (const row of rows) {
-    for (const incident of storedIncidents(row)) {
+    for (const incident of row.incidents) {
       const key = `${incident.url} ${incident.title}`;
       const points = incidentPoints(incident);
       if (points > (byIncident.get(key)?.points ?? 0)) {

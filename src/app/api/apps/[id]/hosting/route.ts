@@ -1,3 +1,4 @@
+import {RESOURCE_KIND} from '@/lib/constants';
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp} from '@/lib/services/apps';
 import {addHosting, type HostingInput, type HostingView} from '@/lib/services/hosting';
@@ -18,8 +19,10 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
   const {id} = await params;
   return handle(
     request,
-    async ({db, workspaceId, body}) =>
-      created({hosting: await addHosting(db, workspaceId, id, jsonObject<HostingInput>(body))}),
+    async ({db, workspaceId, body}) => {
+      const hosting = await addHosting(db, workspaceId, id, jsonObject<HostingInput>(body));
+      return created({hosting}, {kind: RESOURCE_KIND.hosting, id: hosting.id});
+    },
     {
       afterCommit: ({db, workspaceId}, result) =>
         checkHostingAfterWrite(db, workspaceId, id, [(result.body as {hosting: HostingView}).hosting.id]),

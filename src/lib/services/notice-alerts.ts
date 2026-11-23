@@ -105,7 +105,7 @@ export async function acknowledgeAlert(
   id: string,
   now = new Date(),
 ): Promise<NoticeAlertView> {
-  await findAlert(db, workspaceId, id);
+  await getAlert(db, workspaceId, id);
   // The status condition keeps the first acknowledgement when two arrive at once.
   await db
     .update(noticeAlerts)
@@ -117,10 +117,11 @@ export async function acknowledgeAlert(
         ne(noticeAlerts.status, NOTICE_ALERT_STATUS.acknowledged),
       ),
     );
-  return findAlert(db, workspaceId, id);
+  return getAlert(db, workspaceId, id);
 }
 
-async function findAlert(
+/** One alert. 404 outside the workspace. */
+export async function getAlert(
   db: AppDatabase,
   workspaceId: string,
   id: string,

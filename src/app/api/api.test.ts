@@ -13,6 +13,7 @@ import {
   HOSTING_VERSION_MAX_LENGTH,
   NOTICE_ALERT_STATUS,
   PERSON_STATUS,
+  RESOURCE_KIND,
 } from '@/lib/constants';
 import {callApi, ROUTES, type RequestOptions} from '@/lib/api/test/client';
 import {openApiSpec} from '@/lib/api/openapi';
@@ -147,7 +148,7 @@ describe('JSON API', () => {
     expect((await api('GET', `/api/apps/${app.id}`)).body.app.vendor).toBeNull();
   });
 
-  it('repeating a POST or PATCH with the same Idempotency-Key replays the first response and writes nothing new, even when both arrive at once', async () => {
+  it('repeating a POST or PATCH with the same Idempotency-Key answers as the first did and writes nothing new, even when both arrive at once', async () => {
     const {ada, ben} = await seedApp();
     const save = {name: 'Northwind Mail', kind: 'saas', ownerId: ada.id, backupOwnerId: ben.id, noticeDeadline: '2099-06-30'};
 
@@ -182,6 +183,83 @@ describe('JSON API', () => {
     const elsewhere = await api('PATCH', `/api/people/${first.body.person.id}`, {idempotencyKey: 'add-person', body: {name: 'Fay F.'}});
     expect(elsewhere.status).toBe(422);
     expect((await api('GET', '/api/people')).body.people.map((p: {name: string}) => p.name)).toEqual(['Fay']);
+  });
+
+  it('a replay returns the stored status and the resource\'s current state, rebuilt from relational data', async () => {
+    const add = {idempotencyKey: 'add-fay', body: {name: 'Fay', email: 'fay@example.test'}};
+    const first = await api('POST', '/api/people', add);
+    expect(first.status).toBe(201);
+    const [stored] = await t.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, 'add-fay'));
+    expect(stored).toMatchObject({statusCode: 201, resourceKind: RESOURCE_KIND.person, resourceId: first.body.person.id, countAdded: null});
+    // No copy of the response is kept: the row holds the key, a hash, a status, a kind, an id and counts.
+    expect(JSON.stringify(stored)).not.toContain('fay@example.test');
+
+    const renamed = await api('PATCH', `/api/people/${first.body.person.id}`, {body: {name: 'Fay Farrow'}});
+    const replay = await api('POST', '/api/people', add);
+    expect(replay.status).toBe(201);
+    expect(replay.body).toEqual({person: renamed.body.person});
+    expect((await api('GET', '/api/people')).body.people).toHaveLength(1);
+  });
+
+  it('a replay of each kind of write answers in the same shape as the first response, and 404 once the resource is deleted', async () => {
+    const {app} = await seedApp();
+    const writes: [string, string, unknown][] = [
+      ['PATCH', `/api/apps/${app.id}`, {vendor: 'Contoso'}],
+      ['POST', `/api/apps/${app.id}/hosting`, {provider: 'Azure', service: 'SQL Server', region: 'uksouth'}],
+      ['POST', `/api/notice-alerts/${app.alerts[0].id}/acknowledge`, undefined],
+      ['POST', `/api/apps/${app.id}/archive`, undefined],
+    ];
+    const firsts = [];
+    for (const [method, url, body] of writes) {
+      const first = await api(method, url, {idempotencyKey: url, body});
+      const replay = await api(method, url, {idempotencyKey: url, body});
+      expect(replay.status, url).toBe(first.status);
+      expect(Object.keys(replay.body), url).toEqual(Object.keys(first.body));
+      firsts.push(first);
+    }
+    // The hosting row as it is now (the check that followed the first run has stored its answer on it).
+    const [hosting] = (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting;
+    expect(hosting.id).toBe(firsts[1].body.hosting.id);
+    expect((await api('POST', writes[1][1], {idempotencyKey: writes[1][1], body: writes[1][2]})).body).toEqual({hosting});
+
+    await t.db.execute(sql`delete from app_hosting where id = ${hosting.id}`);
+    expect((await api('POST', writes[1][1], {idempotencyKey: writes[1][1], body: writes[1][2]})).status).toBe(404);
+  });
+
+  it('a replay of a new dependency shows what the check found since, not the unchecked first answer', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+    const add = {idempotencyKey: 'add-quill', body: {name: 'quill-forms', currentVersion: '3.9.0'}};
+    const first = await api('POST', `/api/apps/${app.id}/dependencies`, add);
+    expect(first.body.dependency).toMatchObject({checkedAt: null, advisories: []});
+
+    const replay = await api('POST', `/api/apps/${app.id}/dependencies`, add);
+    expect(replay.status).toBe(201);
+    expect(replay.body.dependency).toMatchObject({id: first.body.dependency.id, latestVersion: '5.0.2', advisories: [{id: 'GHSA-qqqq-1111-aaaa'}]});
+  });
+
+  it('a replay of an import answers with the counts of the first run, stored as four numbers, whatever was imported since', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+    const path = `/api/apps/${app.id}/dependencies/import`;
+    const first = await api('POST', path, {idempotencyKey: 'build-1', body: PACKAGE_JSON});
+    const [stored] = await t.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, 'build-1'));
+    expect(stored).toMatchObject({
+      statusCode: 200,
+      resourceKind: RESOURCE_KIND.dependencyImport,
+      resourceId: app.id,
+      countAdded: 3,
+      countUpdated: 0,
+      countUnchanged: 0,
+      countRemoved: 0,
+    });
+
+    const later = await api('POST', path, {idempotencyKey: 'build-2', body: JSON.stringify({name: 'contoso-portal', dependencies: {'quill-forms': '5.0.2'}})});
+    expect(later.body).toEqual({import: {added: 0, updated: 1, unchanged: 0, removed: 2}});
+    const replay = await api('POST', path, {idempotencyKey: 'build-1', body: PACKAGE_JSON});
+    expect(replay.status).toBe(200);
+    expect(replay.body).toEqual(first.body);
+    expect((await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies).toHaveLength(1);
   });
 
   it('an Idempotency-Key is forgotten after 24 hours', async () => {
@@ -292,7 +370,7 @@ describe('JSON API', () => {
 
   // Hosting follows the same rules as dependencies.
 
-  it('the hosting check after a save runs once the write has committed, never inside its transaction, and not again when the stored response is replayed', async () => {
+  it('the hosting check after a save runs once the write has committed, never inside its transaction, and not again when the request is replayed', async () => {
     const {app} = await seedApp();
     const feeds = stubFeeds();
     let openTransactions = 0;
@@ -320,8 +398,18 @@ describe('JSON API', () => {
     expect(openDuringFetch).toEqual([0, 0]);
     expect(spy).toHaveBeenCalled();
 
+    // A replay answers with the same status and the row as it is now: what the first run's check has found since.
     const replay = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'save-1', body});
-    expect(replay.body).toEqual(first.body);
+    expect(replay.status).toBe(201);
+    expect(replay.body.hosting).toEqual({
+      ...first.body.hosting,
+      endOfSupportOn: '2025-04-30',
+      endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate,
+      status: HEALTH_STATUS.critical,
+      healthCheckedAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    expect(replay.body).toEqual({hosting: (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting[0]});
     expect(feeds.requested.length).toBe(afterFirst);
 
     await api('PATCH', `/api/apps/${app.id}/hosting/${first.body.hosting.id}`, {idempotencyKey: 'edit-1', body: {runtimeVersion: '24'}});
@@ -338,10 +426,13 @@ describe('JSON API', () => {
 
     const saved = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}});
     expect(saved.status).toBe(201);
-    expect((await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}})).body).toEqual(saved.body);
+    const replay = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}});
 
     const {hosting, health} = (await api('GET', `/api/apps/${app.id}`)).body.app;
     expect(hosting).toHaveLength(1);
+    expect(replay.status).toBe(201);
+    expect(replay.body).toEqual({hosting: hosting[0]});
+    expect(hosting[0].id).toBe(saved.body.hosting.id);
     expect(hosting[0]).toMatchObject({status: HEALTH_STATUS.na, healthError: 'Vercel status could not be reached (fetch failed)', incidents: []});
     expect(health).toMatchObject({score: null, status: HEALTH_STATUS.na, dimensions: {hosting: {status: HEALTH_STATUS.na, deductions: []}}});
   });
@@ -386,30 +477,33 @@ describe('JSON API', () => {
     expect((await api('GET', path)).body.hosting).toMatchObject([atLimit]);
   });
 
-  it('a bad hosting row in the database never turns the app list, the app or its hosting into a 500: what is not a usable incident is left out', async () => {
+  it('a bad hosting row in the database never turns the app list, the app or its hosting into a 500: a planted link and a time that is not a time are left out', async () => {
     const {app} = await seedApp();
     stubFeeds();
     const {hosting} = (await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting'}})).body;
     const usable = {title: 'Builds are queued', impact: 'major', scope: 'service', url: 'https://www.vercel-status.com/incidents/abc', startedAt: '2026-11-22T07:10:00.000Z'};
-    const stored = [
-      [usable, null, 7, {title: {$ne: ''}, impact: 'major', scope: 'service'}, {...usable, title: 'Planted link', url: 'https://evil.example/login', startedAt: 'never'}],
-      {incidents: 'many'},
-      'outage',
-      null,
-    ];
+    // What the table's own constraints still let a stray write store: any link, an endless time, an endless check error.
+    await t.db.execute(sql`
+      insert into hosting_incidents (id, workspace_id, hosting_id, title, impact, scope, url, started_at, position) values
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, ${usable.title}, 'major', 'service', ${usable.url}, ${usable.startedAt}, 0),
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, 'Planted link', 'major', 'service', 'https://evil.example/login', 'infinity', 1),
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, 'Script link', 'minor', 'provider', 'javascript:alert(1)', '-infinity', 2)`);
+    await t.db.execute(sql`update app_hosting set health_error = ${'x'.repeat(5_000)} where id = ${hosting.id}`);
 
-    for (const incidents of stored) {
-      await t.db.execute(sql`update app_hosting set incidents = ${JSON.stringify(incidents)}::jsonb, health_error = ${'x'.repeat(5_000)} where id = ${hosting.id}`);
-      expect((await api('GET', '/api/apps')).status).toBe(200);
-      expect((await api('GET', `/api/apps/${app.id}/hosting`)).status).toBe(200);
-      const detail = await api('GET', `/api/apps/${app.id}`);
-      expect(detail.status).toBe(200);
-      expect(detail.body.app.hosting[0].healthError).toHaveLength(HOSTING_CHECK_ERROR_MAX_LENGTH);
-    }
-    await t.db.execute(sql`update app_hosting set incidents = ${JSON.stringify(stored[0])}::jsonb, health_error = null where id = ${hosting.id}`);
+    expect((await api('GET', '/api/apps')).status).toBe(200);
+    expect((await api('GET', `/api/apps/${app.id}/hosting`)).status).toBe(200);
+    const detail = await api('GET', `/api/apps/${app.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.app.hosting[0].healthError).toHaveLength(HOSTING_CHECK_ERROR_MAX_LENGTH);
+
+    await t.db.execute(sql`update app_hosting set health_error = null where id = ${hosting.id}`);
     const {app: read} = (await api('GET', `/api/apps/${app.id}`)).body;
-    expect(read.hosting[0].incidents).toEqual([usable, {...usable, title: 'Planted link', url: null, startedAt: null}]);
-    expect(read.health.dimensions.hosting.deductions.map((deduction: {label: string}) => deduction.label)).toEqual(['Builds are queued', 'Planted link']);
+    expect(read.hosting[0].incidents).toEqual([
+      usable,
+      {...usable, title: 'Planted link', url: null, startedAt: null},
+      {title: 'Script link', impact: 'minor', scope: 'provider', url: null, startedAt: null},
+    ]);
+    expect(read.health.dimensions.hosting.deductions.map((deduction: {label: string}) => deduction.label)).toEqual(['Builds are queued', 'Planted link', 'Script link']);
   });
 
   it('every route is documented in the OpenAPI spec, and nothing in the spec is missing a route', () => {

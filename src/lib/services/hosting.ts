@@ -1,4 +1,4 @@
-import {and, asc, eq} from 'drizzle-orm';
+import {and, eq} from 'drizzle-orm';
 import {
   END_OF_SUPPORT_SOURCE,
   HOSTING_NAME_MAX_LENGTH,
@@ -13,7 +13,7 @@ import {todayIso} from '@/lib/notice-alerts';
 import {assertActiveApp} from './app-scope';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
 import {hostingStatus, isMonitored} from './hosting-health';
-import {normaliseCheckError, normaliseIncidents} from './hosting-incidents';
+import {loadHosting, normaliseCheckError, replaceIncidents, type HostingRecord} from './hosting-incidents';
 import {atMost, optionalDate, optionalText, requiredText} from './validation';
 
 export type HostingInput = {
@@ -36,21 +36,22 @@ export const CHECKED_FIELDS = [...IDENTITY_FIELDS, 'region'] as const;
 
 /**
  * A hosting row the check has not looked at. Every edit that changes one of
- * CHECKED_FIELDS puts the row back here: what the check found was about another
- * service, version or region.
+ * CHECKED_FIELDS puts the row back here (and forgets its incidents): what the
+ * check found was about another service, version or region.
  */
-export const UNCHECKED: Pick<AppHostingRow, 'incidents' | 'healthCheckedAt' | 'healthError'> = {
-  incidents: [],
+const UNCHECKED: Pick<AppHostingRow, 'healthCheckedAt' | 'healthError'> = {
   healthCheckedAt: null,
   healthError: null,
 };
 
-/** JSON shape of one hosting row (a provider service an app runs on) in the API: the row plus its own status. */
-export type HostingView = Omit<AppHostingRow, 'workspaceId'> & {
+/** JSON shape of one hosting row (a provider service an app runs on) in the API: the row, its incidents and its own status. */
+export type HostingView = Omit<HostingRecord, 'workspaceId'> & {
   /** False for a row the check has nothing to look at: no end-of-support date and no watched status feed. */
   isMonitored: boolean;
   status: HealthStatus;
 };
+
+const HOSTING_NOT_FOUND = 'Hosting entry not found';
 
 /** An app's hosting rows (archived apps too, as history), by provider then service. */
 export async function listHosting(
@@ -61,12 +62,19 @@ export async function listHosting(
   if (!isUuid(appId)) {
     return [];
   }
-  const rows = await db
-    .select()
-    .from(appHosting)
-    .where(and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId)))
-    .orderBy(asc(appHosting.provider), asc(appHosting.service));
+  const rows = await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId)));
   return rows.map(toView);
+}
+
+/** One hosting entry, whichever app it is on. 404 outside the workspace. */
+export async function getHosting(db: AppDatabase, workspaceId: string, id: string): Promise<HostingView> {
+  const [row] = isUuid(id)
+    ? await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.id, id)))
+    : [];
+  if (!row) {
+    throw new NotFoundError(HOSTING_NOT_FOUND);
+  }
+  return toView(row);
 }
 
 export async function addHosting(
@@ -88,7 +96,7 @@ export async function addHosting(
         endOfSupportSource: values.endOfSupportOn ? END_OF_SUPPORT_SOURCE.manual : null,
       })
       .returning();
-    return toView(row);
+    return toView({...row, incidents: []});
   });
 }
 
@@ -103,14 +111,18 @@ export async function updateHosting(
   const current = await findHosting(db, workspaceId, appId, id);
   const values = validateHosting({...current, ...patch});
   const isSameThing = CHECKED_FIELDS.every((field) => values[field] === current[field]);
-  return withServiceCheck(async () => {
-    const [row] = await db
-      .update(appHosting)
-      .set({...values, ...endOfSupportAfterEdit(current, values), ...(isSameThing ? {} : UNCHECKED)})
-      .where(eq(appHosting.id, current.id))
-      .returning();
-    return toView(row);
-  });
+  await withServiceCheck(() =>
+    db.transaction(async (tx) => {
+      await tx
+        .update(appHosting)
+        .set({...values, ...endOfSupportAfterEdit(current, values), ...(isSameThing ? {} : UNCHECKED)})
+        .where(eq(appHosting.id, current.id));
+      if (!isSameThing) {
+        await replaceIncidents(tx, current, []);
+      }
+    }),
+  );
+  return getHosting(db, workspaceId, current.id);
 }
 
 export async function removeHosting(
@@ -143,7 +155,7 @@ async function findHosting(
         )
     : [];
   if (!row) {
-    throw new NotFoundError('Hosting entry not found');
+    throw new NotFoundError(HOSTING_NOT_FOUND);
   }
   return row;
 }
@@ -198,8 +210,8 @@ async function withServiceCheck<T>(write: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The row as the API serves it. What the check stored is normalised again here, so a bad stored value never fails a read. */
-function toView(row: AppHostingRow): HostingView {
+/** The row as the API serves it. */
+function toView(row: HostingRecord): HostingView {
   return {
     id: row.id,
     appId: row.appId,
@@ -211,7 +223,8 @@ function toView(row: AppHostingRow): HostingView {
     runtimeVersion: row.runtimeVersion,
     endOfSupportOn: row.endOfSupportOn,
     endOfSupportSource: row.endOfSupportSource,
-    incidents: normaliseIncidents(row.incidents, row.provider),
+    isVersionInexact: row.isVersionInexact,
+    incidents: row.incidents,
     healthCheckedAt: row.healthCheckedAt,
     healthError: normaliseCheckError(row.healthError),
     isMonitored: isMonitored(row),

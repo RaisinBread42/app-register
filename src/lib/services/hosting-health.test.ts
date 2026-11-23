@@ -1,11 +1,10 @@
 import {describe, expect, it} from 'vitest';
 import {HEALTH_DIMENSION, HEALTH_STATUS, HOSTING_MAX_INCIDENTS, INCIDENT_IMPACT, INCIDENT_SCOPE, INCIDENT_TITLE_MAX_LENGTH} from '@/lib/constants';
-import type {HostingIncident} from '@/lib/db/schema';
 import {statusPage} from '@/lib/monitoring/test/feeds';
 import type {DependencyFacts} from './dependency-health';
 import {appHealth} from './health';
 import {hostingDeductions, hostingStatus, type HostingFacts} from './hosting-health';
-import {normaliseIncidents} from './hosting-incidents';
+import {normaliseIncidents, type HostingIncident} from './hosting-incidents';
 
 const TODAY = '2026-11-22';
 const CHECKED = new Date('2026-11-22T06:00:00Z');
@@ -183,8 +182,8 @@ describe('hosting health', () => {
 
   // Security: what a feed stored is never trusted when it is read back.
 
-  it('a stored incident list that is not in the expected shape never fails a read: unusable incidents are left out and the rest still count', () => {
-    const stored = [
+  it('what a check found that is not a usable incident is left out before anything is stored, and the rest still count', () => {
+    const found = [
       incident({}),
       null,
       'outage',
@@ -192,14 +191,11 @@ describe('hosting health', () => {
       {title: 'No impact', scope: INCIDENT_SCOPE.service},
       {title: 'Made-up impact', impact: 'apocalyptic', scope: INCIDENT_SCOPE.service},
       {title: '   ', impact: INCIDENT_IMPACT.major, scope: INCIDENT_SCOPE.service},
-    ] as unknown as HostingIncident[];
+    ];
 
-    expect(points([row({incidents: stored})])).toEqual([8]);
-    for (const incidents of [null, 'x', {length: 3}, 7] as unknown as HostingIncident[][]) {
-      expect(hostingStatus(row({incidents}), TODAY)).toBe(HEALTH_STATUS.ok);
-      expect(points([row({incidents})])).toEqual([]);
-    }
-    expect(hostingStatus(row({healthError: {} as unknown as string}), TODAY)).toBe(HEALTH_STATUS.ok);
+    const usable = normaliseIncidents(found, 'Azure');
+    expect(usable).toEqual([incident({})]);
+    expect(points([row({incidents: usable})])).toEqual([8]);
   });
 
   it('an incident link is kept only when it is an https page on the provider’s own status host; any other link is dropped and the incident stays', () => {

@@ -15,7 +15,7 @@ export function malformed(): Error {
 /**
  * Text made safe to store and show: control characters become spaces, it is cut
  * to `max` characters, and a character cut in half is replaced (the database
- * refuses NUL and half characters in JSON).
+ * refuses NUL and half characters in text).
  */
 export function cleanText(value: string, max: number): string {
   return value.replace(CONTROL_CHARACTERS, ' ').trim().slice(0, max).toWellFormed();
@@ -45,9 +45,10 @@ export function feedNames(values: unknown, nameOf: (item: unknown) => unknown): 
     .filter((name) => name !== '');
 }
 
-/** A time from a feed as an ISO timestamp, or null when it is not a time. */
+/** A time (from a feed, or a stored timestamp) as an ISO timestamp, or null when it is not a time. */
 export function isoTime(value: unknown): string | null {
-  const time = typeof value === 'string' || typeof value === 'number' ? new Date(value).getTime() : Number.NaN;
+  const isTimeLike = typeof value === 'string' || typeof value === 'number' || value instanceof Date;
+  const time = isTimeLike ? new Date(value).getTime() : Number.NaN;
   return Number.isNaN(time) ? null : new Date(time).toISOString();
 }
 

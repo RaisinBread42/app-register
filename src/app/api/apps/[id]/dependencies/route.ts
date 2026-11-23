@@ -1,3 +1,4 @@
+import {RESOURCE_KIND} from '@/lib/constants';
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp} from '@/lib/services/apps';
 import {addDependency, type DependencyInput, type DependencyView} from '@/lib/services/dependencies';
@@ -18,10 +19,10 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
   const {id} = await params;
   return handle(
     request,
-    async ({db, workspaceId, body}) =>
-      created({
-        dependency: await addDependency(db, workspaceId, id, jsonObject<DependencyInput>(body)),
-      }),
+    async ({db, workspaceId, body}) => {
+      const dependency = await addDependency(db, workspaceId, id, jsonObject<DependencyInput>(body));
+      return created({dependency}, {kind: RESOURCE_KIND.dependency, id: dependency.id});
+    },
     {
       afterCommit: ({db, workspaceId}, result) =>
         checkAfterWrite(db, workspaceId, id, [(result.body as {dependency: DependencyView}).dependency.id]),
