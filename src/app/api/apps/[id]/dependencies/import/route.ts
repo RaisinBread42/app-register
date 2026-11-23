@@ -1,4 +1,4 @@
-import {DEPENDENCY_IMPORT_MAX_BYTES} from '@/lib/constants';
+import {DEPENDENCY_IMPORT_MAX_BYTES, RESOURCE_KIND} from '@/lib/constants';
 import {handle, ok} from '@/lib/api/http';
 import {checkAfterWrite} from '@/lib/services/dependency-health';
 import {importDependencies} from '@/lib/services/dependency-import';
@@ -15,7 +15,10 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
   const {id} = await params;
   return handle(
     request,
-    async ({db, workspaceId, body}) => ok({import: await importDependencies(db, workspaceId, id, body)}),
+    async ({db, workspaceId, body}) => {
+      const counts = await importDependencies(db, workspaceId, id, body);
+      return ok({import: counts}, {kind: RESOURCE_KIND.dependencyImport, id, counts});
+    },
     {
       maxBodyBytes: DEPENDENCY_IMPORT_MAX_BYTES,
       afterCommit: ({db, workspaceId}) => checkAfterWrite(db, workspaceId, id),

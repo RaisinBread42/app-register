@@ -1,3 +1,4 @@
+import {RESOURCE_KIND} from '@/lib/constants';
 import {handle, jsonObject, noContent, ok} from '@/lib/api/http';
 import {checkAfterWrite} from '@/lib/services/dependency-health';
 import {
@@ -13,16 +14,10 @@ export async function PATCH(request: Request, {params}: Context): Promise<Respon
   const {id, dependencyId} = await params;
   return handle(
     request,
-    async ({db, workspaceId, body}) =>
-      ok({
-        dependency: await updateDependency(
-          db,
-          workspaceId,
-          id,
-          dependencyId,
-          jsonObject<Partial<DependencyInput>>(body),
-        ),
-      }),
+    async ({db, workspaceId, body}) => {
+      const dependency = await updateDependency(db, workspaceId, id, dependencyId, jsonObject<Partial<DependencyInput>>(body));
+      return ok({dependency}, {kind: RESOURCE_KIND.dependency, id: dependency.id});
+    },
     {afterCommit: ({db, workspaceId}) => checkAfterWrite(db, workspaceId, id, [dependencyId])},
   );
 }

@@ -13,6 +13,7 @@ import {
   OWNERSHIP_CHANGE_REASON,
   OWNERSHIP_ROLE,
   PERSON_STATUS,
+  RESOURCE_KIND,
 } from '@/lib/constants';
 import {MIGRATIONS_FOLDER} from './client';
 import {newId} from './ids';
@@ -22,6 +23,7 @@ import {
   attachments,
   dependencyAdvisories,
   dependencyAdvisoryAliases,
+  idempotencyKeys,
   noticeAlerts,
   ownershipChanges,
   people,
@@ -57,6 +59,7 @@ const COLUMNS_0002 = ['advisories', 'check_error', 'checked_at', 'is_dev', 'sour
 const TABLES_0003 = ['dependency_advisories', 'dependency_advisory_aliases'];
 
 /** Rollback files, newest first: the order they must run in. */
+const ROLLBACK_0004 = '0004_relational_idempotency.down.sql';
 const ROLLBACK_0003 = '0003_relational_advisories.down.sql';
 const ROLLBACK_0002 = '0002_dependency_health.down.sql';
 const ROLLBACK_0001 = '0001_api_keys_idempotency_deps_hosting.down.sql';
@@ -276,6 +279,7 @@ describe('database schema', () => {
 
   it('migration 0003 moves stored advisories and hand-recorded ids into tables, and its rollback puts them back in the old columns', async () => {
     const w = await seedWorkspace(t, t.workspaceId);
+    await t.client.exec(rollbackSql(ROLLBACK_0004));
     await t.client.exec(rollbackSql(ROLLBACK_0003));
     const advisories = [
       {id: 'GHSA-qqqq-1111-aaaa', aliases: ['CVE-2026-4411', 'PYSEC-2026-7'], severity: 'high', summary: 'Prototype pollution in merge()', url: 'https://osv.dev/vulnerability/GHSA-qqqq-1111-aaaa'},
@@ -305,6 +309,7 @@ describe('database schema', () => {
     expect(quill).toMatchObject({name: 'quill-forms', vulnerabilities, advisories});
     expect(tally).toMatchObject({name: 'tally-ui', vulnerabilities: [], advisories: []});
 
+    await t.client.exec(rollbackSql(ROLLBACK_0004));
     await t.client.exec(rollbackSql(ROLLBACK_0003));
     const old = await t.client.query<{vulnerabilities: string[]; advisories: unknown}>(
       `select vulnerabilities, advisories from app_dependencies where id = $1`,
@@ -313,9 +318,73 @@ describe('database schema', () => {
     expect(old.rows).toEqual([{vulnerabilities, advisories}]);
   });
 
+  it('the database itself rejects an Idempotency-Key row whose resource or counts do not fit its kind', async () => {
+    const row = {workspaceId: t.workspaceId, requestHash: 'h', statusCode: 200};
+    const counts = {countAdded: 1, countUpdated: 0, countUnchanged: 2, countRemoved: 0};
+    await t.db.insert(idempotencyKeys).values({...row, key: 'claimed'});
+    await t.db.insert(idempotencyKeys).values({...row, key: 'person', resourceKind: RESOURCE_KIND.person, resourceId: newId()});
+    await t.db.insert(idempotencyKeys).values({...row, key: 'import', resourceKind: RESOURCE_KIND.dependencyImport, resourceId: newId(), ...counts});
+
+    const cases: [string, () => Promise<unknown>][] = [
+      ['idempotency_keys_pk', () => t.db.insert(idempotencyKeys).values({...row, key: 'claimed'})],
+      ['idempotency_keys_resource_kind_allowed', () => t.client.query(`insert into idempotency_keys (workspace_id, key, request_hash, status_code, resource_kind, resource_id) values ($1, 'k1', 'h', 200, 'invoice', $2)`, [t.workspaceId, newId()])],
+      ['idempotency_keys_resource_kind_with_id', () => t.db.insert(idempotencyKeys).values({...row, key: 'k2', resourceKind: RESOURCE_KIND.app})],
+      ['idempotency_keys_resource_kind_with_id', () => t.db.insert(idempotencyKeys).values({...row, key: 'k3', resourceId: newId()})],
+      ['idempotency_keys_counts_only_for_import', () => t.db.insert(idempotencyKeys).values({...row, key: 'k4', resourceKind: RESOURCE_KIND.app, resourceId: newId(), ...counts})],
+      ['idempotency_keys_counts_only_for_import', () => t.db.insert(idempotencyKeys).values({...row, key: 'k5', resourceKind: RESOURCE_KIND.dependencyImport, resourceId: newId()})],
+      ['idempotency_keys_counts_only_for_import', () => t.db.insert(idempotencyKeys).values({...row, key: 'k6', resourceKind: RESOURCE_KIND.dependencyImport, resourceId: newId(), ...counts, countRemoved: null})],
+    ];
+    for (const [rule, write] of cases) {
+      await expect(write(), rule).rejects.toThrow(rule);
+    }
+  });
+
+  it('migration 0004 forgets the stored Idempotency-Keys, which held a JSON copy of the response, and so does its rollback', async () => {
+    const columns = async () =>
+      (
+        await t.client.query<{column_name: string}>(
+          `select column_name from information_schema.columns where table_name = 'idempotency_keys' order by 1`,
+        )
+      ).rows.map((r) => r.column_name);
+    const keys = async () => (await t.client.query(`select key from idempotency_keys`)).rows;
+    const relational = await columns();
+    expect(relational).not.toContain('response_body');
+
+    await t.db.insert(idempotencyKeys).values({workspaceId: t.workspaceId, key: 'new-shape', requestHash: 'h', statusCode: 200});
+    await t.client.exec(rollbackSql(ROLLBACK_0004));
+    expect(await columns()).toEqual(['created_at', 'key', 'request_hash', 'response_body', 'status_code', 'workspace_id']);
+    expect(await keys()).toEqual([]);
+
+    await t.client.query(
+      `insert into idempotency_keys (workspace_id, key, request_hash, status_code, response_body) values ($1, 'old-shape', 'h', 201, $2)`,
+      [t.workspaceId, JSON.stringify({person: {name: 'Fay'}})],
+    );
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await columns()).toEqual(relational);
+    expect(await keys()).toEqual([]);
+  });
+
+  it('the database has no JSON or array columns: every column is a plain relational type', async () => {
+    const columns = await t.client.query<{table_name: string; column_name: string; data_type: string}>(
+      `select table_name, column_name, data_type from information_schema.columns
+       where table_schema = 'public' and data_type in ('json', 'jsonb', 'ARRAY')
+       order by 1, 2`,
+    );
+    expect(columns.rows).toEqual([]);
+
+    // The guard itself works: it sees a body column the moment one is added back.
+    await t.client.exec(`alter table idempotency_keys add column response_body jsonb; alter table app_dependencies add column tags text[]`);
+    const reintroduced = await t.client.query<{column_name: string}>(
+      `select column_name from information_schema.columns
+       where table_schema = 'public' and data_type in ('json', 'jsonb', 'ARRAY')
+       order by 1`,
+    );
+    expect(reintroduced.rows.map((r) => r.column_name)).toEqual(['response_body', 'tags']);
+  });
+
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    // Rollbacks run newest first: 0003 and 0002 changed a table that 0001 created.
-    for (const file of [ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
+    // Rollbacks run newest first: 0004, 0003 and 0002 changed tables that 0001 created.
+    for (const file of [ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
       await t.client.exec(rollbackSql(file));
     }
     const after = await t.client.query<{table_name: string}>(
@@ -341,6 +410,7 @@ describe('database schema', () => {
       ).rows.map((r) => r.column_name);
     const before = await columns();
 
+    await t.client.exec(rollbackSql(ROLLBACK_0004));
     await t.client.exec(rollbackSql(ROLLBACK_0003));
     const at0002 = await columns();
     await t.client.exec(rollbackSql(ROLLBACK_0002));

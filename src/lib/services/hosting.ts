@@ -17,6 +17,8 @@ export type HostingInput = {
 /** JSON shape of one hosting row (a provider service an app runs on) in the API. */
 export type HostingView = Omit<AppHostingRow, 'workspaceId'>;
 
+const HOSTING_NOT_FOUND = 'Hosting entry not found';
+
 /** An app's hosting rows (archived apps too, as history), by provider then service. */
 export async function listHosting(
   db: AppDatabase,
@@ -32,6 +34,20 @@ export async function listHosting(
     .where(and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId)))
     .orderBy(asc(appHosting.provider), asc(appHosting.service));
   return rows.map(toView);
+}
+
+/** One hosting entry, whichever app it is on. 404 outside the workspace. */
+export async function getHosting(db: AppDatabase, workspaceId: string, id: string): Promise<HostingView> {
+  const [row] = isUuid(id)
+    ? await db
+        .select()
+        .from(appHosting)
+        .where(and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.id, id)))
+    : [];
+  if (!row) {
+    throw new NotFoundError(HOSTING_NOT_FOUND);
+  }
+  return toView(row);
 }
 
 export async function addHosting(
@@ -101,7 +117,7 @@ async function findHosting(
         )
     : [];
   if (!row) {
-    throw new NotFoundError('Hosting entry not found');
+    throw new NotFoundError(HOSTING_NOT_FOUND);
   }
   return row;
 }

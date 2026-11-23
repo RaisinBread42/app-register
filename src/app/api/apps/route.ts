@@ -1,4 +1,4 @@
-import {API_QUERY} from '@/lib/constants';
+import {API_QUERY, RESOURCE_KIND} from '@/lib/constants';
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {createApp, listActiveApps, type CreateAppInput} from '@/lib/services/apps';
 
@@ -17,7 +17,8 @@ export function GET(request: Request): Promise<Response> {
 
 /** POST /api/apps → 201 `{ app: AppDetail }` */
 export function POST(request: Request): Promise<Response> {
-  return handle(request, async ({db, workspaceId, body}) =>
-    created({app: await createApp(db, workspaceId, jsonObject<CreateAppInput>(body))}),
-  );
+  return handle(request, async ({db, workspaceId, body}) => {
+    const app = await createApp(db, workspaceId, jsonObject<CreateAppInput>(body));
+    return created({app}, {kind: RESOURCE_KIND.app, id: app.id});
+  });
 }

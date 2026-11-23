@@ -49,21 +49,31 @@ export async function updatePerson(
   id: string,
   patch: UpdatePersonInput,
 ): Promise<PersonView> {
-  const [current] = isUuid(id)
-    ? await db
-        .select()
-        .from(people)
-        .where(and(eq(people.workspaceId, workspaceId), eq(people.id, id)))
-    : [];
-  if (!current) {
-    throw new NotFoundError('Person not found');
-  }
+  const current = await findPerson(db, workspaceId, id);
   const merged = {...current, ...patch};
   const values = {...validateNameAndEmail(merged), ...validateStatus(merged.status, merged.leftOn)};
   return withEmailCheck(async () => {
     const [row] = await db.update(people).set(values).where(eq(people.id, id)).returning();
     return toPersonView(row);
   });
+}
+
+/** One person, active or left. 404 outside the workspace. */
+export async function getPerson(db: AppDatabase, workspaceId: string, id: string): Promise<PersonView> {
+  return toPersonView(await findPerson(db, workspaceId, id));
+}
+
+async function findPerson(db: AppDatabase, workspaceId: string, id: string): Promise<PersonRow> {
+  const [row] = isUuid(id)
+    ? await db
+        .select()
+        .from(people)
+        .where(and(eq(people.workspaceId, workspaceId), eq(people.id, id)))
+    : [];
+  if (!row) {
+    throw new NotFoundError('Person not found');
+  }
+  return row;
 }
 
 export async function listActivePeople(

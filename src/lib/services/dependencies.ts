@@ -26,6 +26,8 @@ export type DependencyInput = {
 /** JSON shape of an app dependency in the API: the row plus its own status. */
 export type DependencyView = Omit<DependencyRecord, 'workspaceId'> & {status: HealthStatus};
 
+const DEPENDENCY_NOT_FOUND = 'Dependency not found';
+
 /** An app's dependencies (archived apps too, as history), by name. */
 export async function listDependencies(
   db: AppDatabase,
@@ -37,6 +39,17 @@ export async function listDependencies(
   }
   const rows = await loadDependencies(db, and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId)));
   return rows.map(toView);
+}
+
+/** One dependency, whichever app it is on. 404 outside the workspace. */
+export async function getDependency(db: AppDatabase, workspaceId: string, id: string): Promise<DependencyView> {
+  const [row] = isUuid(id)
+    ? await loadDependencies(db, and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.id, id)))
+    : [];
+  if (!row) {
+    throw new NotFoundError(DEPENDENCY_NOT_FOUND);
+  }
+  return toView(row);
 }
 
 export async function addDependency(
@@ -114,7 +127,7 @@ async function findDependency(
       )
     : [];
   if (!row) {
-    throw new NotFoundError('Dependency not found');
+    throw new NotFoundError(DEPENDENCY_NOT_FOUND);
   }
   return row;
 }

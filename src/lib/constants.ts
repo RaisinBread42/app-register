@@ -213,9 +213,25 @@ export const BEARER_PREFIX = 'Bearer ';
 /** Every API key starts with this, so a leaked one is easy to spot in code or logs. */
 export const API_KEY_PREFIX = 'ar_';
 
-/** How long a stored Idempotency-Key replays its first response. */
+/** How long a repeat of a request with the same Idempotency-Key is answered without running it again. */
 export const IDEMPOTENCY_KEY_TTL_HOURS = 24;
 export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+
+/**
+ * What a POST or PATCH answered about. A repeat of the request (same
+ * Idempotency-Key) reads that row again instead of replaying a stored body.
+ */
+export const RESOURCE_KIND = {
+  app: 'app',
+  person: 'person',
+  dependency: 'dependency',
+  hosting: 'hosting',
+  noticeAlert: 'notice_alert',
+  /** An import answers with counts, not a row; they are stored beside the key. */
+  dependencyImport: 'dependency_import',
+} as const;
+export const RESOURCE_KINDS = Object.values(RESOURCE_KIND);
+export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
 export const HTTP_METHOD = {
   get: 'GET',

@@ -7,7 +7,6 @@ import {
   foreignKey,
   index,
   integer,
-  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -30,8 +29,11 @@ import {
   OWNERSHIP_ROLES,
   PERSON_STATUS,
   PERSON_STATUSES,
+  RESOURCE_KIND,
+  RESOURCE_KINDS,
   type AdvisorySeverity,
   type AdvisorySource,
+  type ResourceKind,
 } from '../constants';
 
 /** CHECK (column IN (...)) built from a constants array, so TS and DB share one list. */
@@ -446,7 +448,12 @@ export const apiKeys = pgTable(
   (t) => [index('api_keys_workspace_idx').on(t.workspaceId)],
 );
 
-/** First response to each Idempotency-Key, replayed for repeats of the same request. */
+/**
+ * What the first request with each Idempotency-Key answered about, so a repeat
+ * is answered by reading that row again. No response body is stored.
+ * `resource_id` has no foreign key: it points at one of several tables, and the
+ * row may be deleted later (a repeat then answers 404).
+ */
 export const idempotencyKeys = pgTable(
   'idempotency_keys',
   {
@@ -454,11 +461,24 @@ export const idempotencyKeys = pgTable(
     key: text('key').notNull(),
     requestHash: text('request_hash').notNull(),
     statusCode: integer('status_code').notNull(),
-    responseBody: jsonb('response_body').notNull(),
+    /** Kind and id are null only while the write is still running, inside its own transaction. */
+    resourceKind: text('resource_kind').$type<ResourceKind>(),
+    resourceId: uuid('resource_id'),
+    /** What a dependency import did; null for every other kind. */
+    countAdded: integer('count_added'),
+    countUpdated: integer('count_updated'),
+    countUnchanged: integer('count_unchanged'),
+    countRemoved: integer('count_removed'),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({name: 'idempotency_keys_pk', columns: [t.workspaceId, t.key]}),
+    check('idempotency_keys_resource_kind_allowed', oneOf(t.resourceKind, RESOURCE_KINDS)),
+    check('idempotency_keys_resource_kind_with_id', sql`(${t.resourceKind} is null) = (${t.resourceId} is null)`),
+    check(
+      'idempotency_keys_counts_only_for_import',
+      sql`num_nonnulls(${t.countAdded}, ${t.countUpdated}, ${t.countUnchanged}, ${t.countRemoved}) = case when ${t.resourceKind} = ${sql.raw(`'${RESOURCE_KIND.dependencyImport}'`)} then 4 else 0 end`,
+    ),
     // Expiry sweep: keys older than the TTL.
     index('idempotency_keys_created_idx').on(t.createdAt),
   ],

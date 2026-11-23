@@ -80,8 +80,9 @@ const idempotencyKey = {
   required: true,
   description:
     `Any unique string (a UUID is ideal), 1–${IDEMPOTENCY_KEY_MAX_LENGTH} characters. ` +
-    `Repeating a request with the same key and the same body replays the first response ` +
-    `for ${IDEMPOTENCY_KEY_TTL_HOURS} hours instead of running it again.`,
+    `Repeating a request with the same key and the same body within ${IDEMPOTENCY_KEY_TTL_HOURS} hours does not run it again: ` +
+    `a replay returns the same status and the resource's current state (404 if it has been deleted since). ` +
+    `An import replays the counts of its first run.`,
   schema: {type: 'string', minLength: 1, maxLength: IDEMPOTENCY_KEY_MAX_LENGTH},
 };
 
@@ -405,7 +406,7 @@ export const openApiSpec = {
           'two entries of one list have the same name after trimming (ignoring case), ' +
           `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
           `The check afterwards takes at most ${DEPENDENCY_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
-          'Replaying a stored response (same Idempotency-Key) does not check again.',
+          'A replay (same Idempotency-Key) does not check again.',
         parameters: [appId, idempotencyKey],
         requestBody: body('PackageFile'),
         responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},
