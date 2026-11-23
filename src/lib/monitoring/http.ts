@@ -6,7 +6,8 @@ import type {Fetch} from '@/lib/services/package-sources';
  * The one place the hosting check calls outside feeds. Polite by default: a
  * short timeout and a User-Agent that names the product and nothing else.
  * An answer longer than HOSTING_FEED_MAX_RESPONSE_BYTES is not read to the end
- * and counts as no answer, and a redirect is never followed. Tests pass a fake:
+ * and counts as no answer, a redirect is never followed, and the timeout covers
+ * the whole answer: a body that keeps dripping is cut off like one that never starts. Tests pass a fake:
  * `src/test-setup.ts` blocks `fetch`.
  */
 
@@ -19,9 +20,10 @@ const UTF16_LE_BOM = [0xff, 0xfe];
 export function createFetchText(send: Fetch = fetch): FetchText {
   return async (url, signal) => {
     const timeout = AbortSignal.timeout(MONITORING_TIMEOUT_MS);
+    const stop = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const response = await send(url, {
       headers: {[API_HEADER.userAgent]: MONITORING_USER_AGENT},
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      signal: stop,
       cache: 'no-store',
       // A feed is only ever read from its own fixed URL: a redirect counts as a failed source.
       redirect: 'error',
@@ -29,7 +31,7 @@ export function createFetchText(send: Fetch = fetch): FetchText {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const bytes = await readBytesUpTo(response, HOSTING_FEED_MAX_RESPONSE_BYTES);
+    const bytes = await readBytesUpTo(response, HOSTING_FEED_MAX_RESPONSE_BYTES, stop);
     if (bytes === null) {
       throw new Error('answer over the size cap');
     }
