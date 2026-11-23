@@ -10,6 +10,7 @@ import {createFetchText, type FetchText} from '@/lib/monitoring/http';
 import {incidentScope, parseStatusFeed, type FeedIncident} from '@/lib/monitoring/status-feeds';
 import {activeAppsIn, assertActiveApp} from './app-scope';
 import {listHosting, type HostingView} from './hosting';
+import {isOutage} from './hosting-health';
 import {loadHosting, normaliseIncidents, replaceIncidents, type HostingIncident, type HostingRecord} from './hosting-incidents';
 import {mapWithLimit} from './package-sources';
 
@@ -289,5 +290,7 @@ function incidents(
     const scope = incidentScope(incident, target);
     return scope ? [{title: incident.title, impact: incident.impact, scope, url: incident.url, startedAt: incident.startedAt}] : [];
   });
-  return normaliseIncidents(reaching, row.provider);
+  // Outages on the row's own service come first, so the cap on stored incidents can never drop one for a lighter notice.
+  const heaviestFirst = [...reaching.filter(isOutage), ...reaching.filter((incident) => !isOutage(incident))];
+  return normaliseIncidents(heaviestFirst, row.provider);
 }
