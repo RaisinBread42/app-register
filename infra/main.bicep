@@ -1,5 +1,5 @@
 // App Register — UAT on Azure, sized to be cheap:
-//   Container Apps (consumption, scale to zero) + ACR Basic + Postgres Flexible B1ms (32 GiB).
+//   Container Apps (consumption, one always-on replica) + ACR Basic + Postgres Flexible B1ms (32 GiB).
 // Deploy with scripts/deploy-uat.sh; never point this at PROD.
 targetScope = 'resourceGroup'
 
@@ -142,8 +142,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(image)) {
           )
         }
       ]
-      // One replica at most: migrations run at start-up, and UAT traffic is tiny.
-      scale: {minReplicas: 0, maxReplicas: 1}
+      // Exactly one replica: always on so the first page load is fast (no cold start),
+      // and never more than one because migrations run at start-up.
+      scale: {minReplicas: 1, maxReplicas: 1}
     }
   }
   dependsOn: [identityCanPull, database, allowAzure]
