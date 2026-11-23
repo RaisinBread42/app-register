@@ -1,6 +1,6 @@
 import {and, asc, eq, isNull, lte} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
-import {ENV, NOTICE_ALERT_STATUS, PRODUCT_NAME, appRoute} from '@/lib/constants';
+import {ENV, MS_PER_DAY, NOTICE_ALERT_STATUS, PRODUCT_NAME, appRoute} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {apps, noticeAlerts, people} from '@/lib/db/schema';
 import type {EmailPort} from '@/lib/email';
@@ -35,7 +35,8 @@ const backupOwner = alias(people, 'backup_owner');
 /**
  * Selects scheduled notice alerts whose due date is today or earlier (catch-up),
  * emails the owner and backup, and marks each alert `sent` at most once.
- * A failed send leaves the row scheduled so the next run retries.
+ * Claims the row before sending so concurrent runners cannot double-deliver;
+ * a failed send releases the claim so the next run retries.
  * Logs never include email addresses (personal data).
  */
 export async function sendDueNoticeAlerts(
@@ -53,18 +54,19 @@ export async function sendDueNoticeAlerts(
 
   let sent = 0;
   for (const alert of due) {
+    if (!(await markSent(db, workspaceId, alert.id, now))) {
+      continue;
+    }
     try {
-      await options.email.send(buildMessage(alert, from, options.appUrl));
+      await options.email.send(buildMessage(alert, from, today, options.appUrl));
+      sent += 1;
     } catch (error: unknown) {
+      await releaseClaim(db, workspaceId, alert.id);
       // Name and code only — the error message may quote the recipient address.
       console.error('notice alert send failed', {
         alertId: alert.id,
         name: error instanceof Error ? error.name : 'Error',
       });
-      continue;
-    }
-    if (await markSent(db, workspaceId, alert.id, now)) {
-      sent += 1;
     }
   }
   return {sent};
@@ -125,13 +127,33 @@ async function markSent(
   return updated.length > 0;
 }
 
-function buildMessage(alert: DueAlert, from: string, appUrl: string | undefined) {
+/** Puts a claimed alert back to `scheduled` so a later run can retry after a send failure. */
+async function releaseClaim(db: AppDatabase, workspaceId: string, id: string): Promise<void> {
+  await db
+    .update(noticeAlerts)
+    .set({status: NOTICE_ALERT_STATUS.scheduled, sentAt: null})
+    .where(
+      and(
+        eq(noticeAlerts.workspaceId, workspaceId),
+        eq(noticeAlerts.id, id),
+        eq(noticeAlerts.status, NOTICE_ALERT_STATUS.sent),
+      ),
+    );
+}
+
+function buildMessage(
+  alert: DueAlert,
+  from: string,
+  today: string,
+  appUrl: string | undefined,
+) {
   const recipients = uniqueEmails([alert.ownerEmail, alert.backupEmail]);
-  const subject = `Notice deadline in ${alert.offsetDays} days: ${alert.appName}`;
+  const daysLeft = calendarDaysBetween(today, alert.noticeDeadline);
+  const {subject, timing} = deadlineCopy(alert.appName, alert.noticeDeadline, daysLeft);
   const lines = [
     `${PRODUCT_NAME} reminder`,
     '',
-    `The notice deadline for ${alert.appName} is ${alert.noticeDeadline} (${alert.offsetDays} days away).`,
+    `The notice deadline for ${alert.appName} is ${alert.noticeDeadline}${timing}.`,
     'Give notice before that date to avoid an auto-renewal.',
   ];
   if (appUrl) {
@@ -139,6 +161,35 @@ function buildMessage(alert: DueAlert, from: string, appUrl: string | undefined)
     lines.push('', `Open the app: ${base}${appRoute(alert.appId)}`);
   }
   return {from, to: recipients, subject, text: lines.join('\n')};
+}
+
+/** Subject and parenthetical timing from calendar days left, not the scheduled offset. */
+function deadlineCopy(appName: string, noticeDeadline: string, daysLeft: number) {
+  if (daysLeft > 0) {
+    return {
+      subject: `Notice deadline in ${daysLeft} days: ${appName}`,
+      timing: ` (${daysLeft} days away)`,
+    };
+  }
+  if (daysLeft === 0) {
+    return {subject: `Notice deadline today: ${appName}`, timing: ' (today)'};
+  }
+  const ago = Math.abs(daysLeft);
+  return {
+    subject: `Notice deadline was ${noticeDeadline}: ${appName}`,
+    timing: ` (${ago} days ago)`,
+  };
+}
+
+function calendarDaysBetween(fromIso: string, toIso: string): number {
+  const from = utcDay(fromIso);
+  const to = utcDay(toIso);
+  return Math.round((to - from) / MS_PER_DAY);
+}
+
+function utcDay(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
 }
 
 function uniqueEmails(emails: string[]): string[] {

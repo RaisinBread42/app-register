@@ -1,7 +1,7 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS} from '@/lib/constants';
 import {addDaysIso} from '@/lib/notice-alerts';
-import {createSinkEmail} from '@/lib/email';
+import {createSinkEmail, type EmailMessage, type EmailPort} from '@/lib/email';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {createApp} from './apps';
 import {sendDueNoticeAlerts} from './notice-alert-send';
@@ -63,9 +63,8 @@ describe('notice-deadline email alerts', () => {
     expect(sink.messages[0].text).toContain(`${APP_URL}/applications/`);
   });
 
-  /** Criterion 3: each alert is sent at most once per app per offset. */
+  /** Criterion 3: each alert is sent at most once per app per offset (including concurrent runners). */
   it('each alert is sent at most once per app per offset', async () => {
-    const sink = createSinkEmail();
     await createApp(
       t.db,
       t.workspaceId,
@@ -73,20 +72,48 @@ describe('notice-deadline email alerts', () => {
       TODAY,
     );
 
-    const first = await sendDueNoticeAlerts(t.db, t.workspaceId, {
-      email: sink,
-      from: FROM,
-      today: TODAY,
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    const second = await sendDueNoticeAlerts(t.db, t.workspaceId, {
-      email: sink,
-      from: FROM,
-      today: TODAY,
+    let inFlight = 0;
+    let unlockBoth!: () => void;
+    const bothEntered = new Promise<void>((resolve) => {
+      unlockBoth = resolve;
     });
+    const messages: EmailMessage[] = [];
+    const email: EmailPort = {
+      async send(message) {
+        messages.push({
+          from: message.from,
+          to: [...message.to],
+          subject: message.subject,
+          text: message.text,
+        });
+        inFlight += 1;
+        if (inFlight === 2) unlockBoth();
+        await hold;
+      },
+    };
 
-    expect(first).toEqual({sent: 1});
-    expect(second).toEqual({sent: 0});
-    expect(sink.messages).toHaveLength(1);
+    const runA = sendDueNoticeAlerts(t.db, t.workspaceId, {email, from: FROM, today: TODAY});
+    const runB = sendDueNoticeAlerts(t.db, t.workspaceId, {email, from: FROM, today: TODAY});
+
+    // Only one runner claims; the other never enters send. Release after a tick.
+    await Promise.race([
+      bothEntered.then(() => {
+        throw new Error('both runners entered send');
+      }),
+      new Promise((r) => setTimeout(r, 50)),
+    ]).catch((error: unknown) => {
+      release();
+      throw error;
+    });
+    release();
+    const [a, b] = await Promise.all([runA, runB]);
+
+    expect(a.sent + b.sent).toBe(1);
+    expect(messages).toHaveLength(1);
     const alerts = await listAlerts(t.db, t.workspaceId, {status: NOTICE_ALERT_STATUS.sent});
     expect(alerts).toHaveLength(1);
     expect(alerts[0].offsetDays).toBe(30);
@@ -139,10 +166,11 @@ describe('notice-deadline email alerts', () => {
     expect(dueToday.filter((a) => a.appName === 'Due Today')).toEqual([]);
   });
 
-  it('an alert due tomorrow waits; an overdue scheduled alert still sends', async () => {
+  it('catch-up email uses calendar days left, not the scheduled offset', async () => {
     const sink = createSinkEmail();
     const deadline = addDaysIso(TODAY, 90);
     await createApp(t.db, t.workspaceId, appInput('Litware HR', deadline), TODAY);
+    await createApp(t.db, t.workspaceId, appInput('Late Books', deadline), TODAY);
 
     expect(
       await sendDueNoticeAlerts(t.db, t.workspaceId, {
@@ -151,16 +179,31 @@ describe('notice-deadline email alerts', () => {
         today: addDaysIso(TODAY, -1),
       }),
     ).toEqual({sent: 0});
-    expect(sink.messages).toHaveLength(0);
 
+    const oneDayLate = addDaysIso(TODAY, 1);
     expect(
       await sendDueNoticeAlerts(t.db, t.workspaceId, {
         email: sink,
         from: FROM,
-        today: addDaysIso(TODAY, 1),
+        today: oneDayLate,
       }),
-    ).toEqual({sent: 1});
-    expect(sink.messages).toHaveLength(1);
+    ).toEqual({sent: 2});
+    const litware = sink.messages.find((m) => m.subject.includes('Litware HR'));
+    expect(litware?.subject).toBe('Notice deadline in 89 days: Litware HR');
+    expect(litware?.text).toContain('(89 days away)');
+
+    // Fresh app whose 90-day alert is still scheduled, sent long after the deadline.
+    const pastDeadline = addDaysIso(TODAY, 60);
+    await createApp(t.db, t.workspaceId, appInput('Past Due CRM', addDaysIso(TODAY, 30)), TODAY);
+    const pastSink = createSinkEmail();
+    await sendDueNoticeAlerts(t.db, t.workspaceId, {
+      email: pastSink,
+      from: FROM,
+      today: pastDeadline,
+    });
+    expect(pastSink.messages[0].subject).toMatch(/^Notice deadline was /);
+    expect(pastSink.messages[0].text).toMatch(/\(\d+ days ago\)/);
+    expect(pastSink.messages[0].text).not.toMatch(/days away/);
   });
 
   it('send failures leave the alert scheduled and never put an email address in the log', async () => {
