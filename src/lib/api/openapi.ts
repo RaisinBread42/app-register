@@ -224,7 +224,9 @@ const hostingCheckFields = {
     type: 'array',
     items: ref('HostingIncident'),
     maxItems: HOSTING_MAX_INCIDENTS,
-    description: 'Open provider incidents and announced maintenance that reach this row, as the last check found them',
+    description:
+      'Open provider incidents and announced maintenance that reach this row, as the last check found them: ' +
+      'outages on the row’s own service first. Stored as rows of hosting_incidents.',
   },
   healthCheckedAt: {
     ...nullable('string', {format: 'date-time'}),
@@ -369,7 +371,9 @@ const schemas = {
     scope: {
       type: 'string',
       enum: [...INCIDENT_SCOPES],
-      description: 'service: the feed names this service or region. provider: it only names the provider.',
+      description:
+        'service: the feed names this service or region. provider: a notice, not an outage on this row: the feed only names ' +
+        'the provider, names other regions in free text, or names regions this row’s region cannot be compared with.',
     },
     url: {
       ...nullable('string', {format: 'uri'}),

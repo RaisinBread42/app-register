@@ -8,7 +8,8 @@ import {STATUS_FEED_KIND, type StatusFeedKind} from './constants';
  * - `statusFeed`: the provider's public, keyless status feed.
  * - `statusComponents`: what that feed calls the service, so an incident can be
  *   matched to it. Copied from the live feeds; without it only provider-wide
- *   notices reach the row.
+ *   notices reach the row. A feed's own list of affected services is matched
+ *   against these names while it is read, however long it is.
  * - `eolProduct`: the endoflife.date product whose release table gives the
  *   end-of-support date for the row's version.
  * - `hasVersion` / `hasRuntime`: whether the dialog asks for a version or a runtime.
@@ -45,6 +46,67 @@ export const HOSTING_RUNTIMES: CatalogRuntime[] = [
   {name: 'PHP', aliases: [], eolProduct: 'php'},
   {name: 'Ruby', aliases: [], eolProduct: 'ruby'},
   {name: 'Go', aliases: ['golang'], eolProduct: 'go'},
+];
+
+/**
+ * Azure's regions by display name, as its status feed writes them in prose.
+ * The region code is the name without spaces: "North Central US" is `northcentralus`.
+ */
+export const AZURE_REGIONS = [
+  'East US',
+  'East US 2',
+  'Central US',
+  'North Central US',
+  'South Central US',
+  'West Central US',
+  'West US',
+  'West US 2',
+  'West US 3',
+  'Canada Central',
+  'Canada East',
+  'Mexico Central',
+  'Brazil South',
+  'Brazil Southeast',
+  'Chile Central',
+  'North Europe',
+  'West Europe',
+  'UK South',
+  'UK West',
+  'France Central',
+  'France South',
+  'Germany West Central',
+  'Germany North',
+  'Switzerland North',
+  'Switzerland West',
+  'Norway East',
+  'Norway West',
+  'Sweden Central',
+  'Poland Central',
+  'Italy North',
+  'Spain Central',
+  'Austria East',
+  'UAE North',
+  'UAE Central',
+  'Qatar Central',
+  'Israel Central',
+  'South Africa North',
+  'South Africa West',
+  'Central India',
+  'South India',
+  'West India',
+  'East Asia',
+  'Southeast Asia',
+  'Japan East',
+  'Japan West',
+  'Korea Central',
+  'Korea South',
+  'Australia East',
+  'Australia Southeast',
+  'Australia Central',
+  'Australia Central 2',
+  'New Zealand North',
+  'Indonesia Central',
+  'Malaysia West',
 ];
 
 const statuspage = (name: string, host: string): StatusFeed => ({
@@ -199,6 +261,12 @@ export function findService(provider: string, service: string): CatalogService |
   return entry?.services.find((item) =>
     [item.name, `${entry.name} ${item.name}`].some((name) => squash(name) === wanted),
   );
+}
+
+/** Every name (squashed) the catalog knows for the services of the provider that `feed` belongs to. */
+export function statusComponentKeys(feed: StatusFeed): Set<string> {
+  const provider = HOSTING_CATALOG.find((entry) => entry.statusFeed?.url === feed.url);
+  return new Set(provider?.services.flatMap((service) => service.statusComponents ?? []).map(squash));
 }
 
 export function findRuntime(runtime: string): CatalogRuntime | undefined {

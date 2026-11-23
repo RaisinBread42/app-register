@@ -1,4 +1,4 @@
-import {FEED_MAX_NAMES, FEED_NAME_MAX_LENGTH, HTTPS_PROTOCOL, INCIDENT_URL_MAX_LENGTH} from '@/lib/constants';
+import {FEED_NAME_MAX_LENGTH, HTTPS_PROTOCOL, INCIDENT_URL_MAX_LENGTH} from '@/lib/constants';
 
 /**
  * Readers for values that come from an outside feed. Nothing a feed says is
@@ -37,10 +37,13 @@ export function feedList(value: unknown): unknown[] {
   return value;
 }
 
-/** A list of names (services, regions) from a feed: the first FEED_MAX_NAMES, blanks left out. */
+/**
+ * A list of names (services, regions) from a feed, blanks left out. Every name
+ * is read, however many there are: cutting the list could hide the one name a
+ * hosting row is waiting for. Its size is bounded by the cap on the whole answer.
+ */
 export function feedNames(values: unknown, nameOf: (item: unknown) => unknown): string[] {
   return feedList(values)
-    .slice(0, FEED_MAX_NAMES)
     .map((item) => feedText(nameOf(item)))
     .filter((name) => name !== '');
 }
