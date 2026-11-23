@@ -1,3 +1,6 @@
+/** The event an AbortSignal fires when it aborts. */
+const ABORT_EVENT = 'abort';
+
 type Source = {body: ReadableStream<Uint8Array> | null};
 
 /**
@@ -50,9 +53,9 @@ function stopWhenAborted(signal?: AbortSignal): {aborted: Promise<never>; forget
     if (signal?.aborted) {
       onAbort();
     }
-    signal?.addEventListener('abort', onAbort, {once: true});
+    signal?.addEventListener(ABORT_EVENT, onAbort, {once: true});
   });
   // The race above handles the rejection; this keeps it from being reported as unhandled once nothing is racing.
   aborted.catch(() => undefined);
-  return {aborted, forget: () => signal?.removeEventListener('abort', onAbort)};
+  return {aborted, forget: () => signal?.removeEventListener(ABORT_EVENT, onAbort)};
 }
