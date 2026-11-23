@@ -1,4 +1,5 @@
-import {API_HEADER, HTTP_STATUS, IDEMPOTENT_METHODS} from '@/lib/constants';
+import {readTextUpTo} from '@/lib/capped-body';
+import {API_HEADER, BYTES_PER_MB, HTTP_STATUS, IDEMPOTENT_METHODS} from '@/lib/constants';
 import {getDb, type AppDatabase} from '@/lib/db/client';
 import {findWorkspaceForApiKey} from '@/lib/services/api-keys';
 import {
@@ -31,10 +32,13 @@ export type HandleOptions = {
    * it needs no Idempotency-Key and does not run inside a write transaction.
    */
   isSafeToRepeat?: boolean;
+  /** Largest request body accepted, in bytes; a longer one is a 400 and is not read to the end. */
+  maxBodyBytes?: number;
   /**
    * Slow follow-up work (outside calls) for a successful write. It runs after the
    * write has committed, never inside its transaction, and before the response is
    * sent. If it fails the write still stands; the failure is logged by name only.
+   * It does not run again when a stored response is replayed for an Idempotency-Key.
    */
   afterCommit?: (context: Omit<ApiContext, 'body'>, result: ApiResult) => Promise<unknown>;
 };
@@ -53,20 +57,20 @@ export async function handle(
   try {
     const db = getDb();
     const workspaceId = await authenticate(db, request);
-    const body = await request.text();
+    const body = await readBody(request, options.maxBodyBytes);
     const isWrite = (IDEMPOTENT_METHODS as readonly string[]).includes(request.method);
     if (!isWrite || options.isSafeToRepeat) {
       return toResponse(await run({db, workspaceId, body}));
     }
     const url = new URL(request.url);
-    const result = await runOnce(
+    const {isReplay, ...result} = await runOnce(
       db,
       workspaceId,
       request.headers.get(API_HEADER.idempotencyKey),
       {method: request.method, path: url.pathname + url.search, body},
       (tx) => run({db: tx, workspaceId, body}),
     );
-    if (options.afterCommit) {
+    if (options.afterCommit && !isReplay) {
       await options.afterCommit({db, workspaceId}, result).catch((error: unknown) => {
         console.error('API follow-up failed', {name: (error as Error | undefined)?.name});
       });
@@ -89,6 +93,19 @@ export function jsonObject<T>(body: string): T {
     throw new ValidationError('Request body must be a JSON object');
   }
   return parsed as T;
+}
+
+/** The body as text. With a cap, an oversized body is refused from its Content-Length or as soon as too much has arrived. */
+async function readBody(request: Request, maxBytes?: number): Promise<string> {
+  if (maxBytes === undefined) {
+    return request.text();
+  }
+  const isDeclaredTooLarge = Number(request.headers.get(API_HEADER.contentLength)) > maxBytes;
+  const body = isDeclaredTooLarge ? null : await readTextUpTo(request, maxBytes);
+  if (body === null) {
+    throw new ValidationError(`The request body is larger than ${maxBytes / BYTES_PER_MB} MB`);
+  }
+  return body;
 }
 
 async function authenticate(db: AppDatabase, request: Request): Promise<string> {

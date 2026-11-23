@@ -1,9 +1,13 @@
 import {
   ADVISORY_SEVERITIES,
+  BYTES_PER_MB,
   APP_KINDS,
   APP_SORTS,
   DEPENDENCY_CHECK_ERRORS,
+  DEPENDENCY_FOLLOW_UP_BUDGET_MS,
   DEPENDENCY_IMPORT_MAX_BYTES,
+  DEPENDENCY_NAME_MAX_LENGTH,
+  DEPENDENCY_VERSION_MAX_LENGTH,
   DEPENDENCY_SOURCES,
   HEALTH_ATTENTION_BELOW,
   HEALTH_CRITICAL_BELOW,
@@ -11,6 +15,7 @@ import {
   HEALTH_DIMENSIONS,
   HEALTH_MAX_SCORE,
   HEALTH_STATUSES,
+  RANGE_VERSION_POINTS,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
   NOTICE_ALERT_STATUSES,
@@ -114,9 +119,13 @@ const appInputFields = {
 };
 
 const dependencyFields = {
-  name: text,
-  currentVersion: text,
-  latestVersion: nullable('string'),
+  name: {...text, maxLength: DEPENDENCY_NAME_MAX_LENGTH, description: 'Changing it clears what monitoring found'},
+  currentVersion: {
+    ...text,
+    maxLength: DEPENDENCY_VERSION_MAX_LENGTH,
+    description: 'Changing it clears the advisories and check state, which were about the old version',
+  },
+  latestVersion: nullable('string', {maxLength: DEPENDENCY_VERSION_MAX_LENGTH}),
   vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
   recommendedAction: nullable('string'),
 };
@@ -137,24 +146,33 @@ const dependencyMonitoring = {
     items: ref('Advisory'),
     description: 'Advisories OSV knows for the tracked version',
   },
-  checkedAt: {...nullable('string', {format: 'date-time'}), description: 'Last registry check; null until the first one'},
+  checkedAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'When the registry and OSV last both answered for this name and version. ' +
+      'null until then: not checked yet, a check that failed, a package the registry does not know, or a version that is a range.',
+  },
   checkError: {
     type: ['string', 'null'],
     enum: [...DEPENDENCY_CHECK_ERRORS, null],
     description:
-      'not_found: not on the public npm registry. unavailable: a source did not answer, the previous result is kept. ' +
-      'invalid_version: the tracked version is a range or tag, so advisories cannot be matched.',
+      'not_found: not on the public npm registry. unavailable: a source gave no usable answer, the previous result is kept. ' +
+      'invalid_version: the tracked version is a range or tag, so advisories cannot be checked ' +
+      '(import package-lock.json for exact versions).',
   },
   status: {
     ...healthStatus,
-    description: 'critical with a critical or high advisory; attention with anything else that costs points; na until checked',
+    description:
+      'critical with a critical or high advisory; attention with anything else that costs points, which a version that is ' +
+      'a range always does; ok only once the registry and OSV have both answered for this name and version; ' +
+      'otherwise na (not checked yet, the check failed, or the registry does not know the package: see checkError).',
   },
 };
 
 const refreshCounts = {
-  checked: {...count, description: 'Dependencies looked up'},
+  checked: {...count, description: 'Dependencies a source was asked about'},
   notFound: {...count, description: 'Not on the public npm registry'},
-  unavailable: {...count, description: 'A source did not answer; the previous result was kept'},
+  unavailable: {...count, description: 'A source gave no usable answer; the previous result was kept'},
   advisories: {...count, description: 'Advisories now known across the checked dependencies'},
 };
 
@@ -229,14 +247,14 @@ const schemas = {
     points: {type: 'integer', minimum: 0, description: 'Points taken off the score'},
   }),
   DimensionHealth: strict({
-    status: {...healthStatus, description: 'na: the app records nothing for this dimension'},
+    status: {...healthStatus, description: 'na: the app records nothing for this dimension, or none of it has been checked yet'},
     deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
   }),
   Health: {
     ...strict({
       score: {
         ...nullable('integer', {minimum: 0, maximum: HEALTH_MAX_SCORE}),
-        description: 'null when no monitored dimension has anything to check',
+        description: 'null when no monitored dimension has anything checked: no dependencies, or none of them checked yet',
       },
       status: healthStatus,
       dimensions: strict(
@@ -265,7 +283,8 @@ const schemas = {
     type: 'object',
     description:
       'An npm package.json or package-lock.json (lockfileVersion 2 or 3), sent as it is on disk. ' +
-      `At most ${DEPENDENCY_IMPORT_MAX_BYTES / (1024 * 1024)} MB.`,
+      'It must have `lockfileVersion` and `packages`, or at least one of `dependencies`, `devDependencies` and ' +
+      `\`optionalDependencies\` (an empty one counts). At most ${DEPENDENCY_IMPORT_MAX_BYTES / BYTES_PER_MB} MB.`,
   },
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
@@ -371,10 +390,17 @@ export const openApiSpec = {
       post: {
         summary: 'Import direct dependencies from a package.json or package-lock.json, then check them',
         description:
-          'The body is the file itself. Runtime and dev dependencies are both taken (dev ones flagged `isDev`). ' +
+          'The body is the file itself. Runtime, optional and dev dependencies are taken (dev ones flagged `isDev`), ' +
+          'each under its real package name (an npm alias is resolved). ' +
           'A lockfile gives exact installed versions; a package.json gives its ranges with the operators stripped. ' +
+          `A version that is still a range (\`^16\`, \`4.x\`, \`*\`) cannot be checked for advisories: it gets status attention and costs ${RANGE_VERSION_POINTS} point. ` +
           'By name: new ones are added, known ones get the file\'s version, and ones no longer in the file are ' +
-          'removed only if an earlier import created them.',
+          'removed only if an earlier import created them. Imports of one app run one at a time. ' +
+          '400 and nothing changes when: the body is not JSON or not a package file, it is larger than the cap, ' +
+          'two entries of one list have the same name after trimming (ignoring case), ' +
+          `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
+          `The check afterwards takes at most ${DEPENDENCY_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
+          'Replaying a stored response (same Idempotency-Key) does not check again.',
         parameters: [appId, idempotencyKey],
         requestBody: body('PackageFile'),
         responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},

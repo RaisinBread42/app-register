@@ -1,7 +1,7 @@
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp} from '@/lib/services/apps';
 import {addDependency, type DependencyInput, type DependencyView} from '@/lib/services/dependencies';
-import {refreshDependencyHealth} from '@/lib/services/dependency-health';
+import {checkAfterWrite} from '@/lib/services/dependency-health';
 
 type Context = {params: Promise<{id: string}>};
 
@@ -24,7 +24,7 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
       }),
     {
       afterCommit: ({db, workspaceId}, result) =>
-        refreshDependencyHealth(db, workspaceId, id, {only: [(result.body as {dependency: DependencyView}).dependency.id]}),
+        checkAfterWrite(db, workspaceId, id, [(result.body as {dependency: DependencyView}).dependency.id]),
     },
   );
 }

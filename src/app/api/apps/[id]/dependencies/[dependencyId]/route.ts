@@ -1,5 +1,5 @@
 import {handle, jsonObject, noContent, ok} from '@/lib/api/http';
-import {refreshDependencyHealth} from '@/lib/services/dependency-health';
+import {checkAfterWrite} from '@/lib/services/dependency-health';
 import {
   removeDependency,
   updateDependency,
@@ -23,7 +23,7 @@ export async function PATCH(request: Request, {params}: Context): Promise<Respon
           jsonObject<Partial<DependencyInput>>(body),
         ),
       }),
-    {afterCommit: ({db, workspaceId}) => refreshDependencyHealth(db, workspaceId, id, {only: [dependencyId]})},
+    {afterCommit: ({db, workspaceId}) => checkAfterWrite(db, workspaceId, id, [dependencyId])},
   );
 }
 
