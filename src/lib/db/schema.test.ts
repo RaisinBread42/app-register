@@ -15,6 +15,7 @@ import {
 import {MIGRATIONS_FOLDER} from './client';
 import {newId} from './ids';
 import {
+  appDependencies,
   apps,
   attachments,
   noticeAlerts,
@@ -43,6 +44,8 @@ const ALL_TABLES = [
 ];
 
 const TABLES_0001 = ['api_keys', 'app_dependencies', 'app_hosting', 'idempotency_keys'];
+
+const COLUMNS_0002 = ['advisories', 'check_error', 'checked_at', 'is_dev', 'source'];
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
 async function seedWorkspace(t: TestDb, workspaceId: string) {
@@ -198,11 +201,10 @@ describe('database schema', () => {
   });
 
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    const down = readFileSync(
-      path.join(MIGRATIONS_FOLDER, 'rollback', '0001_api_keys_idempotency_deps_hosting.down.sql'),
-      'utf8',
-    );
-    await t.client.exec(down);
+    // Rollbacks run newest first: 0002 changed a table that 0001 created.
+    for (const file of ['0002_dependency_health.down.sql', '0001_api_keys_idempotency_deps_hosting.down.sql']) {
+      await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8'));
+    }
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
@@ -213,6 +215,27 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('rolling back migration 0002 removes only the dependency monitoring columns and keeps the dependencies, and migrating again restores them', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    await t.db.insert(appDependencies).values({id: newId(), workspaceId: w.workspaceId, appId: w.appId, name: 'left-pad', currentVersion: '1.3.0'});
+    const columns = async () =>
+      (
+        await t.client.query<{column_name: string}>(
+          `select column_name from information_schema.columns where table_name = 'app_dependencies' order by 1`,
+        )
+      ).rows.map((r) => r.column_name);
+    const before = await columns();
+
+    const down = readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', '0002_dependency_health.down.sql'), 'utf8');
+    await t.client.exec(down);
+    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0002.includes(name)));
+    const kept = await t.client.query<{name: string}>(`select name from app_dependencies`);
+    expect(kept.rows).toEqual([{name: 'left-pad'}]);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await columns()).toEqual(before);
   });
 
   it('unit tests run on in-process PGlite with the real migrations, no Docker needed', async () => {

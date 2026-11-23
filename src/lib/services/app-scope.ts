@@ -15,13 +15,30 @@ export async function assertActiveApp(
   workspaceId: string,
   appId: string,
 ): Promise<void> {
-  const [row] = isUuid(appId)
-    ? await db
-        .select({id: apps.id})
-        .from(apps)
-        .where(and(activeAppsIn(workspaceId), eq(apps.id, appId)))
-    : [];
+  const [row] = isUuid(appId) ? await activeApp(db, workspaceId, appId) : [];
   if (!row) {
     throw new NotFoundError('App not found');
   }
+}
+
+/**
+ * `assertActiveApp` that also holds the app's row (`FOR UPDATE`) until the
+ * transaction ends. Writers that start with this run one at a time per app.
+ */
+export async function lockActiveApp(
+  tx: AppDatabase,
+  workspaceId: string,
+  appId: string,
+): Promise<void> {
+  const [row] = isUuid(appId) ? await activeApp(tx, workspaceId, appId).for('update') : [];
+  if (!row) {
+    throw new NotFoundError('App not found');
+  }
+}
+
+function activeApp(db: AppDatabase, workspaceId: string, appId: string) {
+  return db
+    .select({id: apps.id})
+    .from(apps)
+    .where(and(activeAppsIn(workspaceId), eq(apps.id, appId)));
 }

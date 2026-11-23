@@ -1,12 +1,20 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {APP_LIST_SORT, ENV, FILTER_ALL, PERSON_STATUS} from '@/lib/constants';
+import {APP_HEALTH_FILTER, APP_LIST_SORT, ENV, FILTER_ALL, HEALTH_STATUS, PERSON_STATUS} from '@/lib/constants';
 import {fetchFromRoutes} from '@/lib/api/test/client';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {createApiKey} from '@/lib/services/api-keys';
+import {fakeRegistry} from '@/lib/services/test/fake-registry';
 import {ACTION_MESSAGE} from '@/lib/ui/action-result';
 import {createApiClient, type ApiClient} from '@/lib/ui/api-client';
 import {appToForm, emptyAppForm, type AppFormValues} from '@/lib/ui/forms';
-import {applyAppListView, appsWithRenewal, upcomingNoticeDeadlines} from '@/lib/ui/register-view';
+import {
+  applyAppListView,
+  appsNeedingAttention,
+  appsWithRenewal,
+  healthDistribution,
+  healthStats,
+  upcomingNoticeDeadlines,
+} from '@/lib/ui/register-view';
 import * as actions from './actions';
 
 let t: TestDb;
@@ -64,6 +72,22 @@ describe('App Register UI', () => {
     return {priya, marcus, appId: result.appId!};
   }
 
+  /** The UI server reaches the API through the route handlers; anything else is the (fake) npm registry and OSV. */
+  function stubRegistry() {
+    const registry = fakeRegistry({
+      latest: {'quill-forms': '5.0.2', 'tally-ui': '2.4.9', 'lint-kit': '9.2.0'},
+      advisories: {
+        'quill-forms@3.9.0': [
+          {id: 'GHSA-qqqq-1111-aaaa', severity: 'CRITICAL', summary: 'Template injection in quill-forms'},
+          {id: 'GHSA-qqqq-4444-dddd', severity: 'CRITICAL', summary: 'Remote code execution in quill-forms'},
+        ],
+      },
+    });
+    vi.stubGlobal('fetch', (input: string, init?: RequestInit) =>
+      input.startsWith('http://register.test') ? fetchFromRoutes(input, init) : registry.fetch(input, init),
+    );
+  }
+
   // Acceptance criteria.
 
   it('AC1: the applications list shows each app with name, kind, owner and renewal, filtered by type and search and sorted as chosen', async () => {
@@ -81,14 +105,14 @@ describe('App Register UI', () => {
     });
     const apps = await api.listApps();
 
-    const bySoonestRenewal = applyAppListView(apps, {query: '', kind: FILTER_ALL, sort: APP_LIST_SORT.renewal});
+    const bySoonestRenewal = applyAppListView(apps, {query: '', kind: FILTER_ALL, health: FILTER_ALL, sort: APP_LIST_SORT.renewal});
     expect(bySoonestRenewal.map((app) => [app.name, app.kind, app.owner.name, app.renewalDate])).toEqual([
       ['Badge Printer', 'in_house', 'Marcus Okonkwo', '2098-01-15'],
       ['Atlas Board', 'saas', 'Priya Chen', '2099-06-30'],
     ]);
-    const saasOnly = applyAppListView(apps, {query: '', kind: 'saas', sort: APP_LIST_SORT.name});
+    const saasOnly = applyAppListView(apps, {query: '', kind: 'saas', health: FILTER_ALL, sort: APP_LIST_SORT.name});
     expect(saasOnly.map((app) => app.name)).toEqual(['Atlas Board']);
-    const searched = applyAppListView(apps, {query: '  printer ', kind: FILTER_ALL, sort: APP_LIST_SORT.name});
+    const searched = applyAppListView(apps, {query: '  printer ', kind: FILTER_ALL, health: FILTER_ALL, sort: APP_LIST_SORT.name});
     expect(searched.map((app) => app.name)).toEqual(['Badge Printer']);
   });
 
@@ -191,6 +215,60 @@ describe('App Register UI', () => {
     expect(await actions.removeHostingAction(appId, hosting.id)).toEqual({ok: true});
     const after = await api.getApp(appId);
     expect([after.dependencies, after.hosting]).toEqual([[], []]);
+  });
+
+  it('importing a package file on the Dependencies tab reports what was added, updated and removed, and the page then shows versions, advisories and a score', async () => {
+    const {appId} = await seedApp();
+    stubRegistry();
+    const lockfile = JSON.stringify({
+      name: 'atlas-board',
+      lockfileVersion: 3,
+      packages: {
+        '': {dependencies: {'quill-forms': '^3.9.0', 'tally-ui': '^2.4.0'}, devDependencies: {'lint-kit': '^9.0.0'}},
+        'node_modules/quill-forms': {version: '3.9.0'},
+        'node_modules/tally-ui': {version: '2.4.9'},
+        'node_modules/lint-kit': {version: '9.2.0'},
+      },
+    });
+
+    const first = await actions.importDependenciesAction(key(), appId, lockfile);
+    expect(first).toEqual({ok: true, summary: {added: 3, updated: 0, unchanged: 0, removed: 0}});
+    const second = await actions.importDependenciesAction(key(), appId, JSON.stringify({name: 'atlas-board', dependencies: {'quill-forms': '5.0.2'}}));
+    expect(second.summary).toEqual({added: 0, updated: 1, unchanged: 0, removed: 2});
+    expect(await actions.importDependenciesAction(key(), appId, 'not a package file')).toEqual({
+      ok: false,
+      error: 'The file must be JSON: send package.json or package-lock.json as the request body',
+    });
+
+    const app = await api.getApp(appId);
+    expect(app.dependencies).toMatchObject([{name: 'quill-forms', currentVersion: '5.0.2', latestVersion: '5.0.2', advisories: [], status: HEALTH_STATUS.ok}]);
+    expect(app.health).toMatchObject({score: 100, status: HEALTH_STATUS.ok});
+    expect(await actions.refreshDependenciesAction(appId)).toEqual({ok: true});
+  });
+
+  it('the applications list sorts lowest health first and filters by needs attention or healthy; apps with no score come last and count in neither', async () => {
+    const {priya, marcus} = await seedPeople();
+    stubRegistry();
+    const create = async (name: string, dependencies?: Record<string, string>) => {
+      const {appId} = await actions.createAppAction(key(), {...atlasBoard(priya.id, marcus.id), name});
+      if (dependencies) {
+        await actions.importDependenciesAction(key(), appId!, JSON.stringify({name: 'x', dependencies}));
+      }
+    };
+    await create('Atlas Board', {'tally-ui': '2.4.9'});
+    await create('Customer Portal', {'quill-forms': '3.9.0'});
+    await create('Slate Chat');
+    const apps = await api.listApps();
+    const list = (health: string) =>
+      applyAppListView(apps, {query: '', kind: FILTER_ALL, health, sort: APP_LIST_SORT.health}).map((app) => [app.name, app.health.score]);
+
+    // Customer Portal: 100 − 10 − 10 (two critical advisories) − 3 (a major version behind).
+    expect(list(FILTER_ALL)).toEqual([['Customer Portal', 77], ['Atlas Board', 100], ['Slate Chat', null]]);
+    expect(list(APP_HEALTH_FILTER.attention)).toEqual([['Customer Portal', 77]]);
+    expect(list(APP_HEALTH_FILTER.healthy)).toEqual([['Atlas Board', 100]]);
+    expect(healthStats(apps)).toEqual({average: 89, healthy: 1, needAttention: 1});
+    expect(appsNeedingAttention(apps).map((app) => app.name)).toEqual(['Customer Portal']);
+    expect(healthDistribution(apps).map((band) => [band.range, band.count])).toEqual([['95–100', 1], ['80–94', 0], ['Below 80', 1]]);
   });
 
   it('AC7: archiving an app removes it from the apps list but keeps its page', async () => {

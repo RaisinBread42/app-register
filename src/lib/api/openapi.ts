@@ -1,6 +1,21 @@
 import {
+  ADVISORY_SEVERITIES,
+  BYTES_PER_MB,
   APP_KINDS,
   APP_SORTS,
+  DEPENDENCY_CHECK_ERRORS,
+  DEPENDENCY_FOLLOW_UP_BUDGET_MS,
+  DEPENDENCY_IMPORT_MAX_BYTES,
+  DEPENDENCY_NAME_MAX_LENGTH,
+  DEPENDENCY_VERSION_MAX_LENGTH,
+  DEPENDENCY_SOURCES,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_CRITICAL_BELOW,
+  HEALTH_DIMENSION,
+  HEALTH_DIMENSIONS,
+  HEALTH_MAX_SCORE,
+  HEALTH_STATUSES,
+  RANGE_VERSION_POINTS,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
   NOTICE_ALERT_STATUSES,
@@ -91,6 +106,7 @@ const appProperties = {
   ...appFields,
   owner: personRef,
   backupOwner: personRef,
+  health: ref('Health'),
   archivedAt: nullable('string', {format: 'date-time'}),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -103,11 +119,61 @@ const appInputFields = {
 };
 
 const dependencyFields = {
-  name: text,
-  currentVersion: text,
-  latestVersion: nullable('string'),
+  name: {...text, maxLength: DEPENDENCY_NAME_MAX_LENGTH, description: 'Changing it clears what monitoring found'},
+  currentVersion: {
+    ...text,
+    maxLength: DEPENDENCY_VERSION_MAX_LENGTH,
+    description: 'Changing it clears the advisories and check state, which were about the old version',
+  },
+  latestVersion: nullable('string', {maxLength: DEPENDENCY_VERSION_MAX_LENGTH}),
   vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
   recommendedAction: nullable('string'),
+};
+
+const count: Schema = {type: 'integer', minimum: 0};
+const healthStatus: Schema = {type: 'string', enum: [...HEALTH_STATUSES]};
+
+/** What monitoring stores on a dependency; read-only in the API. */
+const dependencyMonitoring = {
+  source: {
+    type: 'string',
+    enum: [...DEPENDENCY_SOURCES],
+    description: 'How it got here. An import only removes dependencies an import created.',
+  },
+  isDev: {type: 'boolean', description: 'A devDependency in the imported file'},
+  advisories: {
+    type: 'array',
+    items: ref('Advisory'),
+    description: 'Advisories OSV knows for the tracked version',
+  },
+  checkedAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'When the registry and OSV last both answered for this name and version. ' +
+      'null until then: not checked yet, a check that failed, a package the registry does not know, or a version that is a range.',
+  },
+  checkError: {
+    type: ['string', 'null'],
+    enum: [...DEPENDENCY_CHECK_ERRORS, null],
+    description:
+      'not_found: not on the public npm registry. unavailable: a source gave no usable answer, the previous result is kept. ' +
+      'invalid_version: the tracked version is a range or tag, so advisories cannot be checked ' +
+      '(import package-lock.json for exact versions).',
+  },
+  status: {
+    ...healthStatus,
+    description:
+      'critical with a critical or high advisory; attention with anything else that costs points, which a version that is ' +
+      'a range always does; ok only once the registry and OSV have both answered for this name and version; ' +
+      'otherwise na (not checked yet, the check failed, or the registry does not know the package: see checkError).',
+  },
+};
+
+const refreshCounts = {
+  checked: {...count, description: 'Dependencies a source was asked about'},
+  notFound: {...count, description: 'Not on the public npm registry'},
+  unavailable: {...count, description: 'A source gave no usable answer; the previous result was kept'},
+  advisories: {...count, description: 'Advisories now known across the checked dependencies'},
 };
 
 const hostingFields = {
@@ -159,7 +225,67 @@ const schemas = {
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
-  Dependency: strict({id, appId: id, ...dependencyFields, createdAt: timestamp, updatedAt: timestamp}),
+  Dependency: strict({
+    id,
+    appId: id,
+    ...dependencyFields,
+    ...dependencyMonitoring,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }),
+  Advisory: strict({
+    id: {...text, examples: ['GHSA-p6mc-m468-83gw']},
+    aliases: {type: 'array', items: text, description: 'Other ids for the same advisory, e.g. its CVE'},
+    severity: {type: 'string', enum: [...ADVISORY_SEVERITIES]},
+    summary: text,
+    url: {type: 'string', format: 'uri'},
+  }),
+  Deduction: strict({
+    dimension: {type: 'string', enum: [...HEALTH_DIMENSIONS]},
+    label: text,
+    detail: text,
+    points: {type: 'integer', minimum: 0, description: 'Points taken off the score'},
+  }),
+  DimensionHealth: strict({
+    status: {...healthStatus, description: 'na: the app records nothing for this dimension, or none of it has been checked yet'},
+    deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
+  }),
+  Health: {
+    ...strict({
+      score: {
+        ...nullable('integer', {minimum: 0, maximum: HEALTH_MAX_SCORE}),
+        description: 'null when no monitored dimension has anything checked: no dependencies, or none of them checked yet',
+      },
+      status: healthStatus,
+      dimensions: strict(
+        Object.fromEntries(
+          HEALTH_DIMENSIONS.map((dimension) => [
+            dimension,
+            {oneOf: [ref('DimensionHealth'), {type: 'null'}], description: 'null: not monitored yet'},
+          ]),
+        ),
+      ),
+    }),
+    description:
+      `Starts at ${HEALTH_MAX_SCORE} and loses the points of every deduction (floor 0). ` +
+      `Below ${HEALTH_CRITICAL_BELOW} is critical, below ${HEALTH_ATTENTION_BELOW} is attention, otherwise ok. ` +
+      `Only \`${HEALTH_DIMENSION.dependencies}\` is monitored so far.`,
+  },
+  DependencyImport: strict({
+    added: count,
+    updated: {...count, description: 'Known dependencies whose version changed'},
+    unchanged: count,
+    removed: {...count, description: 'Imported earlier and no longer in the file'},
+  }),
+  DependencyRefresh: strict(refreshCounts),
+  WorkspaceDependencyRefresh: strict({apps: {...count, description: 'Active apps with dependencies'}, ...refreshCounts}),
+  PackageFile: {
+    type: 'object',
+    description:
+      'An npm package.json or package-lock.json (lockfileVersion 2 or 3), sent as it is on disk. ' +
+      'It must have `lockfileVersion` and `packages`, or at least one of `dependencies`, `devDependencies` and ' +
+      `\`optionalDependencies\` (an empty one counts). At most ${DEPENDENCY_IMPORT_MAX_BYTES / BYTES_PER_MB} MB.`,
+  },
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
   Hosting: strict({id, appId: id, ...hostingFields, createdAt: timestamp, updatedAt: timestamp}),
@@ -178,7 +304,7 @@ export const openApiSpec = {
     description:
       'Register of bought SaaS and in-house apps. Every request except this document needs ' +
       '`Authorization: Bearer <API key>`; the key decides the workspace. POST and PATCH need an ' +
-      '`Idempotency-Key` header. Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
+      '`Idempotency-Key` header (except the refresh endpoints, which are safe to repeat). Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
   },
   servers: [{url: '/'}],
   security: [{bearerAuth: []}],
@@ -254,15 +380,47 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a dependency (name unique per app, case-insensitive)',
+        summary: 'Add a dependency (name unique per app, case-insensitive); it is then checked against the registry',
         parameters: [appId, idempotencyKey],
         requestBody: body('DependencyInput'),
         responses: {201: json(strict({dependency: ref('Dependency')}), 'Added'), ...errors},
       },
     },
+    '/api/apps/{id}/dependencies/import': {
+      post: {
+        summary: 'Import direct dependencies from a package.json or package-lock.json, then check them',
+        description:
+          'The body is the file itself. Runtime, optional and dev dependencies are taken (dev ones flagged `isDev`), ' +
+          'each under its real package name (an npm alias is resolved). ' +
+          'A lockfile gives exact installed versions; a package.json gives its ranges with the operators stripped. ' +
+          `A version that is still a range (\`^16\`, \`4.x\`, \`*\`) cannot be checked for advisories: it gets status attention and costs ${RANGE_VERSION_POINTS} point. ` +
+          'By name: new ones are added, known ones get the file\'s version, and ones no longer in the file are ' +
+          'removed only if an earlier import created them. Imports of one app run one at a time. ' +
+          '400 and nothing changes when: the body is not JSON or not a package file, it is larger than the cap, ' +
+          'two entries of one list have the same name after trimming (ignoring case), ' +
+          `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
+          `The check afterwards takes at most ${DEPENDENCY_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
+          'Replaying a stored response (same Idempotency-Key) does not check again.',
+        parameters: [appId, idempotencyKey],
+        requestBody: body('PackageFile'),
+        responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},
+      },
+    },
+    '/api/apps/{id}/dependencies/refresh': {
+      post: {
+        summary: "Check an app's dependencies against the npm registry and OSV now",
+        description: 'Safe to repeat, so it needs no Idempotency-Key. One package failing never fails the refresh.',
+        parameters: [appId],
+        responses: {
+          200: json(strict({refresh: ref('DependencyRefresh')}), 'Checked'),
+          401: errors[401],
+          404: errors[404],
+        },
+      },
+    },
     '/api/apps/{id}/dependencies/{dependencyId}': {
       patch: {
-        summary: 'Update a dependency',
+        summary: 'Update a dependency; it is then checked again',
         parameters: [appId, pathId('dependencyId', 'Dependency id'), idempotencyKey],
         requestBody: body('DependencyPatch'),
         responses: {200: json(strict({dependency: ref('Dependency')}), 'Updated'), ...errors},
@@ -301,6 +459,16 @@ export const openApiSpec = {
         summary: 'Remove a hosting entry (a second delete answers 404)',
         parameters: [appId, pathId('hostingId', 'Hosting entry id')],
         responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
+      },
+    },
+    '/api/monitoring/dependencies/refresh': {
+      post: {
+        summary: 'Check the dependencies of every active app (the daily scheduled job calls this)',
+        description: 'Safe to repeat, so it needs no Idempotency-Key.',
+        responses: {
+          200: json(strict({refresh: ref('WorkspaceDependencyRefresh')}), 'Checked'),
+          401: errors[401],
+        },
       },
     },
     '/api/people': {

@@ -3,7 +3,7 @@
 import {revalidatePath} from 'next/cache';
 import {PERSON_STATUS, ROUTES, appRoute} from '@/lib/constants';
 import {runAction, type ActionResult} from '@/lib/ui/action-result';
-import {apiClient, type PersonInput} from '@/lib/ui/api-client';
+import {apiClient, type DependencyImport, type PersonInput} from '@/lib/ui/api-client';
 import {
   formToAppInput,
   formToDependencyInput,
@@ -60,13 +60,35 @@ export async function saveDependencyAction(
       ? apiClient().updateDependency(idempotencyKey, appId, dependencyId, input)
       : apiClient().addDependency(idempotencyKey, appId, input);
   });
-  revalidatePath(appRoute(appId));
+  refreshApps();
+  return result;
+}
+
+export type ImportDependenciesResult = ActionResult & {summary?: DependencyImport};
+
+/** `fileText` is the package.json or package-lock.json the user picked; the API checks its size and shape. */
+export async function importDependenciesAction(
+  idempotencyKey: string,
+  appId: string,
+  fileText: string,
+): Promise<ImportDependenciesResult> {
+  let summary: DependencyImport | undefined;
+  const result = await runAction(async () => {
+    summary = await apiClient().importDependencies(idempotencyKey, appId, fileText);
+  });
+  refreshApps();
+  return {...result, summary};
+}
+
+export async function refreshDependenciesAction(appId: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().refreshDependencies(appId));
+  refreshApps();
   return result;
 }
 
 export async function removeDependencyAction(appId: string, dependencyId: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().removeDependency(appId, dependencyId));
-  revalidatePath(appRoute(appId));
+  refreshApps();
   return result;
 }
 

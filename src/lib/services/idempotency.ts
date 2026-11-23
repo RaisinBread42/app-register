@@ -7,6 +7,9 @@ import {IdempotencyConflictError, ValidationError} from './errors';
 
 export type ApiResult = {status: number; body: unknown};
 
+/** `isReplay`: the write did not run now; this is the response stored when it first ran. */
+export type RunOnceResult = ApiResult & {isReplay: boolean};
+
 /** Claim, or read what another request stored; twice covers a key swept in between. */
 const CLAIM_ATTEMPTS = 2;
 
@@ -26,7 +29,7 @@ export async function runOnce(
   key: string | null,
   request: {method: string; path: string; body: string},
   write: (tx: AppDatabase) => Promise<ApiResult>,
-): Promise<ApiResult> {
+): Promise<RunOnceResult> {
   if (!key || key.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
     throw new ValidationError(
       `An Idempotency-Key header (1 to ${IDEMPOTENCY_KEY_MAX_LENGTH} characters) is required`,
@@ -53,11 +56,11 @@ export async function runOnce(
         .onConflictDoNothing()
         .returning({key: idempotencyKeys.key});
       if (claimed.length > 0) {
-        return runAndStore(tx, workspaceId, key, write);
+        return {...(await runAndStore(tx, workspaceId, key, write)), isReplay: false};
       }
       const stored = await findStored(tx, workspaceId, key);
       if (stored) {
-        return replay(stored, requestHash);
+        return {...replay(stored, requestHash), isReplay: true};
       }
     }
     throw new Error('Could not claim the Idempotency-Key');

@@ -16,6 +16,7 @@ export default async function AppPage({params, searchParams}: Props) {
       keys={{
         archive: crypto.randomUUID(),
         addDependency: crypto.randomUUID(),
+        importDependencies: crypto.randomUUID(),
         addHosting: crypto.randomUUID(),
         dependencies: keysFor(app.dependencies),
         hosting: keysFor(app.hosting),

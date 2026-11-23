@@ -1,4 +1,5 @@
 import {handle, jsonObject, noContent, ok} from '@/lib/api/http';
+import {checkAfterWrite} from '@/lib/services/dependency-health';
 import {
   removeDependency,
   updateDependency,
@@ -7,19 +8,22 @@ import {
 
 type Context = {params: Promise<{id: string; dependencyId: string}>};
 
-/** PATCH /api/apps/:id/dependencies/:dependencyId → `{ dependency: Dependency }` */
+/** PATCH /api/apps/:id/dependencies/:dependencyId → `{ dependency: Dependency }`, then the dependency is checked again. */
 export async function PATCH(request: Request, {params}: Context): Promise<Response> {
   const {id, dependencyId} = await params;
-  return handle(request, async ({db, workspaceId, body}) =>
-    ok({
-      dependency: await updateDependency(
-        db,
-        workspaceId,
-        id,
-        dependencyId,
-        jsonObject<Partial<DependencyInput>>(body),
-      ),
-    }),
+  return handle(
+    request,
+    async ({db, workspaceId, body}) =>
+      ok({
+        dependency: await updateDependency(
+          db,
+          workspaceId,
+          id,
+          dependencyId,
+          jsonObject<Partial<DependencyInput>>(body),
+        ),
+      }),
+    {afterCommit: ({db, workspaceId}) => checkAfterWrite(db, workspaceId, id, [dependencyId])},
   );
 }
 
