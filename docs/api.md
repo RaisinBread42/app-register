@@ -75,7 +75,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 | POST | `/api/people` | Add (email trimmed, lowercased, unique per workspace) |
 | PATCH | `/api/people/:id` | Rename, re-email, or `{"status":"left","leftOn":"YYYY-MM-DD"}`; `{"status":"active"}` reverses it |
 | GET | `/api/notice-alerts` | `?status=`, `?appId=`; by due date; includes archived apps' history |
-| POST | `/api/notice-alerts/send` | Send every due notice-deadline alert email → `{ send: { sent } }`. **The daily scheduled job calls this** (no Idempotency-Key) |
+| POST | `/api/notice-alerts/send` | Send every due notice-deadline alert email → `{ send: { sent } }` (no Idempotency-Key). Invokable now; schedule daily only once email leaves the sink |
 | POST | `/api/notice-alerts/:id/acknowledge` | Mark seen; first time wins; never changes the app |
 | GET | `/api/openapi.json` | The spec (no key needed) |
 
@@ -187,10 +187,15 @@ Which incidents reach a row:
 - Only catalog values are sent: the endoflife.date product and the fixed feed URLs, with `User-Agent: app-register`, at most 6 requests at a time with an 8 second timeout that covers the whole answer (a body that keeps dripping is cut off too). Nothing a person typed (provider, service, version, region) leaves the server.
 - Public status pages only show what a provider chooses to publish, never account-specific incidents.
 
-The daily jobs are two requests, each safe to repeat:
+The daily health job is one request, safe to repeat:
 
 ```bash
 curl -fsS -X POST "$APP_REGISTER_URL/api/monitoring/refresh" -H "Authorization: Bearer $APP_REGISTER_API_KEY"
+```
+
+Notice-deadline email send is the same shape, but leave it on-demand (or behind a real `EMAIL_PROVIDER`) so a sink does not mark alerts sent with nowhere for the mail to land:
+
+```bash
 curl -fsS -X POST "$APP_REGISTER_URL/api/notice-alerts/send" -H "Authorization: Bearer $APP_REGISTER_API_KEY"
 ```
 

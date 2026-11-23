@@ -6,7 +6,8 @@ import {sendDueNoticeAlerts} from '@/lib/services/notice-alert-send';
 /**
  * POST /api/notice-alerts/send → `{ send: { sent } }`
  * Sends every due notice-deadline alert email for the workspace.
- * The daily scheduled job calls this. Safe to repeat.
+ * Invokable now; schedule a daily job only once `EMAIL_PROVIDER` is a real sender
+ * (a sink would mark alerts sent with nowhere for the mail to land). Safe to repeat.
  */
 export function POST(request: Request): Promise<Response> {
   return handle(
@@ -16,7 +17,7 @@ export function POST(request: Request): Promise<Response> {
       const send = await sendDueNoticeAlerts(db, workspaceId, {
         email: createEmailPort(),
         from,
-        appUrl: process.env[ENV.appUrl],
+        appUrl: process.env[ENV.appPublicUrl] || process.env[ENV.appUrl],
       });
       return ok({send});
     },

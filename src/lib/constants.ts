@@ -70,8 +70,13 @@ export const OVERVIEW_LIST_LIMIT = 5;
 
 /** Environment variables the UI server reads. Never exposed to the browser. */
 export const ENV = {
-  /** Base URL of this app; the UI server calls `${APP_URL}/api/*`. */
+  /** Base URL the UI server uses to call `${APP_URL}/api/*` (often loopback in UAT). */
   appUrl: 'APP_URL',
+  /**
+   * Public base URL for links in outbound email. Falls back to `APP_URL` when unset
+   * (local/dev). UAT sets this to the ingress URL so mail never points at localhost.
+   */
+  appPublicUrl: 'APP_PUBLIC_URL',
   /** Bearer key the UI server sends to the API (`npm run api-key:create -- "UI"`). */
   apiKey: 'APP_REGISTER_API_KEY',
   /** Shared password for HTTP Basic auth on every UI route (temporary until sign-in). */

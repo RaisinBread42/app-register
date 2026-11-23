@@ -18,8 +18,9 @@ Variable **names** only, never values.
 | --- | --- | --- |
 | `DATABASE_URL` | Postgres connection URL (`postgres://user:password@host:5432/db`) | Host env / secrets; local value in `.env.example` matches `docker-compose.yml` |
 | `EMAIL_FROM` | From-address for notice alerts | Host env / secrets |
-| `EMAIL_PROVIDER` | `sink` (tests) or provider id | Host env |
-| `APP_URL` | Base URL of this app: links in email, and the address the UI server calls for `/api/*` | Host env |
+| `EMAIL_PROVIDER` | `sink` (tests / early UAT) or provider id. Keep the daily notice-alert cron off while this is `sink` | Host env |
+| `APP_URL` | Address the UI server calls for `/api/*` (loopback in UAT) | Host env |
+| `APP_PUBLIC_URL` | Public base URL for links in outbound email; falls back to `APP_URL` when unset | Host env |
 | `APP_REGISTER_API_KEY` | Bearer key the UI server sends to the JSON API. Server side only, never `NEXT_PUBLIC_*`. Create it with `npm run api-key:create -- "UI"` | Host secrets |
 | `UI_PASSWORD` | Shared password for every UI page (HTTP Basic auth; any username). Unset means the UI answers 503 to everyone. `/api/*` is not behind it | Host secrets |
 
