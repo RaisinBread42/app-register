@@ -26,15 +26,22 @@ Authorization: Bearer ar_…
 | Situation | Result |
 | --- | --- |
 | No header, or longer than 255 characters | `400`, nothing written |
-| First request with a key | Runs normally; a 2xx response is stored |
-| Same key, same method, path and body (a double-click, or a retry after a timeout) | The stored response is replayed. Nothing runs again. This holds even when both requests arrive at the same moment. |
+| First request with a key | Runs normally; for a 2xx the status code and which resource it answered about are recorded |
+| Same key, same method, path and body (a double-click, or a retry after a timeout) | Nothing runs again. The answer is a replay: the same status code as the first time, and the resource's current state. This holds even when both requests arrive at the same moment. |
 | Same key, different method, path or body | `422`, nothing written |
 | First request failed (4xx or 5xx) | Nothing is stored, so a retry with the same key runs normally |
-| More than 24 hours later | The key is forgotten; the request runs as new. Expired rows (which hold a copy of the response, possibly names and emails) are deleted on the next POST/PATCH in any workspace. |
+| More than 24 hours later | The key is forgotten; the request runs as new. Expired rows are deleted on the next POST/PATCH in any workspace. |
 
 Bodies are compared byte for byte, so send the same JSON text when retrying. Keys are scoped per workspace.
 
-How it works: the key is claimed inside the same database transaction as the write. A concurrent duplicate waits on that claim, then reads the committed response. Exactly one request does the work.
+How it works: the key is claimed inside the same database transaction as the write. A concurrent duplicate waits on that claim, then reads what the first one recorded. Exactly one request does the work.
+
+**A replay returns the same status and the resource's current state**, not a copy of the first response (which is what it was before migration `0004`). No response body is stored: the key's row holds the status code, the kind of resource (`app`, `person`, `dependency`, `hosting`, `notice_alert`, `dependency_import`) and its id, and the replay reads that resource again the way a `GET` would.
+
+- Usually the two are the same. They differ when the resource changed in between: a replayed `POST /api/apps/:id/dependencies` shows what the check has found since, and a replay after someone else's edit shows that edit.
+- If the resource has since been deleted (a dependency or hosting entry), the replay answers `404`, like any read. The write still ran only once.
+- An import answers with counts, not a resource, so its four counts are stored as numbers and replayed exactly.
+- Migration `0004` (and its rollback) deletes the keys stored so far, because the old rows held only a JSON copy of the response. A request first sent before it and retried after it runs again as new.
 
 `GET` and `DELETE` are naturally safe to repeat: a second `DELETE` of the same row answers `404`. The two dependency refresh endpoints are also safe to repeat (they only re-check), so they take no `Idempotency-Key`.
 
@@ -105,7 +112,7 @@ Two free sources, no account or key:
 | OSV.dev | `POST https://api.osv.dev/v1/querybatch` with `{package: {name, ecosystem: "npm"}, version}` per dependency (following `next_page_token`, at most 10 pages), then `GET https://api.osv.dev/v1/vulns/<id>` | `advisories`: id, aliases, severity (GitHub's rating in `database_specific.severity`), summary, link |
 
 - A check runs after an import, after a dependency is added or edited by hand, and on the two refresh endpoints. It runs after the write has committed, never inside its transaction; if a source is down the write still succeeds.
-- The check that follows a write holds up its response for at most 15 seconds. What it has not reached by then stays unchecked (status `na`) until the next refresh. It does not run again when a stored response is replayed for an `Idempotency-Key`. The refresh endpoints themselves have no overall limit.
+- The check that follows a write holds up its response for at most 15 seconds. What it has not reached by then stays unchecked (status `na`) until the next refresh. It does not run again when a request is replayed for an `Idempotency-Key`. The refresh endpoints themselves have no overall limit.
 - Each dependency stores `latestVersion`, `advisories`, `checkedAt` and `checkError`. One package failing never fails the refresh: `not_found` (not on the public registry: private, misspelt, or not an npm package), `unavailable` (a source gave no usable answer; the previous result is kept), `invalid_version` (the tracked version is a range or tag, so advisories cannot be checked).
 - `checkedAt` is set only when the registry and OSV have both answered for the dependency's current name and version. It is `null` for a dependency not checked yet, one whose first check failed, one the registry does not know, and one whose version is a range. A later failed check keeps the earlier `checkedAt` and results, and adds `checkError: "unavailable"`.
 - Changing a dependency's name or version (by `PATCH` or by an import) clears its advisories, `checkedAt` and `checkError`; a rename also clears `latestVersion`, unless the same request sends a new one. A check that was in flight for the old name or version is discarded.

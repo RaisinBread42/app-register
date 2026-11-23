@@ -8,7 +8,7 @@ App Register is a flat-priced register of the SaaS a company buys and the apps i
 
 Browser → Next.js App Router (`src/app/`) → server actions or route handlers → domain services (`src/lib/services/`) → Drizzle (`src/lib/db/`) → Postgres 18.
 
-JSON API: route handlers in `src/app/api/` ([api.md](api.md); OpenAPI spec in `src/lib/api/openapi.ts`). Every handler goes through `handle()` in `src/lib/api/http.ts`: bearer API key → workspace, `Idempotency-Key` on POST/PATCH, errors → `{ error }`. Services only touch rows in that workspace.
+JSON API: route handlers in `src/app/api/` ([api.md](api.md); OpenAPI spec in `src/lib/api/openapi.ts`). Every handler goes through `handle()` in `src/lib/api/http.ts`: bearer API key → workspace, `Idempotency-Key` on POST/PATCH, errors → `{ error }`. No response is stored for an `Idempotency-Key`: each POST/PATCH route names the row it answered about (`RESOURCE_KIND` + id; an import adds its counts), `idempotency_keys` keeps that with the status code, and a repeat is answered by reading the row again (`src/lib/api/replay.ts`). Services only touch rows in that workspace.
 
 UI (`src/app/(register)/`): server components load data and server actions submit it, both through `src/lib/ui/api-client.ts`, which calls `${APP_URL}/api/*` over HTTP with `APP_REGISTER_API_KEY`. Client components never call the API and never see the key. Each POST/PATCH sends an `Idempotency-Key` that the page rendered for that user action, so a double-click or retry of one Save is one write. `src/proxy.ts` puts every non-API route behind HTTP Basic auth with `UI_PASSWORD` (fails closed when unset); `/api/*` keeps its bearer keys.
 
@@ -43,6 +43,7 @@ UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, e
 - Seed and demo data must be fictional — never real company, client, or employer data.
 - No magic strings for statuses, kinds, routes, or alert offsets: put them in `src/lib/constants.ts`.
 - Every table except `workspaces` carries `workspace_id`; children reference parents by `(id, workspace_id)` so a row can never point into another workspace. One default workspace until sign-in exists.
+- Relational data only: no `json`/`jsonb` columns, no array columns and no serialised JSON in a text column; a list becomes a child table (see `dependency_advisories`), and a test in `src/lib/db/schema.test.ts` fails on any JSON or array column.
 - Allowed values are `text` plus a `CHECK` built from the arrays in `src/lib/constants.ts` (no Postgres `ENUM`).
 - Ids come from `newId()` (`src/lib/db/ids.ts`), never a DB default. `updated_at` is set by Drizzle `$onUpdate`, so all writes go through services.
 - Apps are soft-deleted (`archived_at`); active-app queries share one filter in `src/lib/services/apps.ts`.
