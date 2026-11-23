@@ -16,9 +16,9 @@ import {Tooltip} from '@astryxdesign/core/Tooltip';
 import {VStack} from '@astryxdesign/core/VStack';
 import {DEPENDENCY_IMPORT_MAX_BYTES} from '@/lib/constants';
 import type {AppDetail, Dependency, DependencyImport} from '@/lib/ui/api-client';
-import {CHECK_ERROR_LABEL, NOT_SET, SEVERITY_VARIANT, orDash} from '@/lib/ui/copy';
+import {NOT_SET, SEVERITY_VARIANT, orDash} from '@/lib/ui/copy';
 import {dependencyToForm, type DependencyFormValues} from '@/lib/ui/forms';
-import {formatDate, handRecordedAdvisories, lastChecked, worstAdvisoriesFirst} from '@/lib/ui/register-view';
+import {formatDate, handRecordedAdvisories, lastChecked, statusNote, worstAdvisoriesFirst} from '@/lib/ui/register-view';
 import {importDependenciesAction, refreshDependenciesAction, removeDependencyAction, saveDependencyAction} from '../../actions';
 import {FootNote, PanelCard} from '../../_components/Cards';
 import {EditDialog} from '../../_components/EditDialog';
@@ -256,11 +256,13 @@ function AdvisoriesCell({dependency}: {dependency: Dependency}) {
   );
 }
 
+/** The status pill, with the reason beside it when a check failed, could not be done, or has not run yet. */
 function StatusCell({dependency}: {dependency: Dependency}) {
+  const note = statusNote(dependency);
   return (
     <HStack gap={1} vAlign="center" wrap="wrap">
       <CheckPill status={dependency.status} />
-      {dependency.checkError && <Badge label={CHECK_ERROR_LABEL[dependency.checkError]} variant="neutral" />}
+      {note && <Badge label={note} variant="neutral" />}
     </HStack>
   );
 }

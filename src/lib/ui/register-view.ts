@@ -11,6 +11,7 @@ import {
   type HealthStatus,
 } from "@/lib/constants";
 import type { Advisory, App, Dependency, Hosting } from "./api-client";
+import { CHECK_ERROR_LABEL, NOT_CHECKED_YET } from "./copy";
 
 /**
  * Display-only shaping of data the pages already loaded: search, filters,
@@ -129,7 +130,18 @@ export function worstAdvisoriesFirst(advisories: Advisory[]): Advisory[] {
   return [...advisories].sort((a, b) => rank(a) - rank(b));
 }
 
-/** The most recent registry check among an app's dependencies, as YYYY-MM-DD, or null. */
+/**
+ * The note beside a dependency's status pill: why its last check gave no full
+ * answer, or that it has not been checked yet. Null when there is nothing to add.
+ */
+export function statusNote(dependency: Dependency): string | null {
+  if (dependency.checkError) {
+    return CHECK_ERROR_LABEL[dependency.checkError];
+  }
+  return dependency.status === HEALTH_STATUS.na ? NOT_CHECKED_YET : null;
+}
+
+/** The most recent complete check (registry and advisories) among an app's dependencies, as YYYY-MM-DD, or null. */
 export function lastChecked(dependencies: Dependency[]): string | null {
   const dates = dependencies.flatMap((dependency) => dependency.checkedAt ?? []).sort();
   return dates.at(-1)?.slice(0, 10) ?? null;

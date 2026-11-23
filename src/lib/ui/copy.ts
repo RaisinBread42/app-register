@@ -54,8 +54,8 @@ export const LIVE_DATA_NOTE =
 export const HEALTH_BASIS_NOTE = "Based on dependencies; hosting checks coming soon.";
 export const NO_SCORE_TITLE = "No health score yet";
 export const NO_SCORE_HINT =
-  "Import a package.json or package-lock.json on an application's Dependencies tab to score it.";
-export const NOTHING_TO_CHECK = "Nothing recorded to check";
+  "Import a package.json or package-lock.json on an application's Dependencies tab to score it. A score appears once its dependencies have been checked.";
+export const NOTHING_TO_CHECK = "Nothing recorded or checked yet";
 
 /** Badge colours of the prototype's score and check pills. */
 export type StatusVariant = "green" | "yellow" | "red" | "neutral";
@@ -96,8 +96,11 @@ export const SEVERITY_VARIANT: Record<AdvisorySeverity, StatusVariant> = {
 export const CHECK_ERROR_LABEL: Record<DependencyCheckError, string> = {
   [DEPENDENCY_CHECK_ERROR.notFound]: "Not found in registry",
   [DEPENDENCY_CHECK_ERROR.unavailable]: "Check failed; will retry",
-  [DEPENDENCY_CHECK_ERROR.invalidVersion]: "Version is not exact; advisories not checked",
+  [DEPENDENCY_CHECK_ERROR.invalidVersion]:
+    "Version is a range; import package-lock.json for exact versions",
 };
+/** Why a dependency has no status when no check has failed: none has finished yet. */
+export const NOT_CHECKED_YET = "Not checked yet";
 
 export const NOT_SET = "—";
 

@@ -47,7 +47,7 @@ type AppFields = {
 
 export type Deduction = {dimension: HealthDimension; label: string; detail: string; points: number};
 export type DimensionHealth = {status: HealthStatus; deductions: Deduction[]};
-/** `score` is null when nothing is recorded to check; a dimension is null until it is monitored. */
+/** `score` is null when nothing is recorded or nothing has been checked yet; a dimension is null until it is monitored. */
 export type Health = {
   score: number | null;
   status: HealthStatus;
