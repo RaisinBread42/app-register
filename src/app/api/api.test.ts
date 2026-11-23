@@ -8,6 +8,9 @@ import {
   DEPENDENCY_IMPORT_MAX_BYTES,
   END_OF_SUPPORT_SOURCE,
   HEALTH_STATUS,
+  HOSTING_CHECK_ERROR_MAX_LENGTH,
+  HOSTING_NAME_MAX_LENGTH,
+  HOSTING_VERSION_MAX_LENGTH,
   NOTICE_ALERT_STATUS,
   PERSON_STATUS,
 } from '@/lib/constants';
@@ -285,6 +288,128 @@ describe('JSON API', () => {
       },
     });
     expect((await api('POST', '/api/monitoring/refresh', {idempotencyKey: null, key: null})).status).toBe(401);
+  });
+
+  // Hosting follows the same rules as dependencies.
+
+  it('the hosting check after a save runs once the write has committed, never inside its transaction, and not again when the stored response is replayed', async () => {
+    const {app} = await seedApp();
+    const feeds = stubFeeds();
+    let openTransactions = 0;
+    const openDuringFetch: number[] = [];
+    const transaction = t.db.transaction.bind(t.db);
+    const spy = vi.spyOn(t.db, 'transaction').mockImplementation((async (...args: Parameters<typeof transaction>) => {
+      openTransactions++;
+      try {
+        return await transaction(...args);
+      } finally {
+        openTransactions--;
+      }
+    }) as typeof transaction);
+    const send = globalThis.fetch as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      openDuringFetch.push(openTransactions);
+      return send(url, init);
+    });
+    const body = {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'};
+
+    const first = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'save-1', body});
+    expect(first.status).toBe(201);
+    const afterFirst = feeds.requested.length;
+    expect(afterFirst).toBe(2);
+    expect(openDuringFetch).toEqual([0, 0]);
+    expect(spy).toHaveBeenCalled();
+
+    const replay = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'save-1', body});
+    expect(replay.body).toEqual(first.body);
+    expect(feeds.requested.length).toBe(afterFirst);
+
+    await api('PATCH', `/api/apps/${app.id}/hosting/${first.body.hosting.id}`, {idempotencyKey: 'edit-1', body: {runtimeVersion: '24'}});
+    await api('PATCH', `/api/apps/${app.id}/hosting/${first.body.hosting.id}`, {idempotencyKey: 'edit-1', body: {runtimeVersion: '24'}});
+    expect(feeds.requested.length).toBe(afterFirst + 2);
+    expect(openDuringFetch.every((open) => open === 0)).toBe(true);
+  });
+
+  it('when the sources are down the hosting save still stands, is not repeated, and the row shows as not checked with the reason, never ok', async () => {
+    const {app} = await seedApp();
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('fetch failed');
+    });
+
+    const saved = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}});
+    expect(saved.status).toBe(201);
+    expect((await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}})).body).toEqual(saved.body);
+
+    const {hosting, health} = (await api('GET', `/api/apps/${app.id}`)).body.app;
+    expect(hosting).toHaveLength(1);
+    expect(hosting[0]).toMatchObject({status: HEALTH_STATUS.na, healthError: 'Vercel status could not be reached (fetch failed)', incidents: []});
+    expect(health).toMatchObject({score: null, status: HEALTH_STATUS.na, dimensions: {hosting: {status: HEALTH_STATUS.na, deductions: []}}});
+  });
+
+  it('the hosting refresh endpoints need no Idempotency-Key, a hosting save still needs one, and a refresh of an unknown or archived app is 404', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    expect((await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: null, body: {provider: 'Vercel', service: 'Hosting'}})).status).toBe(400);
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting'}});
+
+    for (const path of [`/api/apps/${app.id}/hosting/refresh`, '/api/monitoring/hosting/refresh', '/api/monitoring/refresh']) {
+      expect((await api('POST', path, {idempotencyKey: null})).status, path).toBe(200);
+      expect((await api('POST', path, {idempotencyKey: null})).status, path).toBe(200);
+      expect((await api('POST', path, {idempotencyKey: null, key: null})).status, path).toBe(401);
+    }
+    expect((await api('POST', '/api/apps/not-a-uuid/hosting/refresh', {idempotencyKey: null})).status).toBe(404);
+    await api('POST', `/api/apps/${app.id}/archive`);
+    expect((await api('POST', `/api/apps/${app.id}/hosting/refresh`, {idempotencyKey: null})).status).toBe(404);
+    expect((await api('POST', '/api/monitoring/hosting/refresh', {idempotencyKey: null})).body).toEqual({refresh: {apps: 0, hosting: 0, failedSources: []}});
+  });
+
+  it('a provider, service, region or runtime longer than 100 characters, or a version longer than 50, gets 400 when added or edited', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const path = `/api/apps/${app.id}/hosting`;
+    const valid = {provider: 'Vercel', service: 'Hosting'};
+    const long = 'n'.repeat(HOSTING_NAME_MAX_LENGTH + 1);
+    const longVersion = '1'.repeat(HOSTING_VERSION_MAX_LENGTH + 1);
+    const tooLong = [{provider: long}, {service: long}, {region: long}, {runtime: long}, {version: longVersion}, {runtimeVersion: longVersion}, {provider: 'n'.repeat(200_000)}];
+
+    for (const field of tooLong) {
+      const refused = await api('POST', path, {body: {...valid, ...field}});
+      expect(refused.status, Object.keys(field)[0]).toBe(400);
+      expect(refused.body.error).toMatch(/is longer than (100|50) characters$/);
+    }
+    const atLimit = {provider: 'p'.repeat(HOSTING_NAME_MAX_LENGTH), service: 's'.repeat(HOSTING_NAME_MAX_LENGTH), version: '1'.repeat(HOSTING_VERSION_MAX_LENGTH)};
+    const added = await api('POST', path, {body: atLimit});
+    expect(added.status).toBe(201);
+    for (const field of tooLong) {
+      expect((await api('PATCH', `${path}/${added.body.hosting.id}`, {body: field})).status, Object.keys(field)[0]).toBe(400);
+    }
+    expect((await api('GET', path)).body.hosting).toMatchObject([atLimit]);
+  });
+
+  it('a bad hosting row in the database never turns the app list, the app or its hosting into a 500: what is not a usable incident is left out', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const {hosting} = (await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting'}})).body;
+    const usable = {title: 'Builds are queued', impact: 'major', scope: 'service', url: 'https://www.vercel-status.com/incidents/abc', startedAt: '2026-11-22T07:10:00.000Z'};
+    const stored = [
+      [usable, null, 7, {title: {$ne: ''}, impact: 'major', scope: 'service'}, {...usable, title: 'Planted link', url: 'https://evil.example/login', startedAt: 'never'}],
+      {incidents: 'many'},
+      'outage',
+      null,
+    ];
+
+    for (const incidents of stored) {
+      await t.db.execute(sql`update app_hosting set incidents = ${JSON.stringify(incidents)}::jsonb, health_error = ${'x'.repeat(5_000)} where id = ${hosting.id}`);
+      expect((await api('GET', '/api/apps')).status).toBe(200);
+      expect((await api('GET', `/api/apps/${app.id}/hosting`)).status).toBe(200);
+      const detail = await api('GET', `/api/apps/${app.id}`);
+      expect(detail.status).toBe(200);
+      expect(detail.body.app.hosting[0].healthError).toHaveLength(HOSTING_CHECK_ERROR_MAX_LENGTH);
+    }
+    await t.db.execute(sql`update app_hosting set incidents = ${JSON.stringify(stored[0])}::jsonb, health_error = null where id = ${hosting.id}`);
+    const {app: read} = (await api('GET', `/api/apps/${app.id}`)).body;
+    expect(read.hosting[0].incidents).toEqual([usable, {...usable, title: 'Planted link', url: null, startedAt: null}]);
+    expect(read.health.dimensions.hosting.deductions.map((deduction: {label: string}) => deduction.label)).toEqual(['Builds are queued', 'Planted link']);
   });
 
   it('every route is documented in the OpenAPI spec, and nothing in the spec is missing a route', () => {

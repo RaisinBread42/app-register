@@ -130,7 +130,7 @@ function parseAws(events: unknown, page: string): FeedIncident[] {
   return entries(events).map((event) => {
     const region = feedText(event.arn).split(':')[AWS_ARN_REGION_INDEX];
     const service = feedText(event.service_name);
-    const impacted = event.impacted_services === undefined ? [] : Object.values(impactedServices(event.impacted_services));
+    const impacted = Object.values(impactedServices(event.impacted_services ?? {}));
     return {
       title: title(`${service}: ${feedText(event.summary)} (${feedText(event.region_name)})`),
       url: page,
