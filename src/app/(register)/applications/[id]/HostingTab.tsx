@@ -11,7 +11,7 @@ import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Link} from '@astryxdesign/core/Link';
 import {Selector} from '@astryxdesign/core/Selector';
-import {Table} from '@astryxdesign/core/Table';
+import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
@@ -49,6 +49,9 @@ type Props = {
 
 /** Which hosting entry the dialog edits: `null` adds a new one; `undefined` means closed. */
 type Editing = Hosting | null | undefined;
+
+/** Column shares as the hosting table lays them out at 1440px; the last one keeps room for both row buttons. */
+const column = (share: number) => proportional(share, {minWidth: 100});
 
 /** Selector choice that swaps the list for a free-text field. */
 const OTHER = 'Other';
@@ -123,15 +126,16 @@ export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: 
             hasHover
             emptyState={<EmptyState title="No hosting recorded" description="Add where this application runs: provider, service and region." isCompact />}
             columns={[
-              {key: 'provider', header: 'Provider'},
-              {key: 'service', header: 'Service'},
-              {key: 'region', header: 'Region', renderCell: (h: Hosting) => orDash(h.region)},
-              {key: 'version', header: 'Version / runtime', renderCell: (h: Hosting) => orDash(hostingVersion(h))},
-              {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => <EndOfSupport hosting={h} today={today} />},
-              {key: 'status', header: 'Status', renderCell: (h: Hosting) => <RowStatus hosting={h} />},
+              {key: 'provider', header: 'Provider', width: column(150)},
+              {key: 'service', header: 'Service', width: column(200)},
+              {key: 'region', header: 'Region', width: column(110), renderCell: (h: Hosting) => orDash(h.region)},
+              {key: 'version', header: 'Version / runtime', width: column(140), renderCell: (h: Hosting) => orDash(hostingVersion(h))},
+              {key: 'endOfSupportOn', header: 'End of support', width: column(170), renderCell: (h: Hosting) => <EndOfSupport hosting={h} today={today} />},
+              {key: 'status', header: 'Status', width: column(150), renderCell: (h: Hosting) => <RowStatus hosting={h} />},
               {
                 key: 'actions',
                 header: '',
+                width: column(160),
                 renderCell: (h: Hosting) =>
                   !isReadOnly && (
                     <HStack gap={1} justify="end">
