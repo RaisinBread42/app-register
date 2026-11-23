@@ -150,6 +150,46 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(image)) {
   dependsOn: [identityCanPull, database, allowAzure]
 }
 
+// Daily health refresh: one small job that asks the app to re-check every app's
+// dependencies and hosting. It reuses the app's image (already in the registry) and
+// the UI's API key; nothing new to build or store.
+var refreshScript = 'fetch(process.env.REFRESH_URL,{method:"POST",headers:{authorization:"Bearer "+process.env.APP_REGISTER_API_KEY}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e.name);process.exit(1)})'
+
+resource refreshJob 'Microsoft.App/jobs@2024-03-01' = if (!empty(image) && !empty(uiApiKey)) {
+  name: '${name}-refresh'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {'${identity.id}': {}}
+  }
+  properties: {
+    environmentId: environment.id
+    configuration: {
+      triggerType: 'Schedule'
+      scheduleTriggerConfig: {cronExpression: '17 5 * * *', parallelism: 1, replicaCompletionCount: 1} // 05:17 UTC daily
+      replicaTimeout: 600
+      replicaRetryLimit: 1
+      registries: [{server: registry.properties.loginServer, identity: identity.id}]
+      secrets: [{name: 'ui-api-key', value: uiApiKey}]
+    }
+    template: {
+      containers: [
+        {
+          name: 'refresh'
+          image: image
+          command: ['node', '-e', refreshScript]
+          resources: {cpu: json('0.25'), memory: '0.5Gi'}
+          env: [
+            {name: 'REFRESH_URL', value: 'https://${app!.properties.configuration.ingress.fqdn}/api/monitoring/refresh'}
+            {name: 'APP_REGISTER_API_KEY', secretRef: 'ui-api-key'}
+          ]
+        }
+      ]
+    }
+  }
+  dependsOn: [identityCanPull]
+}
+
 output registryName string = registry.name
 output registryServer string = registry.properties.loginServer
 output postgresServer string = postgres.name
