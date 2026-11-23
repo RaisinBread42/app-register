@@ -168,9 +168,13 @@ export const HOSTING_CHECK_ERROR_MAX_LENGTH = 300;
 
 /** Limits on what is read from one status feed or endoflife.date document; more than this counts as no answer. */
 export const FEED_MAX_INCIDENTS = 200;
+/** Fewer from a free-text feed (Azure's RSS), whose every item is searched for service and region names. */
+export const FEED_MAX_TEXT_INCIDENTS = 50;
 export const FEED_MAX_NAMES = 100;
 export const FEED_NAME_MAX_LENGTH = 200;
-export const FEED_TEXT_MAX_LENGTH = 5_000;
+/** Most of one RSS item that is read, markup included, and most of its text that is searched. */
+export const FEED_ITEM_MAX_LENGTH = 20_000;
+export const FEED_TEXT_MAX_LENGTH = 2_000;
 export const END_OF_LIFE_MAX_RELEASES = 500;
 /** The only scheme an incident link may use. */
 export const HTTPS_PROTOCOL = 'https:';

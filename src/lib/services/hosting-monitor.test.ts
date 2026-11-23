@@ -523,10 +523,10 @@ describe('hosting check', () => {
   it('the hosting check sends nothing a person typed: only the fixed feed URLs and catalog product names, with a User-Agent that names the product', async () => {
     await add({provider: 'azure', service: 'database for postgresql', region: 'secret-region-9', version: '12 (ticket ACME-4411)'});
     await add({provider: 'Vercel', service: 'Hosting', runtime: 'node', runtimeVersion: '../../admin'});
-    const sent: {url: string; headers: Record<string, string>}[] = [];
+    const sent: {url: string; headers: Record<string, string>; redirect?: string}[] = [];
     const feeds = fakeFeeds({[AZURE_POSTGRES]: POSTGRES_ON_AZURE, [NODE]: NODEJS, [FEED_URL.azure]: NO_AZURE_INCIDENTS, [FEED_URL.vercel]: ALL_CLEAR});
     const recording: Fetch = (url, init) => {
-      sent.push({url, headers: {...(init?.headers as Record<string, string>)}});
+      sent.push({url, headers: {...(init?.headers as Record<string, string>)}, redirect: init?.redirect});
       return feeds.fetch(url, init);
     };
 
@@ -535,6 +535,23 @@ describe('hosting check', () => {
     expect(sent.map(({url}) => url).sort()).toEqual([AZURE_POSTGRES, NODE, FEED_URL.azure, FEED_URL.vercel].sort());
     for (const request of sent) {
       expect(request.headers).toEqual({'user-agent': 'app-register'});
+      // A feed that redirects is a failed source; the check never follows it elsewhere.
+      expect(request.redirect).toBe('error');
     }
+  });
+
+  it('a feed stuffed with text does not slow the check down as the workspace grows: every row is still matched in bounded time', async () => {
+    for (let index = 0; index < 30; index++) {
+      await add({provider: 'Azure', service: 'Storage', region: `region${index}`});
+    }
+    const words = Array.from({length: 1_200}, (_, index) => `w${index % 97}`).join(' ');
+    const stuffed = azureStatusRss(Array.from({length: 300}, (_, index) => ({title: `Incident ${index}`, description: `${words} <${'<'.repeat(2_000)}`})));
+    const started = Date.now();
+
+    const rows = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText: fakeFeeds({[FEED_URL.azure]: stuffed}).fetchText});
+
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(rows).toHaveLength(30);
+    expect(rows.every((row) => row.healthError === null && row.incidents.length === HOSTING_MAX_INCIDENTS)).toBe(true);
   });
 });

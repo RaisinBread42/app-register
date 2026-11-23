@@ -6,7 +6,8 @@ import type {Fetch} from '@/lib/services/package-sources';
  * The one place the hosting check calls outside feeds. Polite by default: a
  * short timeout and a User-Agent that names the product and nothing else.
  * An answer longer than HOSTING_FEED_MAX_RESPONSE_BYTES is not read to the end
- * and counts as no answer. Tests pass a fake: `src/test-setup.ts` blocks `fetch`.
+ * and counts as no answer, and a redirect is never followed. Tests pass a fake:
+ * `src/test-setup.ts` blocks `fetch`.
  */
 
 /** The body of `url` as text. Stops early when `signal` aborts (the caller ran out of time). */
@@ -22,6 +23,8 @@ export function createFetchText(send: Fetch = fetch): FetchText {
       headers: {[API_HEADER.userAgent]: MONITORING_USER_AGENT},
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       cache: 'no-store',
+      // A feed is only ever read from its own fixed URL: a redirect counts as a failed source.
+      redirect: 'error',
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);

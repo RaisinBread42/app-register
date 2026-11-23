@@ -1,9 +1,13 @@
 import {
+  FEED_ITEM_MAX_LENGTH,
   FEED_MAX_INCIDENTS,
+  FEED_MAX_TEXT_INCIDENTS,
+  FEED_NAME_MAX_LENGTH,
   FEED_TEXT_MAX_LENGTH,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   INCIDENT_TITLE_MAX_LENGTH,
+  INCIDENT_URL_MAX_LENGTH,
   STATUS_FEED_KIND,
   type IncidentImpact,
   type IncidentScope,
@@ -18,7 +22,8 @@ import {cleanText, feedList, feedNames, feedText, isoTime, linkOnHostOf, malform
  * (Nov 2026). Nothing a feed says is trusted: a feed that is not in its
  * documented shape throws here and is reported as a failed source, never as
  * "all clear"; text is cleaned and cut; at most FEED_MAX_INCIDENTS incidents are
- * read; and a link is only kept when it points at the provider's own status page.
+ * read (FEED_MAX_TEXT_INCIDENTS from a free-text feed); and a link is only kept
+ * when it points at the provider's own status page.
  */
 
 export type FeedIncident = {
@@ -31,8 +36,8 @@ export type FeedIncident = {
   services: string[];
   /** Region codes the feed lists as affected; empty when it lists none or says "global". */
   regions: string[];
-  /** Free text to search when the feed has no lists (Azure's RSS). */
-  text: string | null;
+  /** The word runs of the feed's free text, to search when it has no lists (Azure's RSS). See `phrasesIn`. */
+  phrases: Set<string> | null;
 };
 
 /** Every incident that is open now (and maintenance that is announced), in the feed's order. */
@@ -89,7 +94,7 @@ function parseStatuspage(summary: unknown, page: string): FeedIncident[] {
     impact: impact(incident),
     services: feedNames(incident.components, nameOf('name')),
     regions: [],
-    text: null,
+    phrases: null,
   });
   return [
     // `summary.json` lists unresolved incidents only.
@@ -114,7 +119,7 @@ function parseGoogleCloud(incidents: unknown, page: string): FeedIncident[] {
     impact: GOOGLE_MAJOR.includes(feedText(incident.status_impact)) ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
     services: feedNames(incident.affected_products, nameOf('title')),
     regions: feedNames(incident.currently_affected_locations, nameOf('id')).filter((id) => id !== GLOBAL_REGION),
-    text: null,
+    phrases: null,
   }));
 }
 
@@ -138,7 +143,7 @@ function parseAws(events: unknown, page: string): FeedIncident[] {
       impact: String(event.status) === AWS_DISRUPTION ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
       services: [service, ...feedNames(impacted, nameOf('service_name'))],
       regions: region && region !== GLOBAL_REGION ? [region] : [],
-      text: null,
+      phrases: null,
     };
   });
 }
@@ -155,8 +160,10 @@ function impactedServices(value: unknown): Record<string, unknown> {
 const RSS_ITEM_OPEN = '<item>';
 const RSS_ITEM_CLOSE = '</item>';
 const AZURE_FALLBACK_TITLE = 'Azure incident';
-const CDATA = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
-const MARKUP = /<[^>]+>/g;
+const CDATA_OPEN = '<![CDATA[';
+const CDATA_CLOSE = ']]>';
+/** A tag. It never spans another `<`, so a text full of unclosed `<` is still read in one pass. */
+const MARKUP = /<[^<>]*>/g;
 
 function parseAzureRss(xml: string, page: string): FeedIncident[] {
   if (!xml.includes('<rss')) {
@@ -165,19 +172,19 @@ function parseAzureRss(xml: string, page: string): FeedIncident[] {
   // Split, not a pattern: an unclosed <item> in a huge document must not slow the check down.
   const items = xml
     .split(RSS_ITEM_OPEN)
-    .slice(1, FEED_MAX_INCIDENTS + 1)
-    .map((rest) => rest.split(RSS_ITEM_CLOSE, 1)[0].slice(0, FEED_TEXT_MAX_LENGTH));
+    .slice(1, FEED_MAX_TEXT_INCIDENTS + 1)
+    .map((rest) => rest.split(RSS_ITEM_CLOSE, 1)[0].slice(0, FEED_ITEM_MAX_LENGTH));
   return items.map((item) => {
     const heading = xmlText(item, 'title', INCIDENT_TITLE_MAX_LENGTH) ?? AZURE_FALLBACK_TITLE;
     return {
       title: heading,
-      url: linkOnHostOf(page, xmlText(item, 'link', FEED_TEXT_MAX_LENGTH)) ?? page,
-      startedAt: isoTime(xmlText(item, 'pubDate', FEED_TEXT_MAX_LENGTH)),
+      url: linkOnHostOf(page, xmlText(item, 'link', INCIDENT_URL_MAX_LENGTH)) ?? page,
+      startedAt: isoTime(xmlText(item, 'pubDate', FEED_NAME_MAX_LENGTH)),
       // The public page only carries widespread incidents, and gives no severity.
       impact: INCIDENT_IMPACT.major,
       services: [],
       regions: [],
-      text: `${heading} ${xmlText(item, 'description', FEED_TEXT_MAX_LENGTH) ?? ''}`,
+      phrases: phrasesIn(`${heading} ${xmlText(item, 'description', FEED_TEXT_MAX_LENGTH) ?? ''}`),
     };
   });
 }
@@ -192,7 +199,8 @@ function xmlText(item: string, tag: string, max: number): string | null {
   }
   const text = item
     .slice(start + 1, end)
-    .replace(CDATA, '$1')
+    .replaceAll(CDATA_OPEN, '')
+    .replaceAll(CDATA_CLOSE, '')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(MARKUP, ' ')
@@ -207,15 +215,30 @@ const MIN_REGION_LENGTH = 3;
 const MAX_PHRASE_WORDS = 6;
 
 /**
- * Whether `text` contains `phrase` as whole words, ignoring case, spaces and
- * punctuation: "Central US" and "central-us" mention `centralus`; "leaks" does not mention `AKS`.
+ * Every run of one to MAX_PHRASE_WORDS whole words in `text`, lower-cased and
+ * joined: "Central US" gives `central`, `us` and `centralus`. Built once per
+ * text, so matching many rows against a long text stays cheap.
  */
-function mentions(text: string, phrase: string): boolean {
-  const wanted = squash(phrase);
+function phrasesIn(text: string): Set<string> {
   const words = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  return words.some((_, start) =>
-    Array.from({length: MAX_PHRASE_WORDS}, (_, extra) => words.slice(start, start + extra + 1).join('')).includes(wanted),
-  );
+  const phrases = new Set<string>();
+  words.forEach((_, start) => {
+    let phrase = '';
+    for (const word of words.slice(start, start + MAX_PHRASE_WORDS)) {
+      phrase += word;
+      phrases.add(phrase);
+    }
+  });
+  return phrases;
+}
+
+/**
+ * Whether the text behind `phrases` contains `phrase` as whole words, ignoring
+ * case, spaces and punctuation: "Central US" and "central-us" mention
+ * `centralus`; "leaks" does not mention `AKS`.
+ */
+function mentions(phrases: Set<string>, phrase: string): boolean {
+  return phrases.has(squash(phrase));
 }
 
 export type RowTarget = {
@@ -235,13 +258,14 @@ export type RowTarget = {
 export function incidentScope(incident: FeedIncident, row: RowTarget): IncidentScope | null {
   const region = row.region && squash(row.region).length >= MIN_REGION_LENGTH ? row.region : null;
   const components = row.components ?? [];
-  const mentionsRegion = (text: string) => region !== null && mentions(text, region);
+  const mentionsRegion = (phrases: Set<string>) => region !== null && mentions(phrases, region);
+  const namesRegion = (name: string) => mentionsRegion(phrasesIn(name));
   const isRowService = (name: string) => components.some((component) => squash(component) === squash(name));
 
   const inService =
-    listed(incident.services, row.components, (name) => isRowService(name) || mentionsRegion(name)) ??
-    mentioned(incident.text, (text) => components.some((component) => mentions(text, component)));
-  const inRegion = listed(incident.regions, region, mentionsRegion) ?? mentioned(incident.text, mentionsRegion);
+    listed(incident.services, row.components, (name) => isRowService(name) || namesRegion(name)) ??
+    mentioned(incident.phrases, (phrases) => components.some((component) => mentions(phrases, component)));
+  const inRegion = listed(incident.regions, region, namesRegion) ?? mentioned(incident.phrases, mentionsRegion);
 
   if (inService === false || inRegion === false) {
     return null;
@@ -258,6 +282,6 @@ function listed(names: string[], known: unknown, matches: (name: string) => bool
 }
 
 /** Free text can show the row is affected, never that it is not. */
-function mentioned(text: string | null, matches: (text: string) => boolean): true | null {
-  return text !== null && matches(text) ? true : null;
+function mentioned(phrases: Set<string> | null, matches: (phrases: Set<string>) => boolean): true | null {
+  return phrases !== null && matches(phrases) ? true : null;
 }
