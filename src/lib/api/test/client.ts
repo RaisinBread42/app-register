@@ -16,6 +16,7 @@ import * as monitoringHostingRefresh from '@/app/api/monitoring/hosting/refresh/
 import * as monitoringRefresh from '@/app/api/monitoring/refresh/route';
 import * as acknowledge from '@/app/api/notice-alerts/[id]/acknowledge/route';
 import * as alerts from '@/app/api/notice-alerts/route';
+import * as noticeAlertsSend from '@/app/api/notice-alerts/send/route';
 import * as openapi from '@/app/api/openapi.json/route';
 import * as personById from '@/app/api/people/[id]/route';
 import * as people from '@/app/api/people/route';
@@ -46,6 +47,8 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/people': people,
   '/api/people/{id}': personById,
   '/api/notice-alerts': alerts,
+  // Before `{id}`: a fixed segment wins over a parameter, as in Next.js.
+  '/api/notice-alerts/send': noticeAlertsSend,
   '/api/notice-alerts/{id}/acknowledge': acknowledge,
   '/api/openapi.json': openapi,
 };

@@ -75,6 +75,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 | POST | `/api/people` | Add (email trimmed, lowercased, unique per workspace) |
 | PATCH | `/api/people/:id` | Rename, re-email, or `{"status":"left","leftOn":"YYYY-MM-DD"}`; `{"status":"active"}` reverses it |
 | GET | `/api/notice-alerts` | `?status=`, `?appId=`; by due date; includes archived apps' history |
+| POST | `/api/notice-alerts/send` | Send every due notice-deadline alert email → `{ send: { sent } }` (no Idempotency-Key). Invokable now; schedule daily only once email leaves the sink |
 | POST | `/api/notice-alerts/:id/acknowledge` | Mark seen; first time wins; never changes the app |
 | GET | `/api/openapi.json` | The spec (no key needed) |
 
@@ -82,6 +83,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 
 - Creating an app with a notice deadline schedules one alert per offset in `NOTICE_ALERT_OFFSET_DAYS` whose due date is today or later (UTC).
 - Changing the deadline deletes the app's `scheduled` alerts and schedules new ones. `sent` and `acknowledged` alerts stay as history. Moving the deadline back to one that already has a sent alert for an offset does not schedule that offset again.
+- `POST /api/notice-alerts/send` emails every `scheduled` alert whose `dueOn` is today or earlier (UTC catch-up) to the app's owner and backup owner, then marks it `sent`. Each alert is sent at most once per app per offset. With the sink email provider, messages stay in memory (tests and early UAT). The from-address env var is required.
 - Two edits to the same app at once are serialized (row lock), so neither is lost.
 - Owners must be active people when newly assigned. An app whose owner has left can still be edited.
 - Dependencies are recorded by hand or imported; hosting is recorded by hand. Both are monitored (below).
@@ -185,10 +187,16 @@ Which incidents reach a row:
 - Only catalog values are sent: the endoflife.date product and the fixed feed URLs, with `User-Agent: app-register`, at most 6 requests at a time with an 8 second timeout that covers the whole answer (a body that keeps dripping is cut off too). Nothing a person typed (provider, service, version, region) leaves the server.
 - Public status pages only show what a provider chooses to publish, never account-specific incidents.
 
-The daily job is one request, safe to repeat:
+The daily health job is one request, safe to repeat:
 
 ```bash
 curl -fsS -X POST "$APP_REGISTER_URL/api/monitoring/refresh" -H "Authorization: Bearer $APP_REGISTER_API_KEY"
+```
+
+Notice-deadline email send is the same shape, but leave it on-demand (or behind a real `EMAIL_PROVIDER`) so a sink does not mark alerts sent with nowhere for the mail to land:
+
+```bash
+curl -fsS -X POST "$APP_REGISTER_URL/api/notice-alerts/send" -H "Authorization: Bearer $APP_REGISTER_API_KEY"
 ```
 
 ## Health score

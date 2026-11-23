@@ -28,6 +28,7 @@ UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, e
 | Astryx providers | `src/app/providers.tsx` | same |
 | Domain services | `src/lib/services/` | `src/lib/services/apps.ts` |
 | Outside HTTP calls | `src/lib/services/package-sources.ts` (npm, OSV) and `src/lib/monitoring/http.ts` (hosting feeds) only | same |
+| Email (notice alerts) | `src/lib/email.ts` (port + sink); send runner in `src/lib/services/notice-alert-send.ts` | same |
 | Dependency advisories (read, replace) | `src/lib/services/dependency-advisories.ts` | `loadDependencies`, `replaceAdvisories` |
 | Hosting incidents (read, replace) | `src/lib/services/hosting-incidents.ts` | `loadHosting`, `replaceIncidents` |
 | Outside feed parsing | `src/lib/monitoring/` (read every value through `feed-values.ts`) | `src/lib/monitoring/status-feeds.ts` |

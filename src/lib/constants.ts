@@ -70,13 +70,29 @@ export const OVERVIEW_LIST_LIMIT = 5;
 
 /** Environment variables the UI server reads. Never exposed to the browser. */
 export const ENV = {
-  /** Base URL of this app; the UI server calls `${APP_URL}/api/*`. */
+  /** Base URL the UI server uses to call `${APP_URL}/api/*` (often loopback in UAT). */
   appUrl: 'APP_URL',
+  /**
+   * Public base URL for links in outbound email. Falls back to `APP_URL` when unset
+   * (local/dev). UAT sets this to the ingress URL so mail never points at localhost.
+   */
+  appPublicUrl: 'APP_PUBLIC_URL',
   /** Bearer key the UI server sends to the API (`npm run api-key:create -- "UI"`). */
   apiKey: 'APP_REGISTER_API_KEY',
   /** Shared password for HTTP Basic auth on every UI route (temporary until sign-in). */
   uiPassword: 'UI_PASSWORD',
+  /** From-address for notice-deadline alert emails. */
+  emailFrom: 'EMAIL_FROM',
+  /** Email backend: sink in tests and early UAT, or a real provider id later. */
+  emailProvider: 'EMAIL_PROVIDER',
 } as const;
+
+/** Backends the email port can use. Start with a test sink; real providers come later. */
+export const EMAIL_PROVIDER = {
+  sink: 'sink',
+} as const;
+export const EMAIL_PROVIDERS = Object.values(EMAIL_PROVIDER);
+export type EmailProvider = (typeof EMAIL_PROVIDERS)[number];
 
 /** Every JSON API path starts with this; the UI's Basic auth never applies to it. */
 export const API_PATH_PREFIX = '/api';
@@ -98,7 +114,12 @@ export const API_SUB_ROUTE = {
   import: 'import',
   /** `POST /api/apps/:id/dependencies/refresh` */
   refresh: 'refresh',
+  /** `POST /api/notice-alerts/send` — daily job sends due notice emails. */
+  send: 'send',
 } as const;
+
+/** `POST` here sends every due notice-deadline alert email. The daily job calls it. */
+export const API_NOTICE_ALERTS_SEND = `${API_ROUTES.noticeAlerts}/${API_SUB_ROUTE.send}`;
 
 /** `POST` here re-checks every active app's dependencies. */
 export const API_MONITORING_DEPENDENCIES_REFRESH = `${API_PATH_PREFIX}/monitoring/dependencies/refresh`;

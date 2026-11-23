@@ -7,6 +7,8 @@ import {
   DEPENDENCY_CHECK_ERROR,
   DEPENDENCY_IMPORT_MAX_BYTES,
   END_OF_SUPPORT_SOURCE,
+  EMAIL_PROVIDER,
+  ENV,
   HEALTH_STATUS,
   HOSTING_CHECK_ERROR_MAX_LENGTH,
   HOSTING_NAME_MAX_LENGTH,
@@ -15,6 +17,7 @@ import {
   PERSON_STATUS,
   RESOURCE_KIND,
 } from '@/lib/constants';
+import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {callApi, ROUTES, type RequestOptions} from '@/lib/api/test/client';
 import {openApiSpec} from '@/lib/api/openapi';
 import {newId} from '@/lib/db/ids';
@@ -366,6 +369,33 @@ describe('JSON API', () => {
       },
     });
     expect((await api('POST', '/api/monitoring/refresh', {idempotencyKey: null, key: null})).status).toBe(401);
+  });
+
+  it('the notice-alert send endpoint emails due alerts without an Idempotency-Key and is safe to repeat', async () => {
+    vi.stubEnv(ENV.emailFrom, 'alerts@example.com');
+    vi.stubEnv(ENV.emailProvider, EMAIL_PROVIDER.sink);
+    const ada = (await api('POST', '/api/people', {body: {name: 'Ada Owner', email: 'ada.send@example.test'}})).body.person;
+    const ben = (await api('POST', '/api/people', {body: {name: 'Ben Backup', email: 'ben.send@example.test'}})).body.person;
+    // Notice deadline 30 days out so exactly one offset is due today when scheduled as of today.
+    const deadline = addDaysIso(todayIso(), 30);
+    await api('POST', '/api/apps', {
+      body: {
+        name: 'Contoso Alerts',
+        kind: 'saas',
+        ownerId: ada.id,
+        backupOwnerId: ben.id,
+        noticeDeadline: deadline,
+        renewalDate: addDaysIso(deadline, 45),
+      },
+    });
+
+    const first = await api('POST', '/api/notice-alerts/send', {idempotencyKey: null});
+    const second = await api('POST', '/api/notice-alerts/send', {idempotencyKey: null});
+
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({send: {sent: 1}});
+    expect(second.body).toEqual({send: {sent: 0}});
+    expect((await api('POST', '/api/notice-alerts/send', {idempotencyKey: null, key: null})).status).toBe(401);
   });
 
   // Hosting follows the same rules as dependencies.
