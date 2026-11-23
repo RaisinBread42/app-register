@@ -213,9 +213,25 @@ export const BEARER_PREFIX = 'Bearer ';
 /** Every API key starts with this, so a leaked one is easy to spot in code or logs. */
 export const API_KEY_PREFIX = 'ar_';
 
-/** How long a stored Idempotency-Key replays its first response. */
+/** How long a repeat of a request with the same Idempotency-Key is answered without running it again. */
 export const IDEMPOTENCY_KEY_TTL_HOURS = 24;
 export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+
+/**
+ * What a POST or PATCH answered about. A repeat of the request (same
+ * Idempotency-Key) reads that row again instead of replaying a stored body.
+ */
+export const RESOURCE_KIND = {
+  app: 'app',
+  person: 'person',
+  dependency: 'dependency',
+  hosting: 'hosting',
+  noticeAlert: 'notice_alert',
+  /** An import answers with counts, not a row; they are stored beside the key. */
+  dependencyImport: 'dependency_import',
+} as const;
+export const RESOURCE_KINDS = Object.values(RESOURCE_KIND);
+export type ResourceKind = (typeof RESOURCE_KINDS)[number];
 
 export const HTTP_METHOD = {
   get: 'GET',
@@ -278,6 +294,14 @@ export const ADVISORY_SEVERITY = {
 } as const;
 export const ADVISORY_SEVERITIES = Object.values(ADVISORY_SEVERITY);
 export type AdvisorySeverity = (typeof ADVISORY_SEVERITIES)[number];
+
+/** Who recorded an advisory on a dependency: a person by hand, or the OSV check. */
+export const ADVISORY_SOURCE = {
+  manual: 'manual',
+  osv: 'osv',
+} as const;
+export const ADVISORY_SOURCES = Object.values(ADVISORY_SOURCE);
+export type AdvisorySource = (typeof ADVISORY_SOURCES)[number];
 
 /** What an app's health score is made of. Each dimension reports its own deductions. */
 export const HEALTH_DIMENSION = {

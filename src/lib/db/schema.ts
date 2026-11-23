@@ -7,7 +7,6 @@ import {
   foreignKey,
   index,
   integer,
-  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -18,6 +17,8 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
+  ADVISORY_SEVERITIES,
+  ADVISORY_SOURCES,
   APP_KINDS,
   DEPENDENCY_CHECK_ERRORS,
   DEPENDENCY_SOURCE,
@@ -28,7 +29,11 @@ import {
   OWNERSHIP_ROLES,
   PERSON_STATUS,
   PERSON_STATUSES,
+  RESOURCE_KIND,
+  RESOURCE_KINDS,
   type AdvisorySeverity,
+  type AdvisorySource,
+  type ResourceKind,
 } from '../constants';
 
 /** CHECK (column IN (...)) built from a constants array, so TS and DB share one list. */
@@ -311,16 +316,6 @@ export const reviewItems = pgTable(
   ],
 );
 
-/** One known security advisory for a dependency's tracked version, as monitoring found it. */
-export type StoredAdvisory = {
-  id: string;
-  /** Other ids for the same advisory (e.g. the CVE for a GHSA). */
-  aliases: string[];
-  severity: AdvisorySeverity;
-  summary: string;
-  url: string;
-};
-
 /** What an app runs on or pulls in: a library or SDK, added by hand or imported from a package file. */
 export const appDependencies = pgTable(
   'app_dependencies',
@@ -331,14 +326,10 @@ export const appDependencies = pgTable(
     name: text('name').notNull(),
     currentVersion: text('current_version').notNull(),
     latestVersion: text('latest_version'),
-    /** Advisory ids such as CVE-2026-1234; empty when none are known. */
-    vulnerabilities: text('vulnerabilities').array().notNull().default(sql`'{}'::text[]`),
     recommendedAction: text('recommended_action'),
     /** `import` rows came from a package file and are removed when a later import no longer lists them. */
     source: text('source').notNull().default(DEPENDENCY_SOURCE.manual),
     isDev: boolean('is_dev').notNull().default(false),
-    /** Advisories monitoring found for the tracked version; `vulnerabilities` stays hand-recorded. */
-    advisories: jsonb('advisories').$type<StoredAdvisory[]>().notNull().default([]),
     /** When monitoring last checked this row; null until the first check. */
     checkedAt: timestamp('checked_at', {withTimezone: true}),
     checkError: text('check_error'),
@@ -346,6 +337,7 @@ export const appDependencies = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    unique('app_dependencies_id_workspace_unique').on(t.id, t.workspaceId),
     foreignKey({
       name: 'app_dependencies_app_fk',
       columns: [t.appId, t.workspaceId],
@@ -355,6 +347,59 @@ export const appDependencies = pgTable(
     uniqueIndex('app_dependencies_app_name_unique').on(t.appId, sql`lower(${t.name})`),
     check('app_dependencies_source_allowed', oneOf(t.source, DEPENDENCY_SOURCES)),
     check('app_dependencies_check_error_allowed', oneOf(t.checkError, DEPENDENCY_CHECK_ERRORS)),
+  ],
+);
+
+/**
+ * One advisory known for a dependency's tracked version: an id a person recorded
+ * by hand (`manual`, severity unknown) or one the OSV check found (`osv`).
+ * `position` keeps the order the ids were given in.
+ */
+export const dependencyAdvisories = pgTable(
+  'dependency_advisories',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    dependencyId: uuid('dependency_id').notNull(),
+    /** The advisory's own id, such as CVE-2026-1234 or GHSA-xxxx-xxxx-xxxx. */
+    advisoryId: text('advisory_id').notNull(),
+    source: text('source').$type<AdvisorySource>().notNull(),
+    severity: text('severity').$type<AdvisorySeverity>().notNull(),
+    summary: text('summary').notNull().default(''),
+    position: integer('position').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique('dependency_advisories_id_workspace_unique').on(t.id, t.workspaceId),
+    foreignKey({
+      name: 'dependency_advisories_dependency_fk',
+      columns: [t.dependencyId, t.workspaceId],
+      foreignColumns: [appDependencies.id, appDependencies.workspaceId],
+    }).onDelete('cascade'),
+    // Also serves "a dependency's advisories".
+    unique('dependency_advisories_dependency_advisory_source_unique').on(t.dependencyId, t.advisoryId, t.source),
+    check('dependency_advisories_source_allowed', oneOf(t.source, ADVISORY_SOURCES)),
+    check('dependency_advisories_severity_allowed', oneOf(t.severity, ADVISORY_SEVERITIES)),
+  ],
+);
+
+/** Another id for the same advisory (e.g. the CVE for a GHSA), so an id recorded by hand is counted once. */
+export const dependencyAdvisoryAliases = pgTable(
+  'dependency_advisory_aliases',
+  {
+    workspaceId: workspaceId(),
+    advisoryRowId: uuid('advisory_row_id').notNull(),
+    alias: text('alias').notNull(),
+    position: integer('position').notNull(),
+  },
+  (t) => [
+    // Also serves "an advisory's aliases".
+    primaryKey({name: 'dependency_advisory_aliases_pk', columns: [t.advisoryRowId, t.alias]}),
+    foreignKey({
+      name: 'dependency_advisory_aliases_advisory_fk',
+      columns: [t.advisoryRowId, t.workspaceId],
+      foreignColumns: [dependencyAdvisories.id, dependencyAdvisories.workspaceId],
+    }).onDelete('cascade'),
   ],
 );
 
@@ -403,7 +448,12 @@ export const apiKeys = pgTable(
   (t) => [index('api_keys_workspace_idx').on(t.workspaceId)],
 );
 
-/** First response to each Idempotency-Key, replayed for repeats of the same request. */
+/**
+ * What the first request with each Idempotency-Key answered about, so a repeat
+ * is answered by reading that row again. No response body is stored.
+ * `resource_id` has no foreign key: it points at one of several tables, and the
+ * row may be deleted later (a repeat then answers 404).
+ */
 export const idempotencyKeys = pgTable(
   'idempotency_keys',
   {
@@ -411,11 +461,24 @@ export const idempotencyKeys = pgTable(
     key: text('key').notNull(),
     requestHash: text('request_hash').notNull(),
     statusCode: integer('status_code').notNull(),
-    responseBody: jsonb('response_body').notNull(),
+    /** Kind and id are null only while the write is still running, inside its own transaction. */
+    resourceKind: text('resource_kind').$type<ResourceKind>(),
+    resourceId: uuid('resource_id'),
+    /** What a dependency import did; null for every other kind. */
+    countAdded: integer('count_added'),
+    countUpdated: integer('count_updated'),
+    countUnchanged: integer('count_unchanged'),
+    countRemoved: integer('count_removed'),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({name: 'idempotency_keys_pk', columns: [t.workspaceId, t.key]}),
+    check('idempotency_keys_resource_kind_allowed', oneOf(t.resourceKind, RESOURCE_KINDS)),
+    check('idempotency_keys_resource_kind_with_id', sql`(${t.resourceKind} is null) = (${t.resourceId} is null)`),
+    check(
+      'idempotency_keys_counts_only_for_import',
+      sql`num_nonnulls(${t.countAdded}, ${t.countUpdated}, ${t.countUnchanged}, ${t.countRemoved}) = case when ${t.resourceKind} = ${sql.raw(`'${RESOURCE_KIND.dependencyImport}'`)} then 4 else 0 end`,
+    ),
     // Expiry sweep: keys older than the TTL.
     index('idempotency_keys_created_idx').on(t.createdAt),
   ],

@@ -18,8 +18,7 @@ import {
   type AdvisorySeverity,
 } from '@/lib/constants';
 import {readTextUpTo} from '@/lib/capped-body';
-import type {StoredAdvisory} from '@/lib/db/schema';
-import {isAdvisoryId, normaliseAdvisory} from './advisories';
+import {isAdvisoryId, normaliseAdvisory, type Advisory} from './advisories';
 import {isPlainObject} from './validation';
 
 /**
@@ -44,7 +43,7 @@ export type PackageSources = {
   /** The latest published version, or null when the registry does not know the package. Throws when it gives no usable answer. */
   latestVersion(name: string, signal?: AbortSignal): Promise<string | null>;
   /** Known advisories for each package@version, in the order given. Throws when the source gives no usable answer. */
-  advisories(packages: PackageVersion[], signal?: AbortSignal): Promise<StoredAdvisory[][]>;
+  advisories(packages: PackageVersion[], signal?: AbortSignal): Promise<Advisory[][]>;
 };
 
 /** npm's own rule for package names (older packages may use capitals). Anything else is never sent anywhere. */
@@ -93,7 +92,7 @@ export function createPackageSources(send: Fetch = fetch): PackageSources {
     return JSON.parse(text);
   }
 
-  async function advisory(id: string, signal?: AbortSignal): Promise<StoredAdvisory | null> {
+  async function advisory(id: string, signal?: AbortSignal): Promise<Advisory | null> {
     const found = await json(await request(`${OSV_API_URL}/vulns/${encodeURIComponent(id)}`, {}, signal));
     if (!isPlainObject(found)) {
       throw malformed();
@@ -173,11 +172,11 @@ export function createPackageSources(send: Fetch = fetch): PackageSources {
         idsPerPackage.push(...(await advisoryIds(packages.slice(start, start + OSV_BATCH_SIZE), signal)));
       }
       const uniqueIds = [...new Set(idsPerPackage.flat())];
-      const details = new Map<string, StoredAdvisory | null>();
+      const details = new Map<string, Advisory | null>();
       await mapWithLimit(uniqueIds, async (id) => {
         details.set(id, await advisory(id, signal));
       });
-      return idsPerPackage.map((ids) => ids.map((id) => details.get(id)).filter((found): found is StoredAdvisory => !!found));
+      return idsPerPackage.map((ids) => ids.map((id) => details.get(id)).filter((found): found is Advisory => !!found));
     },
   };
 }

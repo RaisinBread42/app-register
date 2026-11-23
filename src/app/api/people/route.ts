@@ -1,3 +1,4 @@
+import {RESOURCE_KIND} from '@/lib/constants';
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {createPerson, listActivePeople, type CreatePersonInput} from '@/lib/services/people';
 
@@ -10,7 +11,8 @@ export function GET(request: Request): Promise<Response> {
 
 /** POST /api/people → 201 `{ person: Person }` */
 export function POST(request: Request): Promise<Response> {
-  return handle(request, async ({db, workspaceId, body}) =>
-    created({person: await createPerson(db, workspaceId, jsonObject<CreatePersonInput>(body))}),
-  );
+  return handle(request, async ({db, workspaceId, body}) => {
+    const person = await createPerson(db, workspaceId, jsonObject<CreatePersonInput>(body));
+    return created({person}, {kind: RESOURCE_KIND.person, id: person.id});
+  });
 }

@@ -8,18 +8,20 @@ import {
   UnauthorizedError,
   ValidationError,
 } from '@/lib/services/errors';
-import {runOnce, type ApiResult} from '@/lib/services/idempotency';
+import {runOnce, type ApiResult, type WrittenResource} from '@/lib/services/idempotency';
+import {replayBody} from './replay';
 
 const BEARER_TOKEN = /^bearer\s+(\S+)$/i;
 
 export type ApiContext = {db: AppDatabase; workspaceId: string; body: string};
 
-export function ok(body: unknown): ApiResult {
-  return {status: HTTP_STATUS.ok, body};
+/** `resource`: what a POST or PATCH answered about, so a repeat with the same Idempotency-Key can read it again. */
+export function ok(body: unknown, resource?: WrittenResource): ApiResult {
+  return {status: HTTP_STATUS.ok, body, resource};
 }
 
-export function created(body: unknown): ApiResult {
-  return {status: HTTP_STATUS.created, body};
+export function created(body: unknown, resource?: WrittenResource): ApiResult {
+  return {status: HTTP_STATUS.created, body, resource};
 }
 
 export function noContent(): ApiResult {
@@ -38,7 +40,7 @@ export type HandleOptions = {
    * Slow follow-up work (outside calls) for a successful write. It runs after the
    * write has committed, never inside its transaction, and before the response is
    * sent. If it fails the write still stands; the failure is logged by name only.
-   * It does not run again when a stored response is replayed for an Idempotency-Key.
+   * It does not run again when a request is repeated with the same Idempotency-Key.
    */
   afterCommit?: (context: Omit<ApiContext, 'body'>, result: ApiResult) => Promise<unknown>;
 };
@@ -46,7 +48,8 @@ export type HandleOptions = {
 /**
  * Every API route goes through here:
  * 1. a bearer API key picks the workspace (401 without one);
- * 2. POST and PATCH run at most once per Idempotency-Key;
+ * 2. POST and PATCH run at most once per Idempotency-Key; a repeat answers with the
+ *    first status and the resource as it is now (`replayBody`);
  * 3. service errors become `{ error }` responses.
  */
 export async function handle(
@@ -63,19 +66,22 @@ export async function handle(
       return toResponse(await run({db, workspaceId, body}));
     }
     const url = new URL(request.url);
-    const {isReplay, ...result} = await runOnce(
+    const once = await runOnce(
       db,
       workspaceId,
       request.headers.get(API_HEADER.idempotencyKey),
       {method: request.method, path: url.pathname + url.search, body},
       (tx) => run({db: tx, workspaceId, body}),
     );
-    if (options.afterCommit && !isReplay) {
-      await options.afterCommit({db, workspaceId}, result).catch((error: unknown) => {
+    if (once.isReplay) {
+      return toResponse({status: once.status, body: await replayBody(db, workspaceId, once.resource)});
+    }
+    if (options.afterCommit) {
+      await options.afterCommit({db, workspaceId}, once.result).catch((error: unknown) => {
         console.error('API follow-up failed', {name: (error as Error | undefined)?.name});
       });
     }
-    return toResponse(result);
+    return toResponse(once.result);
   } catch (error) {
     return errorResponse(error);
   }

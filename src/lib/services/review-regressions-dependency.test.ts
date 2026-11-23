@@ -1,4 +1,3 @@
-import {eq} from 'drizzle-orm';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {
   DEPENDENCY_CHECK_ERROR,
@@ -11,7 +10,6 @@ import {
   RANGE_VERSION_POINTS,
 } from '@/lib/constants';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
-import {appDependencies, type StoredAdvisory} from '@/lib/db/schema';
 import {archiveApp, createApp, getApp, listActiveApps} from './apps';
 import {addDependency, listDependencies, updateDependency} from './dependencies';
 import {refreshDependencyHealth, refreshWorkspaceDependencyHealth} from './dependency-health';
@@ -86,21 +84,20 @@ describe('review regressions: dependency import and monitoring', () => {
       ]);
     });
 
-    it('a stored advisory row that is not in the expected shape is skipped on read, never a failed page', async () => {
-      const added = await add('quill-forms', '3.9.0');
-      const stored = [
-        {id: 'GHSA-good-0000-0000', aliases: 'CVE-2026-0001', severity: 'nonsense', summary: 7, url: 'javascript:alert(1)'},
-        {aliases: ['no id']},
-        null,
-        'text',
-      ] as unknown as StoredAdvisory[];
-      await t.db.update(appDependencies).set({advisories: stored, checkedAt: new Date()}).where(eq(appDependencies.id, added.id));
-
-      const [app] = await listActiveApps(t.db, t.workspaceId);
-      expect(app.health.dimensions.dependencies?.deductions.map((d) => d.label)).toEqual(['Unrated advisory in quill-forms 3.9.0']);
-      expect((await getApp(t.db, t.workspaceId, appId)).dependencies[0].advisories).toEqual([
-        {id: 'GHSA-good-0000-0000', aliases: [], severity: 'unknown', summary: '', url: 'https://osv.dev/vulnerability/GHSA-good-0000-0000'},
+    it('a summary cut inside an emoji, or holding a NUL, is stored as clean text; a repeated alias is stored once', async () => {
+      await add('quill-forms', '3.9.0');
+      const summary = `${'y'.repeat(298)}\u0000\u{1F600}`;
+      await refresh(osvAnswering({aliases: ['CVE-2026-0001', 'CVE-2026-0001', 'CVE-\u0000'], summary}));
+      expect((await byName())['quill-forms'].advisories).toEqual([
+        {id: 'GHSA-evil-0000-0000', aliases: ['CVE-2026-0001'], severity: 'unknown', summary: 'y'.repeat(298), url: 'https://osv.dev/vulnerability/GHSA-evil-0000-0000'},
       ]);
+    });
+
+    it('an advisory id recorded by hand that is too long or holds a NUL is refused, never a failed write', async () => {
+      const input = (id: string) => ({name: 'quill-forms', currentVersion: '3.9.0', vulnerabilities: [id]});
+      await expect(addDependency(t.db, t.workspaceId, appId, input('C'.repeat(101)))).rejects.toThrow(ValidationError);
+      await expect(addDependency(t.db, t.workspaceId, appId, input('CVE-\u0000'))).rejects.toThrow(ValidationError);
+      expect((await addDependency(t.db, t.workspaceId, appId, input('C'.repeat(100)))).vulnerabilities).toEqual(['C'.repeat(100)]);
     });
 
     it('an advisory id from OSV cannot become a javascript: or off-site link', async () => {

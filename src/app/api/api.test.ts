@@ -9,6 +9,7 @@ import {
   HEALTH_STATUS,
   NOTICE_ALERT_STATUS,
   PERSON_STATUS,
+  RESOURCE_KIND,
 } from '@/lib/constants';
 import {callApi, ROUTES, type RequestOptions} from '@/lib/api/test/client';
 import {openApiSpec} from '@/lib/api/openapi';
@@ -126,7 +127,7 @@ describe('JSON API', () => {
     expect((await api('GET', `/api/apps/${app.id}`)).body.app.vendor).toBeNull();
   });
 
-  it('repeating a POST or PATCH with the same Idempotency-Key replays the first response and writes nothing new, even when both arrive at once', async () => {
+  it('repeating a POST or PATCH with the same Idempotency-Key answers as the first did and writes nothing new, even when both arrive at once', async () => {
     const {ada, ben} = await seedApp();
     const save = {name: 'Northwind Mail', kind: 'saas', ownerId: ada.id, backupOwnerId: ben.id, noticeDeadline: '2099-06-30'};
 
@@ -161,6 +162,81 @@ describe('JSON API', () => {
     const elsewhere = await api('PATCH', `/api/people/${first.body.person.id}`, {idempotencyKey: 'add-person', body: {name: 'Fay F.'}});
     expect(elsewhere.status).toBe(422);
     expect((await api('GET', '/api/people')).body.people.map((p: {name: string}) => p.name)).toEqual(['Fay']);
+  });
+
+  it('a replay returns the stored status and the resource\'s current state, rebuilt from relational data', async () => {
+    const add = {idempotencyKey: 'add-fay', body: {name: 'Fay', email: 'fay@example.test'}};
+    const first = await api('POST', '/api/people', add);
+    expect(first.status).toBe(201);
+    const [stored] = await t.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, 'add-fay'));
+    expect(stored).toMatchObject({statusCode: 201, resourceKind: RESOURCE_KIND.person, resourceId: first.body.person.id, countAdded: null});
+    // No copy of the response is kept: the row holds the key, a hash, a status, a kind, an id and counts.
+    expect(JSON.stringify(stored)).not.toContain('fay@example.test');
+
+    const renamed = await api('PATCH', `/api/people/${first.body.person.id}`, {body: {name: 'Fay Farrow'}});
+    const replay = await api('POST', '/api/people', add);
+    expect(replay.status).toBe(201);
+    expect(replay.body).toEqual({person: renamed.body.person});
+    expect((await api('GET', '/api/people')).body.people).toHaveLength(1);
+  });
+
+  it('a replay of each kind of write answers in the same shape as the first response, and 404 once the resource is deleted', async () => {
+    const {app} = await seedApp();
+    const writes: [string, string, unknown][] = [
+      ['PATCH', `/api/apps/${app.id}`, {vendor: 'Contoso'}],
+      ['POST', `/api/apps/${app.id}/hosting`, {provider: 'Azure', service: 'SQL Server', region: 'uksouth'}],
+      ['POST', `/api/notice-alerts/${app.alerts[0].id}/acknowledge`, undefined],
+      ['POST', `/api/apps/${app.id}/archive`, undefined],
+    ];
+    const firsts = [];
+    for (const [method, url, body] of writes) {
+      const first = await api(method, url, {idempotencyKey: url, body});
+      const replay = await api(method, url, {idempotencyKey: url, body});
+      expect(replay.status, url).toBe(first.status);
+      expect(Object.keys(replay.body), url).toEqual(Object.keys(first.body));
+      firsts.push(first);
+    }
+    const hosting = firsts[1].body.hosting;
+    expect((await api('POST', writes[1][1], {idempotencyKey: writes[1][1], body: writes[1][2]})).body).toEqual({hosting});
+
+    await t.db.execute(sql`delete from app_hosting where id = ${hosting.id}`);
+    expect((await api('POST', writes[1][1], {idempotencyKey: writes[1][1], body: writes[1][2]})).status).toBe(404);
+  });
+
+  it('a replay of a new dependency shows what the check found since, not the unchecked first answer', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+    const add = {idempotencyKey: 'add-quill', body: {name: 'quill-forms', currentVersion: '3.9.0'}};
+    const first = await api('POST', `/api/apps/${app.id}/dependencies`, add);
+    expect(first.body.dependency).toMatchObject({checkedAt: null, advisories: []});
+
+    const replay = await api('POST', `/api/apps/${app.id}/dependencies`, add);
+    expect(replay.status).toBe(201);
+    expect(replay.body.dependency).toMatchObject({id: first.body.dependency.id, latestVersion: '5.0.2', advisories: [{id: 'GHSA-qqqq-1111-aaaa'}]});
+  });
+
+  it('a replay of an import answers with the counts of the first run, stored as four numbers, whatever was imported since', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+    const path = `/api/apps/${app.id}/dependencies/import`;
+    const first = await api('POST', path, {idempotencyKey: 'build-1', body: PACKAGE_JSON});
+    const [stored] = await t.db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, 'build-1'));
+    expect(stored).toMatchObject({
+      statusCode: 200,
+      resourceKind: RESOURCE_KIND.dependencyImport,
+      resourceId: app.id,
+      countAdded: 3,
+      countUpdated: 0,
+      countUnchanged: 0,
+      countRemoved: 0,
+    });
+
+    const later = await api('POST', path, {idempotencyKey: 'build-2', body: JSON.stringify({name: 'contoso-portal', dependencies: {'quill-forms': '5.0.2'}})});
+    expect(later.body).toEqual({import: {added: 0, updated: 1, unchanged: 0, removed: 2}});
+    const replay = await api('POST', path, {idempotencyKey: 'build-1', body: PACKAGE_JSON});
+    expect(replay.status).toBe(200);
+    expect(replay.body).toEqual(first.body);
+    expect((await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies).toHaveLength(1);
   });
 
   it('an Idempotency-Key is forgotten after 24 hours', async () => {
