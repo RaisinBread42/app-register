@@ -1,8 +1,27 @@
 import {
+  ADVISORY_SEVERITIES,
+  BYTES_PER_MB,
   APP_KINDS,
   APP_SORTS,
+  DEPENDENCY_CHECK_ERRORS,
+  END_OF_SUPPORT_SOON_DAYS,
   END_OF_SUPPORT_SOURCES,
-  HOSTING_HEALTH_STATUSES,
+  HOSTING_MAX_INCIDENTS,
+  HOSTING_NAME_MAX_LENGTH,
+  HOSTING_POINTS,
+  HOSTING_VERSION_MAX_LENGTH,
+  MONITORING_FOLLOW_UP_BUDGET_MS,
+  DEPENDENCY_IMPORT_MAX_BYTES,
+  DEPENDENCY_NAME_MAX_LENGTH,
+  DEPENDENCY_VERSION_MAX_LENGTH,
+  DEPENDENCY_SOURCES,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_CRITICAL_BELOW,
+  HEALTH_DIMENSION,
+  HEALTH_DIMENSIONS,
+  HEALTH_MAX_SCORE,
+  HEALTH_STATUSES,
+  RANGE_VERSION_POINTS,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
   INCIDENT_IMPACTS,
@@ -95,7 +114,7 @@ const appProperties = {
   ...appFields,
   owner: personRef,
   backupOwner: personRef,
-  hostingHealth: ref('HostingHealth'),
+  health: ref('Health'),
   archivedAt: nullable('string', {format: 'date-time'}),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -108,20 +127,73 @@ const appInputFields = {
 };
 
 const dependencyFields = {
-  name: text,
-  currentVersion: text,
-  latestVersion: nullable('string'),
+  name: {...text, maxLength: DEPENDENCY_NAME_MAX_LENGTH, description: 'Changing it clears what monitoring found'},
+  currentVersion: {
+    ...text,
+    maxLength: DEPENDENCY_VERSION_MAX_LENGTH,
+    description: 'Changing it clears the advisories and check state, which were about the old version',
+  },
+  latestVersion: nullable('string', {maxLength: DEPENDENCY_VERSION_MAX_LENGTH}),
   vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
   recommendedAction: nullable('string'),
 };
 
+const count: Schema = {type: 'integer', minimum: 0};
+const healthStatus: Schema = {type: 'string', enum: [...HEALTH_STATUSES]};
+
+/** What monitoring stores on a dependency; read-only in the API. */
+const dependencyMonitoring = {
+  source: {
+    type: 'string',
+    enum: [...DEPENDENCY_SOURCES],
+    description: 'How it got here. An import only removes dependencies an import created.',
+  },
+  isDev: {type: 'boolean', description: 'A devDependency in the imported file'},
+  advisories: {
+    type: 'array',
+    items: ref('Advisory'),
+    description: 'Advisories OSV knows for the tracked version',
+  },
+  checkedAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'When the registry and OSV last both answered for this name and version. ' +
+      'null until then: not checked yet, a check that failed, a package the registry does not know, or a version that is a range.',
+  },
+  checkError: {
+    type: ['string', 'null'],
+    enum: [...DEPENDENCY_CHECK_ERRORS, null],
+    description:
+      'not_found: not on the public npm registry. unavailable: a source gave no usable answer, the previous result is kept. ' +
+      'invalid_version: the tracked version is a range or tag, so advisories cannot be checked ' +
+      '(import package-lock.json for exact versions).',
+  },
+  status: {
+    ...healthStatus,
+    description:
+      'critical with a critical or high advisory; attention with anything else that costs points, which a version that is ' +
+      'a range always does; ok only once the registry and OSV have both answered for this name and version; ' +
+      'otherwise na (not checked yet, the check failed, or the registry does not know the package: see checkError).',
+  },
+};
+
+const refreshCounts = {
+  checked: {...count, description: 'Dependencies a source was asked about'},
+  notFound: {...count, description: 'Not on the public npm registry'},
+  unavailable: {...count, description: 'A source gave no usable answer; the previous result was kept'},
+  advisories: {...count, description: 'Advisories now known across the checked dependencies'},
+};
+
 const hostingFields = {
-  provider: {...text, examples: ['Azure', 'AWS', 'Vercel']},
-  service: {...text, examples: ['SQL Server', 'App Service']},
-  region: nullable('string'),
-  version: {...nullable('string'), description: 'Version of the service itself, e.g. 16 for a database'},
-  runtime: {...nullable('string'), examples: ['Node.js', 'Python', '.NET']},
-  runtimeVersion: {...nullable('string'), examples: ['22']},
+  provider: {...text, maxLength: HOSTING_NAME_MAX_LENGTH, examples: ['Azure', 'AWS', 'Vercel']},
+  service: {...text, maxLength: HOSTING_NAME_MAX_LENGTH, examples: ['SQL Server', 'App Service']},
+  region: nullable('string', {maxLength: HOSTING_NAME_MAX_LENGTH}),
+  version: {
+    ...nullable('string', {maxLength: HOSTING_VERSION_MAX_LENGTH}),
+    description: 'Version of the service itself, e.g. 16 for a database',
+  },
+  runtime: {...nullable('string', {maxLength: HOSTING_NAME_MAX_LENGTH}), examples: ['Node.js', 'Python', '.NET']},
+  runtimeVersion: {...nullable('string', {maxLength: HOSTING_VERSION_MAX_LENGTH}), examples: ['22']},
   endOfSupportOn: {
     ...nullable('string', {format: 'date'}),
     description:
@@ -133,9 +205,33 @@ const hostingFields = {
 /** What the hosting check stores on a row; read-only. */
 const hostingCheckFields = {
   endOfSupportSource: {type: ['string', 'null'], enum: [...END_OF_SUPPORT_SOURCES, null]},
-  incidents: {type: 'array', items: ref('HostingIncident')},
-  healthCheckedAt: nullable('string', {format: 'date-time'}),
-  healthError: {...nullable('string'), description: 'Sources that could not be read on the last check'},
+  incidents: {
+    type: 'array',
+    items: ref('HostingIncident'),
+    maxItems: HOSTING_MAX_INCIDENTS,
+    description: 'Open provider incidents and announced maintenance that reach this row, as the last check found them',
+  },
+  healthCheckedAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'When the hosting check last ran for this row as it is now. null until then; ' +
+      'changing the provider, service, region, version or runtime sets it back to null.',
+  },
+  healthError: {
+    ...nullable('string'),
+    description: 'Sources that could not be read on the last check; what earlier checks found from them is kept',
+  },
+  isMonitored: {
+    type: 'boolean',
+    description: 'false when the check has nothing to look at: no end-of-support date and no watched status feed for the provider',
+  },
+  status: {
+    ...healthStatus,
+    description:
+      'critical when past end of support or in an outage (a major incident the feed ties to this service or region); ' +
+      'attention for any other finding; ok only when the row is monitored and its last check read every source; ' +
+      'otherwise na (not monitored, not checked yet, or the last check failed: see healthError).',
+  },
 };
 
 const schemas = {
@@ -179,7 +275,76 @@ const schemas = {
     createdAt: timestamp,
     updatedAt: timestamp,
   }),
-  Dependency: strict({id, appId: id, ...dependencyFields, createdAt: timestamp, updatedAt: timestamp}),
+  Dependency: strict({
+    id,
+    appId: id,
+    ...dependencyFields,
+    ...dependencyMonitoring,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }),
+  Advisory: strict({
+    id: {...text, examples: ['GHSA-p6mc-m468-83gw']},
+    aliases: {type: 'array', items: text, description: 'Other ids for the same advisory, e.g. its CVE'},
+    severity: {type: 'string', enum: [...ADVISORY_SEVERITIES]},
+    summary: text,
+    url: {type: 'string', format: 'uri'},
+  }),
+  Deduction: strict({
+    dimension: {type: 'string', enum: [...HEALTH_DIMENSIONS]},
+    label: text,
+    detail: text,
+    points: {type: 'integer', minimum: 0, description: 'Points taken off the score'},
+  }),
+  DimensionHealth: strict({
+    status: {
+      ...healthStatus,
+      description: 'From the points this dimension lost. na: the app records nothing for it, or none of it is monitored and checked',
+    },
+    deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
+  }),
+  Health: {
+    ...strict({
+      score: {
+        ...nullable('integer', {minimum: 0, maximum: HEALTH_MAX_SCORE}),
+        description:
+          'null when no monitored dimension has anything checked: no dependencies or none of them checked yet, ' +
+          'and no monitored hosting or none of it checked yet',
+      },
+      status: healthStatus,
+      dimensions: strict(
+        Object.fromEntries(
+          HEALTH_DIMENSIONS.map((dimension) => [
+            dimension,
+            {oneOf: [ref('DimensionHealth'), {type: 'null'}], description: 'null: not monitored yet'},
+          ]),
+        ),
+      ),
+    }),
+    description:
+      `Starts at ${HEALTH_MAX_SCORE} and loses the points of every deduction (floor 0). ` +
+      `Below ${HEALTH_CRITICAL_BELOW} is critical, below ${HEALTH_ATTENTION_BELOW} is attention, otherwise ok. ` +
+      `\`${HEALTH_DIMENSION.dependencies}\` and \`${HEALTH_DIMENSION.hosting}\` are monitored; ` +
+      `\`${HEALTH_DIMENSION.licence}\` and \`${HEALTH_DIMENSION.pricing}\` are not yet (null). ` +
+      `Hosting loses ${HOSTING_POINTS.pastEndOfSupport} per row past its end-of-support date, ` +
+      `${HOSTING_POINTS.endOfSupportSoon} per row within ${END_OF_SUPPORT_SOON_DAYS} days of it, ` +
+      `${HOSTING_POINTS.outage} per outage and ${HOSTING_POINTS.notice} per other provider notice (each incident once).`,
+  },
+  DependencyImport: strict({
+    added: count,
+    updated: {...count, description: 'Known dependencies whose version changed'},
+    unchanged: count,
+    removed: {...count, description: 'Imported earlier and no longer in the file'},
+  }),
+  DependencyRefresh: strict(refreshCounts),
+  WorkspaceDependencyRefresh: strict({apps: {...count, description: 'Active apps with dependencies'}, ...refreshCounts}),
+  PackageFile: {
+    type: 'object',
+    description:
+      'An npm package.json or package-lock.json (lockfileVersion 2 or 3), sent as it is on disk. ' +
+      'It must have `lockfileVersion` and `packages`, or at least one of `dependencies`, `devDependencies` and ' +
+      `\`optionalDependencies\` (an empty one counts). At most ${DEPENDENCY_IMPORT_MAX_BYTES / BYTES_PER_MB} MB.`,
+  },
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
   Hosting: strict({id, appId: id, ...hostingFields, ...hostingCheckFields, createdAt: timestamp, updatedAt: timestamp}),
@@ -191,18 +356,16 @@ const schemas = {
       enum: [...INCIDENT_SCOPES],
       description: 'service: the feed names this service or region. provider: it only names the provider.',
     },
-    url: text,
+    url: {
+      ...nullable('string', {format: 'uri'}),
+      description: "An https link on the provider's own status host; null when the feed gave no such link",
+    },
     startedAt: nullable('string', {format: 'date-time'}),
   }),
-  HostingHealth: strict({
-    status: {type: 'string', enum: [...HOSTING_HEALTH_STATUSES], description: 'na: nothing monitored'},
-    deductions: {type: 'array', items: ref('Deduction')},
-  }),
-  Deduction: strict({
-    dimension: text,
-    label: text,
-    detail: text,
-    points: {type: 'integer', maximum: 0, description: 'Points off the 100-point health score'},
+  WorkspaceHostingRefresh: strict({
+    apps: {...count, description: 'Active apps a hosting answer was stored for'},
+    hosting: {...count, description: 'Hosting rows an answer was stored on'},
+    failedSources: {type: 'array', items: text, description: 'Sources that could not be read, each named once'},
   }),
   HostingCatalog: strict({
     providers: {
@@ -228,6 +391,12 @@ const schemas = {
 };
 
 const appId = pathId('id', 'App id');
+
+const HOSTING_WRITE_NOTE =
+  `400 when the provider, service, region or runtime is longer than ${HOSTING_NAME_MAX_LENGTH} characters, or a version longer than ${HOSTING_VERSION_MAX_LENGTH}. ` +
+  'The answer is the row as saved; the check runs after the write has committed, never inside its transaction, ' +
+  `and takes at most ${MONITORING_FOLLOW_UP_BUDGET_MS / 1000} seconds. A row it does not reach stays unchecked (status na) until the next refresh. ` +
+  'Replaying a stored response (same Idempotency-Key) does not check again.';
 const body = (name: string) => ({required: true, content: {'application/json': {schema: ref(name)}}});
 
 export const openApiSpec = {
@@ -238,7 +407,7 @@ export const openApiSpec = {
     description:
       'Register of bought SaaS and in-house apps. Every request except this document needs ' +
       '`Authorization: Bearer <API key>`; the key decides the workspace. POST and PATCH need an ' +
-      '`Idempotency-Key` header. Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
+      '`Idempotency-Key` header (except the refresh endpoints, which are safe to repeat). Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
   },
   servers: [{url: '/'}],
   security: [{bearerAuth: []}],
@@ -314,15 +483,47 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a dependency (name unique per app, case-insensitive)',
+        summary: 'Add a dependency (name unique per app, case-insensitive); it is then checked against the registry',
         parameters: [appId, idempotencyKey],
         requestBody: body('DependencyInput'),
         responses: {201: json(strict({dependency: ref('Dependency')}), 'Added'), ...errors},
       },
     },
+    '/api/apps/{id}/dependencies/import': {
+      post: {
+        summary: 'Import direct dependencies from a package.json or package-lock.json, then check them',
+        description:
+          'The body is the file itself. Runtime, optional and dev dependencies are taken (dev ones flagged `isDev`), ' +
+          'each under its real package name (an npm alias is resolved). ' +
+          'A lockfile gives exact installed versions; a package.json gives its ranges with the operators stripped. ' +
+          `A version that is still a range (\`^16\`, \`4.x\`, \`*\`) cannot be checked for advisories: it gets status attention and costs ${RANGE_VERSION_POINTS} point. ` +
+          'By name: new ones are added, known ones get the file\'s version, and ones no longer in the file are ' +
+          'removed only if an earlier import created them. Imports of one app run one at a time. ' +
+          '400 and nothing changes when: the body is not JSON or not a package file, it is larger than the cap, ' +
+          'two entries of one list have the same name after trimming (ignoring case), ' +
+          `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
+          `The check afterwards takes at most ${MONITORING_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
+          'Replaying a stored response (same Idempotency-Key) does not check again.',
+        parameters: [appId, idempotencyKey],
+        requestBody: body('PackageFile'),
+        responses: {200: json(strict({import: ref('DependencyImport')}), 'Imported'), ...errors},
+      },
+    },
+    '/api/apps/{id}/dependencies/refresh': {
+      post: {
+        summary: "Check an app's dependencies against the npm registry and OSV now",
+        description: 'Safe to repeat, so it needs no Idempotency-Key. One package failing never fails the refresh.',
+        parameters: [appId],
+        responses: {
+          200: json(strict({refresh: ref('DependencyRefresh')}), 'Checked'),
+          401: errors[401],
+          404: errors[404],
+        },
+      },
+    },
     '/api/apps/{id}/dependencies/{dependencyId}': {
       patch: {
-        summary: 'Update a dependency',
+        summary: 'Update a dependency; it is then checked again',
         parameters: [appId, pathId('dependencyId', 'Dependency id'), idempotencyKey],
         requestBody: body('DependencyPatch'),
         responses: {200: json(strict({dependency: ref('Dependency')}), 'Updated'), ...errors},
@@ -344,7 +545,8 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a hosting entry (one per provider + service + region) and check it against the monitoring sources',
+        summary: 'Add a hosting entry (one per provider + service + region); it is then checked against the monitoring sources',
+        description: HOSTING_WRITE_NOTE,
         parameters: [appId, idempotencyKey],
         requestBody: body('HostingInput'),
         responses: {201: json(strict({hosting: ref('Hosting')}), 'Added'), ...errors},
@@ -353,13 +555,21 @@ export const openApiSpec = {
     '/api/apps/{id}/hosting/refresh': {
       post: {
         summary: "Check an app's hosting now: end-of-support dates and open provider incidents",
-        parameters: [appId, idempotencyKey],
-        responses: {200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Checked'), ...errors},
+        description:
+          'Safe to repeat, so it needs no Idempotency-Key. One source failing never fails the check: it is named in ' +
+          '`healthError` and what earlier checks found from it is kept. An answer is dropped when the row changed meanwhile.',
+        parameters: [appId],
+        responses: {
+          200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Checked'),
+          401: errors[401],
+          404: errors[404],
+        },
       },
     },
     '/api/apps/{id}/hosting/{hostingId}': {
       patch: {
-        summary: 'Update a hosting entry and check it again',
+        summary: 'Update a hosting entry; it is then checked again',
+        description: HOSTING_WRITE_NOTE,
         parameters: [appId, pathId('hostingId', 'Hosting entry id'), idempotencyKey],
         requestBody: body('HostingPatch'),
         responses: {200: json(strict({hosting: ref('Hosting')}), 'Updated'), ...errors},
@@ -376,22 +586,38 @@ export const openApiSpec = {
         responses: {200: json(strict({catalog: ref('HostingCatalog')}), 'Catalog'), 401: errors[401]},
       },
     },
+    '/api/monitoring/dependencies/refresh': {
+      post: {
+        summary: 'Check the dependencies of every active app',
+        description: 'Safe to repeat, so it needs no Idempotency-Key.',
+        responses: {
+          200: json(strict({refresh: ref('WorkspaceDependencyRefresh')}), 'Checked'),
+          401: errors[401],
+        },
+      },
+    },
     '/api/monitoring/hosting/refresh': {
       post: {
-        summary: 'Check the hosting of every active app in the workspace (for a daily job)',
-        parameters: [idempotencyKey],
+        summary: 'Check the hosting of every active app',
+        description: 'Safe to repeat, so it needs no Idempotency-Key. An app archived while it runs is skipped.',
+        responses: {
+          200: json(strict({refresh: ref('WorkspaceHostingRefresh')}), 'Checked'),
+          401: errors[401],
+        },
+      },
+    },
+    '/api/monitoring/refresh': {
+      post: {
+        summary: 'Run both checks for every active app: dependencies, then hosting (the daily scheduled job calls this)',
+        description: 'Safe to repeat, so it needs no Idempotency-Key.',
         responses: {
           200: json(
             strict({
-              refreshed: strict({
-                apps: {type: 'integer'},
-                hosting: {type: 'integer'},
-                failedSources: {type: 'array', items: text},
-              }),
+              refresh: strict({dependencies: ref('WorkspaceDependencyRefresh'), hosting: ref('WorkspaceHostingRefresh')}),
             }),
             'Checked',
           ),
-          ...errors,
+          401: errors[401],
         },
       },
     },

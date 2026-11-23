@@ -1,7 +1,7 @@
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp} from '@/lib/services/apps';
-import type {HostingInput} from '@/lib/services/hosting';
-import {addHostingAndCheck} from '@/lib/services/hosting-monitor';
+import {addHosting, type HostingInput, type HostingView} from '@/lib/services/hosting';
+import {checkHostingAfterWrite} from '@/lib/services/hosting-monitor';
 
 type Context = {params: Promise<{id: string}>};
 
@@ -13,10 +13,16 @@ export async function GET(request: Request, {params}: Context): Promise<Response
   );
 }
 
-/** POST /api/apps/:id/hosting → 201 `{ hosting: Hosting }` (checked against the monitoring sources before it answers) */
+/** POST /api/apps/:id/hosting → 201 `{ hosting: Hosting }`, then the new row is checked. */
 export async function POST(request: Request, {params}: Context): Promise<Response> {
   const {id} = await params;
-  return handle(request, async ({db, workspaceId, body}) =>
-    created({hosting: await addHostingAndCheck(db, workspaceId, id, jsonObject<HostingInput>(body))}),
+  return handle(
+    request,
+    async ({db, workspaceId, body}) =>
+      created({hosting: await addHosting(db, workspaceId, id, jsonObject<HostingInput>(body))}),
+    {
+      afterCommit: ({db, workspaceId}, result) =>
+        checkHostingAfterWrite(db, workspaceId, id, [(result.body as {hosting: HostingView}).hosting.id]),
+    },
   );
 }

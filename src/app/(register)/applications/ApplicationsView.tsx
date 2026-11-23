@@ -12,13 +12,30 @@ import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_LIST_SORT, APP_LIST_SORTS, FILTER_ALL, type AppListSort} from '@/lib/constants';
+import {
+  APP_LIST_SORT,
+  APP_LIST_SORTS,
+  FILTER_ALL,
+  HEALTH_ATTENTION_BELOW,
+  HEALTH_MAX_SCORE,
+  type AppListSort,
+} from '@/lib/constants';
 import type {App} from '@/lib/ui/api-client';
-import {APP_LIST_SORT_LABEL, COMING_SOON, HEALTH_COMING_SOON, KIND_LABEL, KIND_OPTIONS, LIVE_DATA_NOTE, NOT_SET} from '@/lib/ui/copy';
+import {
+  APP_LIST_SORT_LABEL,
+  COMING_SOON,
+  HEALTH_BASIS_NOTE,
+  HEALTH_FILTER_OPTIONS,
+  KIND_LABEL,
+  KIND_OPTIONS,
+  LIVE_DATA_NOTE,
+  NOT_SET,
+} from '@/lib/ui/copy';
 import {AppsIcon, CalendarIcon, ShieldIcon, WarningIcon} from '@/lib/ui/icons';
-import {applyAppListView, appsWithRenewal, formatDate} from '@/lib/ui/register-view';
-import {AppCell, PendingPill, StatusPill} from '../_components/AppIdentity';
+import {applyAppListView, appsWithRenewal, formatDate, healthStats} from '@/lib/ui/register-view';
+import {AppCell, PendingPill} from '../_components/AppIdentity';
 import {FootNote, MetricCard} from '../_components/Cards';
+import {DimensionPill, ScorePill} from '../_components/Health';
 import {PageFrame} from '../_components/PageFrame';
 import {PageHeader} from '../_components/PageHeader';
 import {AddApplicationDialog} from './AddApplicationDialog';
@@ -28,21 +45,18 @@ import type {PersonOption} from './AppForm';
 const column = (share: number) => proportional(share, {minWidth: 80});
 
 const TYPE_FILTERS = [{value: FILTER_ALL, label: 'All types'}, ...KIND_OPTIONS];
-const HEALTH_FILTERS = [{value: FILTER_ALL, label: 'All health'}];
-const SORT_OPTIONS = APP_LIST_SORTS.map((sort) => ({
-  value: sort,
-  label: APP_LIST_SORT_LABEL[sort],
-  disabled: sort === APP_LIST_SORT.health,
-}));
+const SORT_OPTIONS = APP_LIST_SORTS.map((sort) => ({value: sort, label: APP_LIST_SORT_LABEL[sort]}));
 
 type Props = {apps: App[]; people: PersonOption[]; addKey: string; initialQuery: string; isAddOpen: boolean};
 
 export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [kind, setKind] = useState<string>(FILTER_ALL);
-  const [sort, setSort] = useState<AppListSort>(APP_LIST_SORT.name);
+  const [health, setHealth] = useState<string>(FILTER_ALL);
+  const [sort, setSort] = useState<AppListSort>(APP_LIST_SORT.health);
   const [isAdding, setIsAdding] = useState(isAddOpen);
-  const shown = applyAppListView(apps, {query, kind, sort});
+  const shown = applyAppListView(apps, {query, kind, health, sort});
+  const stats = healthStats(apps);
 
   return (
     <PageFrame crumbs={[{label: 'Applications'}]}>
@@ -53,8 +67,20 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
       />
       <Grid columns={4} gap={4}>
         <MetricCard label="Total applications" value={apps.length} description="All tracked applications" icon={AppsIcon} />
-        <MetricCard label="Average health" value={NOT_SET} description={HEALTH_COMING_SOON} icon={ShieldIcon} tone="green" />
-        <MetricCard label="Need attention" value={NOT_SET} description={HEALTH_COMING_SOON} icon={WarningIcon} tone="red" />
+        <MetricCard
+          label="Average health"
+          value={stats.average === null ? NOT_SET : `${stats.average} / ${HEALTH_MAX_SCORE}`}
+          description={HEALTH_BASIS_NOTE}
+          icon={ShieldIcon}
+          tone="green"
+        />
+        <MetricCard
+          label="Need attention"
+          value={stats.needAttention}
+          description={`Applications below ${HEALTH_ATTENTION_BELOW}`}
+          icon={WarningIcon}
+          tone="red"
+        />
         <MetricCard label="With licence dates" value={appsWithRenewal(apps).length} description="Tracked renewals" icon={CalendarIcon} tone="amber" />
       </Grid>
       <Card padding={0}>
@@ -72,10 +98,9 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
             <Selector
               label="Health"
               isLabelHidden
-              options={HEALTH_FILTERS}
-              value={FILTER_ALL}
-              isDisabled
-              disabledMessage={HEALTH_COMING_SOON}
+              options={HEALTH_FILTER_OPTIONS}
+              value={health}
+              onChange={(value) => setHealth(value ?? FILTER_ALL)}
               width={142}
             />
             <HStack gap={0} style={{flex: 1}} />
@@ -84,7 +109,7 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
               isLabelHidden
               options={SORT_OPTIONS}
               value={sort}
-              onChange={(value) => setSort((value as AppListSort | null) ?? APP_LIST_SORT.name)}
+              onChange={(value) => setSort((value as AppListSort | null) ?? APP_LIST_SORT.health)}
               width={158}
             />
           </HStack>
@@ -97,9 +122,19 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
               {key: 'name', header: 'Application', width: proportional(198, {minWidth: 190}), renderCell: (app: App) => <AppCell app={app} />},
               {key: 'kind', width: column(135), header: 'Type', renderCell: (app: App) => <Badge label={KIND_LABEL[app.kind]} variant="purple" />},
               {key: 'owner', width: column(124), header: 'Owner', renderCell: (app: App) => app.owner.name},
-              {key: 'health', width: column(92), header: 'Health ↑', renderCell: () => <PendingPill />},
-              {key: 'dependencies', width: column(112), header: 'Dependencies', renderCell: () => <PendingPill />},
-              {key: 'hosting', width: column(100), header: 'Hosting', renderCell: (app: App) => <StatusPill status={app.hostingHealth.status} />},
+              {key: 'health', width: column(92), header: 'Health ↑', renderCell: (app: App) => <ScorePill health={app.health} />},
+              {
+                key: 'dependencies',
+                width: column(112),
+                header: 'Dependencies',
+                renderCell: (app: App) => <DimensionPill dimension={app.health.dimensions.dependencies} />,
+              },
+              {
+                key: 'hosting',
+                width: column(100),
+                header: 'Hosting',
+                renderCell: (app: App) => <DimensionPill dimension={app.health.dimensions.hosting} />,
+              },
               {key: 'licence', width: column(100), header: 'Licence', renderCell: () => <PendingPill />},
               {key: 'pricing', width: column(100), header: 'Pricing', renderCell: () => <PendingPill />},
               {
@@ -117,7 +152,7 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
           </HStack>
         </VStack>
       </Card>
-      <FootNote>{`${LIVE_DATA_NOTE} Statuses shown as — are ${COMING_SOON.toLowerCase()}.`}</FootNote>
+      <FootNote>{`${LIVE_DATA_NOTE} Statuses shown as — have nothing recorded to check, or are ${COMING_SOON.toLowerCase()}.`}</FootNote>
       <AddApplicationDialog isOpen={isAdding} onClose={() => setIsAdding(false)} idempotencyKey={addKey} people={people} />
     </PageFrame>
   );

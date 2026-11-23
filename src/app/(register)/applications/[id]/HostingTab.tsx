@@ -17,23 +17,24 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import {END_OF_SUPPORT_SOURCE} from '@/lib/constants';
 import type {AppDetail, Hosting, HostingCatalog} from '@/lib/ui/api-client';
-import {NOT_SET, orDash} from '@/lib/ui/copy';
+import {NOT_CHECKED_YET, NOT_SET, orDash} from '@/lib/ui/copy';
 import {
   checkErrors,
   endOfSupportNote,
   formatDate,
   formatDateTime,
+  hostingLastChecked,
+  hostingStatusReason,
   hostingVersion,
-  lastChecked,
   openIncidents,
   type IncidentRow,
 } from '@/lib/ui/register-view';
 import {hostingToForm, type HostingFormValues} from '@/lib/ui/forms';
 import {refreshHostingAction, removeHostingAction, saveHostingAction} from '../../actions';
-import {StatusPill} from '../../_components/AppIdentity';
 import {FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
 import {EditDialog} from '../../_components/EditDialog';
 import {FormError} from '../../_components/FormError';
+import {CheckPill, DimensionPill} from '../../_components/Health';
 import {useAction} from '../../_components/use-action';
 import {isoDate} from '../../_components/iso-date';
 
@@ -42,7 +43,6 @@ type Props = {
   catalog: HostingCatalog;
   today: string;
   addKey: string;
-  refreshKey: string;
   editKeys: Record<string, string>;
   isReadOnly: boolean;
 };
@@ -53,7 +53,7 @@ type Editing = Hosting | null | undefined;
 /** Selector choice that swaps the list for a free-text field. */
 const OTHER = 'Other';
 
-export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, isReadOnly}: Props) {
+export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: Props) {
   const [editing, setEditing] = useState<Editing>(undefined);
   const [values, setValues] = useState<HostingFormValues>(hostingToForm());
   const save = useAction();
@@ -61,7 +61,7 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
   const refresh = useAction();
   const confirm = useImperativeAlertDialog();
   const incidents = openIncidents(app.hosting);
-  const checkedAt = lastChecked(app.hosting);
+  const checkedAt = hostingLastChecked(app.hosting);
   const errors = checkErrors(app.hosting);
 
   function open(hosting: Hosting | null) {
@@ -100,7 +100,7 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
                   label="Check now"
                   size="sm"
                   isLoading={refresh.isPending}
-                  onClick={() => refresh.run(() => refreshHostingAction(refreshKey, app.id))}
+                  onClick={() => refresh.run(() => refreshHostingAction(app.id))}
                 />
               )}
               <Button label="Add hosting" variant="primary" size="sm" onClick={() => open(null)} />
@@ -113,7 +113,7 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
             <Banner
               status="warning"
               title="Some sources could not be read on the last check"
-              description={`${errors.join('. ')}. What earlier checks found is still shown.`}
+              description={`${errors.join('. ')}. What earlier checks found is still shown; a row with nothing found shows no status until its next check.`}
               collapsible={false}
             />
           )}
@@ -128,6 +128,7 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
               {key: 'region', header: 'Region', renderCell: (h: Hosting) => orDash(h.region)},
               {key: 'version', header: 'Version / runtime', renderCell: (h: Hosting) => orDash(hostingVersion(h))},
               {key: 'endOfSupportOn', header: 'End of support', renderCell: (h: Hosting) => <EndOfSupport hosting={h} today={today} />},
+              {key: 'status', header: 'Status', renderCell: (h: Hosting) => <RowStatus hosting={h} />},
               {
                 key: 'actions',
                 header: '',
@@ -143,9 +144,9 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
           />
           <KeyValueRows
             rows={[
-              {label: 'Infrastructure status', value: <StatusPill status={app.hostingHealth.status} />},
+              {label: 'Infrastructure status', value: <DimensionPill dimension={app.health.dimensions.hosting} />},
               {label: 'Monitoring sources', value: 'endoflife.date · provider status feeds'},
-              {label: 'Last checked', value: checkedAt ? formatDateTime(checkedAt) : 'Not checked yet'},
+              {label: 'Last checked', value: checkedAt ? formatDateTime(checkedAt) : NOT_CHECKED_YET},
             ]}
           />
           <FootNote>
@@ -172,6 +173,21 @@ export function HostingTab({app, catalog, today, addKey, refreshKey, editKeys, i
         error={save.error}
       />
       {confirm.element}
+    </VStack>
+  );
+}
+
+/** The row's own pill and, when it has no status, why: not monitored, not checked yet, or the check failed. */
+function RowStatus({hosting}: {hosting: Hosting}) {
+  const reason = hostingStatusReason(hosting);
+  return (
+    <VStack gap={1} hAlign="start">
+      <CheckPill status={hosting.status} />
+      {reason && (
+        <Text type="supporting" color="secondary">
+          {reason}
+        </Text>
+      )}
     </VStack>
   );
 }
@@ -207,9 +223,15 @@ function IncidentList({incidents}: {incidents: IncidentRow[]}) {
           {index > 0 && <Divider />}
           <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3}>
             <VStack gap={0.5} style={{flex: 1, minWidth: 0}}>
-              <Link href={incident.url} isExternalLink weight="bold" size="sm">
-                {incident.title}
-              </Link>
+              {incident.url ? (
+                <Link href={incident.url} isExternalLink weight="bold" size="sm">
+                  {incident.title}
+                </Link>
+              ) : (
+                <Text weight="bold" size="sm">
+                  {incident.title}
+                </Text>
+              )}
               <Text type="supporting" color="secondary">
                 {[incident.affects, incident.startedAt && `since ${formatDateTime(incident.startedAt)}`].filter(Boolean).join(' · ')}
               </Text>

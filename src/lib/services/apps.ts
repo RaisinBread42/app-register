@@ -1,15 +1,15 @@
-import {and, asc, between, eq, sql} from 'drizzle-orm';
+import {and, asc, between, eq, inArray, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
 import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {apps, people} from '@/lib/db/schema';
+import {appDependencies, appHosting, apps, people, type AppDependencyRow, type AppHostingRow} from '@/lib/db/schema';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
-import {hostingByApp, listHosting, type HostingView} from './hosting';
-import {hostingHealth, type HostingHealth} from './hosting-health';
+import {appHealth, type AppHealth, type HealthFacts} from './health';
+import {listHosting, type HostingView} from './hosting';
 import {
   listAlertsForApp,
   removeScheduledAlerts,
@@ -54,8 +54,7 @@ export type AppView = Omit<ValidAppInput, 'ownerId' | 'backupOwnerId'> & {
   id: string;
   owner: {id: string; name: string};
   backupOwner: {id: string; name: string};
-  /** Hosting status and point deductions, from what the last hosting check stored. */
-  hostingHealth: HostingHealth;
+  health: AppHealth;
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -128,8 +127,50 @@ export async function listActiveApps(
   const rows = await selectAppViews(db)
     .where(and(...filters))
     .orderBy(...order);
-  const hosting = await hostingByApp(db, workspaceId);
-  return rows.map((row) => toAppView(row, hosting.get(row.app.id) ?? [], today));
+  const appIds = rows.map((row) => row.app.id);
+  const dependencies = await dependenciesByApp(db, workspaceId, appIds);
+  const hosting = await hostingByApp(db, workspaceId, appIds);
+  return rows.map((row) =>
+    toAppView(row, {dependencies: dependencies.get(row.app.id) ?? [], hosting: hosting.get(row.app.id) ?? [], today}),
+  );
+}
+
+/** The dependencies of several apps in one query, for their health scores. */
+async function dependenciesByApp(
+  db: AppDatabase,
+  workspaceId: string,
+  appIds: string[],
+): Promise<Map<string, AppDependencyRow[]>> {
+  const rows = appIds.length
+    ? await db
+        .select()
+        .from(appDependencies)
+        .where(and(eq(appDependencies.workspaceId, workspaceId), inArray(appDependencies.appId, appIds)))
+    : [];
+  const byApp = new Map<string, AppDependencyRow[]>();
+  for (const row of rows) {
+    byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row]);
+  }
+  return byApp;
+}
+
+/** The hosting rows of several apps in one query, for their health scores. */
+async function hostingByApp(
+  db: AppDatabase,
+  workspaceId: string,
+  appIds: string[],
+): Promise<Map<string, AppHostingRow[]>> {
+  const rows = appIds.length
+    ? await db
+        .select()
+        .from(appHosting)
+        .where(and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, appIds)))
+    : [];
+  const byApp = new Map<string, AppHostingRow[]>();
+  for (const row of rows) {
+    byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row]);
+  }
+  return byApp;
 }
 
 /** One app (archived ones too, as history) with its alerts, dependencies and hosting. 404 outside the workspace. */
@@ -145,11 +186,12 @@ export async function getApp(
   if (!row) {
     throw new NotFoundError('App not found');
   }
+  const dependencies = await listDependencies(db, workspaceId, id);
   const hosting = await listHosting(db, workspaceId, id);
   return {
-    ...toAppView(row, hosting, today),
+    ...toAppView(row, {dependencies, hosting, today}),
     alerts: await listAlertsForApp(db, workspaceId, id),
-    dependencies: await listDependencies(db, workspaceId, id),
+    dependencies,
     hosting,
   };
 }
@@ -294,8 +336,7 @@ function toAppView(
     owner: {id: string; name: string};
     backupOwner: {id: string; name: string};
   },
-  hosting: HostingView[],
-  today: string,
+  facts: HealthFacts,
 ): AppView {
   const {app} = row;
   return {
@@ -314,7 +355,7 @@ function toAppView(
     runtimeLocation: app.runtimeLocation,
     dataAndKeys: app.dataAndKeys,
     whatBreaksIfStopped: app.whatBreaksIfStopped,
-    hostingHealth: hostingHealth(hosting, today),
+    health: appHealth(facts),
     archivedAt: app.archivedAt,
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,

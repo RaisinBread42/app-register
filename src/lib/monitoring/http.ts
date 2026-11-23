@@ -1,27 +1,38 @@
-import {MONITOR_TIMEOUT_MS, MONITOR_USER_AGENT} from '@/lib/constants';
+import {readBytesUpTo} from '@/lib/capped-body';
+import {API_HEADER, HOSTING_FEED_MAX_RESPONSE_BYTES, MONITORING_TIMEOUT_MS, MONITORING_USER_AGENT} from '@/lib/constants';
+import type {Fetch} from '@/lib/services/package-sources';
 
 /**
- * The one place the app calls outside feeds. Polite by default: a short
- * timeout and a User-Agent that names the product and nothing else.
- * Tests never reach the network: `src/test-setup.ts` replaces `fetchText`.
+ * The one place the hosting check calls outside feeds. Polite by default: a
+ * short timeout and a User-Agent that names the product and nothing else.
+ * An answer longer than HOSTING_FEED_MAX_RESPONSE_BYTES is not read to the end
+ * and counts as no answer. Tests pass a fake: `src/test-setup.ts` blocks `fetch`.
  */
 
-export type FetchText = (url: string) => Promise<string>;
+/** The body of `url` as text. Stops early when `signal` aborts (the caller ran out of time). */
+export type FetchText = (url: string, signal?: AbortSignal) => Promise<string>;
 
 const UTF16_BE_BOM = [0xfe, 0xff];
 const UTF16_LE_BOM = [0xff, 0xfe];
 
-export const fetchText: FetchText = async (url) => {
-  const response = await fetch(url, {
-    headers: {'user-agent': MONITOR_USER_AGENT},
-    signal: AbortSignal.timeout(MONITOR_TIMEOUT_MS),
-    cache: 'no-store',
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return decode(new Uint8Array(await response.arrayBuffer()));
-};
+export function createFetchText(send: Fetch = fetch): FetchText {
+  return async (url, signal) => {
+    const timeout = AbortSignal.timeout(MONITORING_TIMEOUT_MS);
+    const response = await send(url, {
+      headers: {[API_HEADER.userAgent]: MONITORING_USER_AGENT},
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const bytes = await readBytesUpTo(response, HOSTING_FEED_MAX_RESPONSE_BYTES);
+    if (bytes === null) {
+      throw new Error('answer over the size cap');
+    }
+    return decode(bytes);
+  };
+}
 
 /** AWS serves its health JSON as UTF-16; everything else is UTF-8. The byte order mark tells them apart. */
 export function decode(bytes: Uint8Array): string {

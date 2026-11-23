@@ -1,22 +1,30 @@
 import {
+  FEED_MAX_INCIDENTS,
+  FEED_TEXT_MAX_LENGTH,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
+  INCIDENT_TITLE_MAX_LENGTH,
   STATUS_FEED_KIND,
   type IncidentImpact,
   type IncidentScope,
 } from '@/lib/constants';
 import {squash, type StatusFeed} from '@/lib/hosting-catalog';
+import {isPlainObject} from '@/lib/services/validation';
+import {cleanText, feedList, feedNames, feedText, isoTime, linkOnHostOf, malformed} from './feed-values';
 
 /**
  * Reads each provider's public status feed into one shape, and decides whether
  * an incident reaches a hosting row. Shapes were copied from the live feeds
- * (Nov 2026); a feed that changes shape throws here and is reported as a
- * failed source, never as "all clear".
+ * (Nov 2026). Nothing a feed says is trusted: a feed that is not in its
+ * documented shape throws here and is reported as a failed source, never as
+ * "all clear"; text is cleaned and cut; at most FEED_MAX_INCIDENTS incidents are
+ * read; and a link is only kept when it points at the provider's own status page.
  */
 
 export type FeedIncident = {
   title: string;
-  url: string;
+  /** A link on the provider's own status host, or null when the feed gave none. */
+  url: string | null;
   startedAt: string | null;
   impact: IncidentImpact;
   /** Service or component names the feed lists as affected; empty when it lists none. */
@@ -31,7 +39,7 @@ export type FeedIncident = {
 export function parseStatusFeed(feed: StatusFeed, body: string): FeedIncident[] {
   switch (feed.kind) {
     case STATUS_FEED_KIND.statuspage:
-      return parseStatuspage(JSON.parse(body));
+      return parseStatuspage(JSON.parse(body), feed.page);
     case STATUS_FEED_KIND.gcpIncidents:
       return parseGoogleCloud(JSON.parse(body), feed.page);
     case STATUS_FEED_KIND.awsHealth:
@@ -41,78 +49,76 @@ export function parseStatusFeed(feed: StatusFeed, body: string): FeedIncident[] 
   }
 }
 
+/** The first FEED_MAX_INCIDENTS entries of a feed's list, each of which must be an object. */
+function entries(value: unknown): Record<string, unknown>[] {
+  return feedList(value)
+    .slice(0, FEED_MAX_INCIDENTS)
+    .map((entry) => {
+      if (!isPlainObject(entry)) {
+        throw malformed();
+      }
+      return entry;
+    });
+}
+
+const nameOf = (key: string) => (item: unknown) => (isPlainObject(item) ? item[key] : undefined);
+
+function title(value: unknown): string {
+  const text = feedText(value, INCIDENT_TITLE_MAX_LENGTH);
+  if (text === '') {
+    throw malformed();
+  }
+  return text;
+}
+
 // Atlassian Statuspage `summary.json` (Vercel, Cloudflare, Netlify, GitHub).
 
-type StatuspageIncident = {
-  name: string;
-  impact: string;
-  shortlink: string;
-  started_at: string | null;
-  scheduled_for?: string;
-  components: {name: string}[];
-};
-
 const STATUSPAGE_MAJOR = ['major', 'critical'];
+/** Statuspage ids are short codes; the incident's page is `<status page>/incidents/<id>`. */
+const STATUSPAGE_ID = /^[a-z0-9]{1,40}$/i;
 
-function parseStatuspage(summary: {incidents: StatuspageIncident[]; scheduled_maintenances: StatuspageIncident[]}): FeedIncident[] {
-  const toIncident = (impact: (incident: StatuspageIncident) => IncidentImpact) => (incident: StatuspageIncident) => ({
-    title: incident.name,
-    url: incident.shortlink,
-    startedAt: incident.scheduled_for ?? incident.started_at,
+function parseStatuspage(summary: unknown, page: string): FeedIncident[] {
+  if (!isPlainObject(summary)) {
+    throw malformed();
+  }
+  const toIncident = (impact: (incident: Record<string, unknown>) => IncidentImpact) => (incident: Record<string, unknown>) => ({
+    title: title(incident.name),
+    // Built from the id, not taken from the feed's own link (a shortener on another host).
+    url: typeof incident.id === 'string' && STATUSPAGE_ID.test(incident.id) ? `${page}/incidents/${incident.id}` : null,
+    startedAt: isoTime(incident.scheduled_for) ?? isoTime(incident.started_at),
     impact: impact(incident),
-    services: incident.components.map((component) => component.name),
+    services: feedNames(incident.components, nameOf('name')),
     regions: [],
     text: null,
   });
   return [
     // `summary.json` lists unresolved incidents only.
-    ...summary.incidents.map(
-      toIncident((incident) => (STATUSPAGE_MAJOR.includes(incident.impact) ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor)),
+    ...entries(summary.incidents).map(
+      toIncident((incident) => (STATUSPAGE_MAJOR.includes(feedText(incident.impact)) ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor)),
     ),
-    ...summary.scheduled_maintenances.map(toIncident(() => INCIDENT_IMPACT.maintenance)),
+    ...entries(summary.scheduled_maintenances).map(toIncident(() => INCIDENT_IMPACT.maintenance)),
   ];
 }
 
 // Google Cloud `incidents.json`: recent incidents, open ones have no `end`.
 
-type GoogleIncident = {
-  end?: string | null;
-  begin: string;
-  external_desc: string;
-  uri: string;
-  status_impact: string;
-  affected_products: {title: string}[];
-  currently_affected_locations: {id: string}[];
-};
-
 const GOOGLE_MAJOR = ['SERVICE_OUTAGE', 'SERVICE_DISRUPTION'];
 const GLOBAL_REGION = 'global';
 
-function parseGoogleCloud(incidents: GoogleIncident[], page: string): FeedIncident[] {
-  return incidents
-    .filter((incident) => !incident.end)
-    .map((incident) => ({
-      title: incident.external_desc,
-      url: `${page}/${incident.uri}`,
-      startedAt: incident.begin,
-      impact: GOOGLE_MAJOR.includes(incident.status_impact) ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
-      services: incident.affected_products.map((product) => product.title),
-      regions: incident.currently_affected_locations.map((location) => location.id).filter((id) => id !== GLOBAL_REGION),
-      text: null,
-    }));
+function parseGoogleCloud(incidents: unknown, page: string): FeedIncident[] {
+  const open = feedList(incidents).filter((incident) => isPlainObject(incident) && !incident.end);
+  return entries(open).map((incident) => ({
+    title: title(incident.external_desc),
+    url: linkOnHostOf(page, `${page}/${feedText(incident.uri)}`),
+    startedAt: isoTime(incident.begin),
+    impact: GOOGLE_MAJOR.includes(feedText(incident.status_impact)) ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
+    services: feedNames(incident.affected_products, nameOf('title')),
+    regions: feedNames(incident.currently_affected_locations, nameOf('id')).filter((id) => id !== GLOBAL_REGION),
+    text: null,
+  }));
 }
 
 // AWS Health `public/currentevents`: only events that are open now.
-
-type AwsEvent = {
-  date: string;
-  arn: string;
-  region_name: string;
-  status: string;
-  service_name: string;
-  summary: string;
-  impacted_services?: Record<string, {service_name: string}>;
-};
 
 /** AWS status levels: 1 informational, 2 degradation, 3 disruption. */
 const AWS_DISRUPTION = '3';
@@ -120,58 +126,79 @@ const AWS_DISRUPTION = '3';
 const AWS_ARN_REGION_INDEX = 3;
 const MS_PER_SECOND = 1000;
 
-function parseAws(events: AwsEvent[], page: string): FeedIncident[] {
-  return events.map((event) => {
-    const region = event.arn.split(':')[AWS_ARN_REGION_INDEX];
+function parseAws(events: unknown, page: string): FeedIncident[] {
+  return entries(events).map((event) => {
+    const region = feedText(event.arn).split(':')[AWS_ARN_REGION_INDEX];
+    const service = feedText(event.service_name);
+    const impacted = event.impacted_services === undefined ? [] : Object.values(impactedServices(event.impacted_services));
     return {
-      title: `${event.service_name}: ${event.summary} (${event.region_name})`,
+      title: title(`${service}: ${feedText(event.summary)} (${feedText(event.region_name)})`),
       url: page,
-      startedAt: new Date(Number(event.date) * MS_PER_SECOND).toISOString(),
-      impact: event.status === AWS_DISRUPTION ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
-      services: [event.service_name, ...Object.values(event.impacted_services ?? {}).map((service) => service.service_name)],
+      startedAt: isoTime(Number(event.date) * MS_PER_SECOND),
+      impact: String(event.status) === AWS_DISRUPTION ? INCIDENT_IMPACT.major : INCIDENT_IMPACT.minor,
+      services: [service, ...feedNames(impacted, nameOf('service_name'))],
       regions: region && region !== GLOBAL_REGION ? [region] : [],
       text: null,
     };
   });
 }
 
+function impactedServices(value: unknown): Record<string, unknown> {
+  if (!isPlainObject(value)) {
+    throw malformed();
+  }
+  return value;
+}
+
 // Azure status RSS: one <item> per incident on the public status page, none when all is well.
+
+const RSS_ITEM_OPEN = '<item>';
+const RSS_ITEM_CLOSE = '</item>';
+const AZURE_FALLBACK_TITLE = 'Azure incident';
+const CDATA = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
+const MARKUP = /<[^>]+>/g;
 
 function parseAzureRss(xml: string, page: string): FeedIncident[] {
   if (!xml.includes('<rss')) {
-    throw new Error('Not an RSS feed');
+    throw malformed();
   }
-  return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
-    const title = xmlText(item, 'title') ?? 'Azure incident';
-    const published = Date.parse(xmlText(item, 'pubDate') ?? '');
+  // Split, not a pattern: an unclosed <item> in a huge document must not slow the check down.
+  const items = xml
+    .split(RSS_ITEM_OPEN)
+    .slice(1, FEED_MAX_INCIDENTS + 1)
+    .map((rest) => rest.split(RSS_ITEM_CLOSE, 1)[0].slice(0, FEED_TEXT_MAX_LENGTH));
+  return items.map((item) => {
+    const heading = xmlText(item, 'title', INCIDENT_TITLE_MAX_LENGTH) ?? AZURE_FALLBACK_TITLE;
     return {
-      title,
-      url: xmlText(item, 'link') ?? page,
-      startedAt: Number.isNaN(published) ? null : new Date(published).toISOString(),
+      title: heading,
+      url: linkOnHostOf(page, xmlText(item, 'link', FEED_TEXT_MAX_LENGTH)) ?? page,
+      startedAt: isoTime(xmlText(item, 'pubDate', FEED_TEXT_MAX_LENGTH)),
       // The public page only carries widespread incidents, and gives no severity.
       impact: INCIDENT_IMPACT.major,
       services: [],
       regions: [],
-      text: `${title} ${xmlText(item, 'description') ?? ''}`,
+      text: `${heading} ${xmlText(item, 'description', FEED_TEXT_MAX_LENGTH) ?? ''}`,
     };
   });
 }
 
 /** The text of the first `<tag>` in an RSS item, without CDATA wrappers, markup or entities. */
-function xmlText(item: string, tag: string): string | null {
-  const match = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`).exec(item);
-  if (!match) {
+function xmlText(item: string, tag: string, max: number): string | null {
+  const open = item.indexOf(`<${tag}`);
+  const start = open < 0 ? -1 : item.indexOf('>', open);
+  const end = start < 0 ? -1 : item.indexOf(`</${tag}>`, start);
+  if (end < 0) {
     return null;
   }
-  const text = match[1]
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+  const text = item
+    .slice(start + 1, end)
+    .replace(CDATA, '$1')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(MARKUP, ' ')
     .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return text || null;
+    .replace(/\s+/g, ' ');
+  return cleanText(text, max) || null;
 }
 
 /** A region shorter than this ("us") would match almost any text. */

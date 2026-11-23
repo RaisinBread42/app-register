@@ -4,9 +4,9 @@ import {Link} from '@astryxdesign/core/Link';
 import {Text} from '@astryxdesign/core/Text';
 import {Tooltip} from '@astryxdesign/core/Tooltip';
 import {VStack} from '@astryxdesign/core/VStack';
-import {HOSTING_HEALTH_STATUS, appRoute, type HostingHealthStatus} from '@/lib/constants';
+import {appRoute} from '@/lib/constants';
 import type {App} from '@/lib/ui/api-client';
-import {COMING_SOON, NOT_MONITORED, NOT_SET, STATUS_PILL} from '@/lib/ui/copy';
+import {COMING_SOON, NOT_SET} from '@/lib/ui/copy';
 import {appIconColor, appInitials} from '@/lib/ui/register-view';
 
 const ICON_SIZE = {
@@ -61,16 +61,4 @@ export function PendingPill() {
       <Badge label={NOT_SET} variant="neutral" />
     </Tooltip>
   );
-}
-
-/** The prototype's check pill: green "✓ OK", amber "! Attention", red "! Critical", or a grey "—" when nothing is monitored. */
-export function StatusPill({status}: {status: HostingHealthStatus}) {
-  if (status === HOSTING_HEALTH_STATUS.na) {
-    return (
-      <Tooltip content={NOT_MONITORED}>
-        <Badge label={NOT_SET} variant="neutral" />
-      </Tooltip>
-    );
-  }
-  return <Badge label={STATUS_PILL[status].label} variant={STATUS_PILL[status].variant} />;
 }

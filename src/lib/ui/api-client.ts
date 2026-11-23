@@ -1,19 +1,23 @@
 import {
   API_HEADER,
+  API_HOSTING_CATALOG,
+  API_MONITORING_DEPENDENCIES_REFRESH,
   API_QUERY,
-  API_REFRESH_SEGMENT,
   API_ROUTES,
   API_SUB_ROUTE,
   BEARER_PREFIX,
   ENV,
-  HOSTING_API_ROUTES,
   HTTP_METHOD,
   HTTP_STATUS,
   JSON_CONTENT_TYPE,
+  type AdvisorySeverity,
   type AppKind,
   type AppSort,
+  type DependencyCheckError,
+  type DependencySource,
   type EndOfSupportSource,
-  type HostingHealthStatus,
+  type HealthDimension,
+  type HealthStatus,
   type IncidentImpact,
   type IncidentScope,
   type NoticeAlertStatus,
@@ -45,16 +49,20 @@ type AppFields = {
   whatBreaksIfStopped: string | null;
 };
 
-/** One finding that takes points off the health score (`points` is negative). */
-export type Deduction = {dimension: string; label: string; detail: string; points: number};
-
-export type HostingHealth = {status: HostingHealthStatus; deductions: Deduction[]};
+export type Deduction = {dimension: HealthDimension; label: string; detail: string; points: number};
+export type DimensionHealth = {status: HealthStatus; deductions: Deduction[]};
+/** `score` is null when nothing is recorded or nothing has been checked yet; a dimension is null until it is monitored. */
+export type Health = {
+  score: number | null;
+  status: HealthStatus;
+  dimensions: Record<HealthDimension, DimensionHealth | null>;
+};
 
 export type App = AppFields & {
   id: string;
   owner: PersonRef;
   backupOwner: PersonRef;
-  hostingHealth: HostingHealth;
+  health: Health;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -83,7 +91,23 @@ type DependencyFields = {
   recommendedAction: string | null;
 };
 
-export type Dependency = DependencyFields & {id: string; appId: string; createdAt: string; updatedAt: string};
+export type Advisory = {id: string; aliases: string[]; severity: AdvisorySeverity; summary: string; url: string};
+
+export type Dependency = DependencyFields & {
+  id: string;
+  appId: string;
+  source: DependencySource;
+  isDev: boolean;
+  advisories: Advisory[];
+  checkedAt: string | null;
+  checkError: DependencyCheckError | null;
+  status: HealthStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DependencyImport = {added: number; updated: number; unchanged: number; removed: number};
+export type DependencyRefresh = {checked: number; notFound: number; unavailable: number; advisories: number};
 
 type HostingFields = {
   provider: string;
@@ -99,7 +123,8 @@ export type HostingIncident = {
   title: string;
   impact: IncidentImpact;
   scope: IncidentScope;
-  url: string;
+  /** A page on the provider's own status site, or null when the feed gave none. */
+  url: string | null;
   startedAt: string | null;
 };
 
@@ -109,6 +134,8 @@ type HostingCheckFields = {
   incidents: HostingIncident[];
   healthCheckedAt: string | null;
   healthError: string | null;
+  isMonitored: boolean;
+  status: HealthStatus;
 };
 
 export type Hosting = HostingFields & HostingCheckFields & {id: string; appId: string; createdAt: string; updatedAt: string};
@@ -168,18 +195,24 @@ function segment(id: string): string {
 const appPath = (id: string) => `${API_ROUTES.apps}/${segment(id)}`;
 
 export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClientConfig) {
-  async function request<T>(method: string, path: string, options: {body?: unknown; idempotencyKey?: string} = {}): Promise<T> {
+  /** `body` is sent as JSON; `text` is sent as it is (a file that already is JSON). */
+  async function request<T>(
+    method: string,
+    path: string,
+    options: {body?: unknown; text?: string; idempotencyKey?: string} = {},
+  ): Promise<T> {
+    const content = options.text ?? (options.body === undefined ? undefined : JSON.stringify(options.body));
     const headers: Record<string, string> = {[API_HEADER.authorization]: BEARER_PREFIX + apiKey};
     if (options.idempotencyKey !== undefined) {
       headers[API_HEADER.idempotencyKey] = options.idempotencyKey;
     }
-    if (options.body !== undefined) {
+    if (content !== undefined) {
       headers[API_HEADER.contentType] = JSON_CONTENT_TYPE;
     }
     const response = await send(new URL(path, baseUrl).toString(), {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: content,
       cache: 'no-store',
     });
     if (response.status === HTTP_STATUS.noContent) {
@@ -228,6 +261,19 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
       const path = `${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${segment(id)}`;
       return (await patch<{dependency: Dependency}>(path, idempotencyKey, input)).dependency;
     },
+    /** `fileText` is a package.json or package-lock.json, as it is on disk. */
+    async importDependencies(idempotencyKey: string, appId: string, fileText: string): Promise<DependencyImport> {
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${API_SUB_ROUTE.import}`;
+      return (await request<{import: DependencyImport}>(HTTP_METHOD.post, path, {idempotencyKey, text: fileText})).import;
+    },
+    /** Safe to repeat, so it sends no Idempotency-Key. */
+    async refreshDependencies(appId: string): Promise<DependencyRefresh> {
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${API_SUB_ROUTE.refresh}`;
+      return (await request<{refresh: DependencyRefresh}>(HTTP_METHOD.post, path)).refresh;
+    },
+    async refreshAllDependencies(): Promise<DependencyRefresh & {apps: number}> {
+      return (await request<{refresh: DependencyRefresh & {apps: number}}>(HTTP_METHOD.post, API_MONITORING_DEPENDENCIES_REFRESH)).refresh;
+    },
     removeDependency(appId: string, id: string): Promise<void> {
       return remove(`${appPath(appId)}/${API_SUB_ROUTE.dependencies}/${segment(id)}`);
     },
@@ -241,12 +287,13 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     removeHosting(appId: string, id: string): Promise<void> {
       return remove(`${appPath(appId)}/${API_SUB_ROUTE.hosting}/${segment(id)}`);
     },
-    async refreshHosting(idempotencyKey: string, appId: string): Promise<Hosting[]> {
-      const path = `${appPath(appId)}/${API_SUB_ROUTE.hosting}/${API_REFRESH_SEGMENT}`;
-      return (await post<{hosting: Hosting[]}>(path, idempotencyKey)).hosting;
+    /** Safe to repeat, so it sends no Idempotency-Key. */
+    async refreshHosting(appId: string): Promise<Hosting[]> {
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.hosting}/${API_SUB_ROUTE.refresh}`;
+      return (await request<{hosting: Hosting[]}>(HTTP_METHOD.post, path)).hosting;
     },
     async getHostingCatalog(): Promise<HostingCatalog> {
-      return (await get<{catalog: HostingCatalog}>(HOSTING_API_ROUTES.catalog)).catalog;
+      return (await get<{catalog: HostingCatalog}>(API_HOSTING_CATALOG)).catalog;
     },
     async listPeople(): Promise<Person[]> {
       return (await get<{people: Person[]}>(API_ROUTES.people)).people;

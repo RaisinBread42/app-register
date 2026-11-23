@@ -19,8 +19,15 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1795386559878,
-      "tag": "0002_hosting_health",
+      "when": 1795386458830,
+      "tag": "0002_dependency_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795397082809,
+      "tag": "0003_hosting_health",
       "breakpoints": true
     }
   ]

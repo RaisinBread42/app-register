@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {PGlite} from '@electric-sql/pglite';
@@ -16,6 +17,7 @@ import {
 import {MIGRATIONS_FOLDER} from './client';
 import {newId} from './ids';
 import {
+  appDependencies,
   appHosting,
   apps,
   attachments,
@@ -46,7 +48,23 @@ const ALL_TABLES = [
 
 const TABLES_0001 = ['api_keys', 'app_dependencies', 'app_hosting', 'idempotency_keys'];
 
-const COLUMNS_0002 = ['end_of_support_source', 'health_checked_at', 'health_error', 'incidents', 'runtime', 'runtime_version'];
+const COLUMNS_0002 = ['advisories', 'check_error', 'checked_at', 'is_dev', 'source'];
+
+const COLUMNS_0003 = ['end_of_support_source', 'health_checked_at', 'health_error', 'incidents', 'runtime', 'runtime_version'];
+
+/**
+ * Rollbacks always run newest first: the migrator only applies migrations newer
+ * than the last one recorded, so an older one rolled back alone would never come back.
+ */
+const ROLLBACK_0003 = '0003_hosting_health.down.sql';
+const ROLLBACK_0002 = '0002_dependency_health.down.sql';
+const ROLLBACK_0001 = '0001_api_keys_idempotency_deps_hosting.down.sql';
+
+async function rollBack(t: TestDb, files: string[]) {
+  for (const file of files) {
+    await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8'));
+  }
+}
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
 async function seedWorkspace(t: TestDb, workspaceId: string) {
@@ -201,7 +219,7 @@ describe('database schema', () => {
     }
   });
 
-  it('rolling back migration 0002 removes only the hosting check’s columns and keeps the dates; migrating again restores them and marks existing dates as typed by hand', async () => {
+  it('rolling back migration 0003 removes only the hosting check’s columns and keeps the dates; migrating again restores them and marks existing dates as typed by hand', async () => {
     const w = await seedWorkspace(t, t.workspaceId);
     const hostingId = newId();
     await t.db.insert(appHosting).values({
@@ -225,8 +243,8 @@ describe('database schema', () => {
       ).rows.map((r) => r.column_name);
     const before = await columns();
 
-    await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', '0002_hosting_health.down.sql'), 'utf8'));
-    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0002.includes(name)));
+    await rollBack(t, [ROLLBACK_0003]);
+    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0003.includes(name)));
     const kept = await t.client.query<{end_of_support_on: string}>(`select end_of_support_on::text from app_hosting`);
     expect(kept.rows).toEqual([{end_of_support_on: '2027-02-04'}]);
 
@@ -237,10 +255,8 @@ describe('database schema', () => {
   });
 
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    // Newest first: 0002 only alters a table that 0001 created.
-    for (const file of ['0002_hosting_health.down.sql', '0001_api_keys_idempotency_deps_hosting.down.sql']) {
-      await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8'));
-    }
+    // 0003 and 0002 each changed a table that 0001 created.
+    await rollBack(t, [ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]);
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
@@ -251,6 +267,34 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('rolling back migration 0002 removes only the dependency monitoring columns and keeps the dependencies, and migrating again restores them', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    await t.db.insert(appDependencies).values({id: newId(), workspaceId: w.workspaceId, appId: w.appId, name: 'left-pad', currentVersion: '1.3.0'});
+    const columns = async () =>
+      (
+        await t.client.query<{column_name: string}>(
+          `select column_name from information_schema.columns where table_name = 'app_dependencies' order by 1`,
+        )
+      ).rows.map((r) => r.column_name);
+    const before = await columns();
+
+    await rollBack(t, [ROLLBACK_0003, ROLLBACK_0002]);
+    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0002.includes(name)));
+    const kept = await t.client.query<{name: string}>(`select name from app_dependencies`);
+    expect(kept.rows).toEqual([{name: 'left-pad'}]);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await columns()).toEqual(before);
+  });
+
+  it('every rollback names the hash of the migration file it undoes, so migrating again re-applies it', () => {
+    for (const file of [ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
+      const migration = readFileSync(path.join(MIGRATIONS_FOLDER, file.replace('.down.sql', '.sql')));
+      const down = readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8');
+      expect(down, file).toContain(createHash('sha256').update(migration).digest('hex'));
+    }
   });
 
   it('unit tests run on in-process PGlite with the real migrations, no Docker needed', async () => {

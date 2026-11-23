@@ -1,5 +1,5 @@
 {
-  "id": "c996baa9-eda8-4472-aacb-5c0db7b88c07",
+  "id": "ab31f7c8-8995-40b7-9dd4-78374f94ebd5",
   "prevId": "d4b8c314-5dfc-4a87-93e1-bef7a3fb102b",
   "version": "7",
   "dialect": "postgresql",
@@ -151,6 +151,39 @@
           "primaryKey": false,
           "notNull": false
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "is_dev": {
+          "name": "is_dev",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "advisories": {
+          "name": "advisories",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "check_error": {
+          "name": "check_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -222,7 +255,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "app_dependencies_source_allowed": {
+          "name": "app_dependencies_source_allowed",
+          "value": "\"app_dependencies\".\"source\" in ('manual', 'import')"
+        },
+        "app_dependencies_check_error_allowed": {
+          "name": "app_dependencies_check_error_allowed",
+          "value": "\"app_dependencies\".\"check_error\" in ('not_found', 'unavailable', 'invalid_version')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.app_hosting": {
@@ -271,46 +313,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "runtime": {
-          "name": "runtime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "runtime_version": {
-          "name": "runtime_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "end_of_support_on": {
           "name": "end_of_support_on",
           "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_of_support_source": {
-          "name": "end_of_support_source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "incidents": {
-          "name": "incidents",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "health_checked_at": {
-          "name": "health_checked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "health_error": {
-          "name": "health_error",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -374,16 +379,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "app_hosting_end_of_support_source_allowed": {
-          "name": "app_hosting_end_of_support_source_allowed",
-          "value": "\"app_hosting\".\"end_of_support_source\" in ('manual', 'endoflife.date')"
-        },
-        "app_hosting_end_of_support_has_source": {
-          "name": "app_hosting_end_of_support_has_source",
-          "value": "(\"app_hosting\".\"end_of_support_on\" is null) = (\"app_hosting\".\"end_of_support_source\" is null)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.apps": {

@@ -50,6 +50,12 @@ export const APP_TAB = {
 export const APP_TABS = Object.values(APP_TAB);
 export type AppTab = (typeof APP_TABS)[number];
 
+/** Health filter of the applications list. */
+export const APP_HEALTH_FILTER = {
+  attention: 'attention',
+  healthy: 'healthy',
+} as const;
+
 /** Sort orders of the applications list (sorted in the browser over the loaded apps). */
 export const APP_LIST_SORT = {
   health: 'health',
@@ -88,16 +94,20 @@ export const API_SUB_ROUTE = {
   dependencies: 'dependencies',
   hosting: 'hosting',
   acknowledge: 'acknowledge',
+  /** `POST /api/apps/:id/dependencies/import` */
+  import: 'import',
+  /** `POST /api/apps/:id/dependencies/refresh` */
+  refresh: 'refresh',
 } as const;
 
-/** JSON API paths for the hosting catalog and the scheduled hosting check. */
-export const HOSTING_API_ROUTES = {
-  catalog: `${API_PATH_PREFIX}/hosting/catalog`,
-  refreshAll: `${API_PATH_PREFIX}/monitoring/hosting/refresh`,
-} as const;
-
-/** `POST /api/apps/:id/hosting/refresh` */
-export const API_REFRESH_SEGMENT = 'refresh';
+/** `POST` here re-checks every active app's dependencies. */
+export const API_MONITORING_DEPENDENCIES_REFRESH = `${API_PATH_PREFIX}/monitoring/dependencies/refresh`;
+/** `POST` here re-checks every active app's hosting. */
+export const API_MONITORING_HOSTING_REFRESH = `${API_PATH_PREFIX}/monitoring/hosting/refresh`;
+/** `POST` here runs both checks for the workspace; the daily scheduled job calls it. */
+export const API_MONITORING_REFRESH = `${API_PATH_PREFIX}/monitoring/refresh`;
+/** `GET` here lists the hosting providers, services and runtimes the add-hosting dialog offers. */
+export const API_HOSTING_CATALOG = `${API_PATH_PREFIX}/hosting/catalog`;
 
 /** Who set a hosting row's end-of-support date. A manual date is never overwritten by a check. */
 export const END_OF_SUPPORT_SOURCE = {
@@ -133,40 +143,37 @@ export const STATUS_FEED_KIND = {
 } as const;
 export type StatusFeedKind = (typeof STATUS_FEED_KIND)[keyof typeof STATUS_FEED_KIND];
 
-/** Hosting status pill: ok / attention / critical, or `na` when nothing is monitored. */
-export const HOSTING_HEALTH_STATUS = {
-  ok: 'ok',
-  attention: 'attention',
-  critical: 'critical',
-  na: 'na',
-} as const;
-export const HOSTING_HEALTH_STATUSES = Object.values(HOSTING_HEALTH_STATUS);
-export type HostingHealthStatus = (typeof HOSTING_HEALTH_STATUSES)[number];
-
-/** The health dimension hosting deductions belong to. */
-export const HOSTING_DIMENSION = 'hosting';
-
 /** Points a hosting finding takes off the 100-point health score. */
 export const HOSTING_POINTS = {
-  pastEndOfSupport: -25,
-  endOfSupportSoon: -12,
-  outage: -8,
-  notice: -3,
+  pastEndOfSupport: 25,
+  endOfSupportSoon: 12,
+  outage: 8,
+  notice: 3,
 } as const;
-
-/** Findings that make hosting `critical`; any other finding makes it `attention`. */
-export const HOSTING_CRITICAL_POINTS: readonly number[] = [
-  HOSTING_POINTS.pastEndOfSupport,
-  HOSTING_POINTS.outage,
-];
 
 /** "End of support soon" means within this many days. */
 export const END_OF_SUPPORT_SOON_DAYS = 90;
 
-/** Outbound checks of public feeds: who we say we are, how long we wait, how many at once. */
-export const MONITOR_USER_AGENT = 'app-register';
-export const MONITOR_TIMEOUT_MS = 8_000;
-export const MONITOR_CONCURRENCY = 4;
+/** Longest provider, service, region or runtime name a hosting row stores; longer is a 400. */
+export const HOSTING_NAME_MAX_LENGTH = 100;
+/** Longest version or runtime version a hosting row stores; longer is a 400. */
+export const HOSTING_VERSION_MAX_LENGTH = 50;
+
+/** Limits on what is stored of one provider incident; longer text is cut, extra incidents are left out. */
+export const INCIDENT_TITLE_MAX_LENGTH = 200;
+export const INCIDENT_URL_MAX_LENGTH = 500;
+export const HOSTING_MAX_INCIDENTS = 20;
+/** Longest stored note on why a hosting check gave no full answer. */
+export const HOSTING_CHECK_ERROR_MAX_LENGTH = 300;
+
+/** Limits on what is read from one status feed or endoflife.date document; more than this counts as no answer. */
+export const FEED_MAX_INCIDENTS = 200;
+export const FEED_MAX_NAMES = 100;
+export const FEED_NAME_MAX_LENGTH = 200;
+export const FEED_TEXT_MAX_LENGTH = 5_000;
+export const END_OF_LIFE_MAX_RELEASES = 500;
+/** The only scheme an incident link may use. */
+export const HTTPS_PROTOCOL = 'https:';
 
 export const MS_PER_DAY = 86_400_000;
 
@@ -255,6 +262,8 @@ export const API_HEADER = {
   authorization: 'authorization',
   idempotencyKey: 'idempotency-key',
   contentType: 'content-type',
+  contentLength: 'content-length',
+  userAgent: 'user-agent',
   wwwAuthenticate: 'www-authenticate',
 } as const;
 
@@ -300,3 +309,121 @@ export const FILTER_ALL = 'all';
 
 /** The API stores money as whole cents; the UI shows and takes currency units. */
 export const CENTS_PER_UNIT = 100;
+
+/** How a dependency got on an app. An import only ever removes rows it created itself. */
+export const DEPENDENCY_SOURCE = {
+  manual: 'manual',
+  import: 'import',
+} as const;
+export const DEPENDENCY_SOURCES = Object.values(DEPENDENCY_SOURCE);
+export type DependencySource = (typeof DEPENDENCY_SOURCES)[number];
+
+export const BYTES_PER_MB = 1024 * 1024;
+
+/** Largest package.json / package-lock.json the import accepts (5 MB of text). */
+export const DEPENDENCY_IMPORT_MAX_BYTES = 5 * BYTES_PER_MB;
+
+/** npm's own limit for a package name; also the longest dependency name the register stores. */
+export const DEPENDENCY_NAME_MAX_LENGTH = 214;
+/** Longest version (or range, tag, URL) the register stores; semver's own limit. */
+export const DEPENDENCY_VERSION_MAX_LENGTH = 256;
+/** The range that means "any version"; an empty range in a package.json means the same. */
+export const ANY_VERSION_RANGE = '*';
+
+/** Why the last registry check of a dependency gave no full answer. */
+export const DEPENDENCY_CHECK_ERROR = {
+  /** Not on the public npm registry: private, misspelt, or not an npm package. */
+  notFound: 'not_found',
+  /** The registry or advisory source did not answer (or answered nonsense); the previous result is kept. */
+  unavailable: 'unavailable',
+  /** The tracked version is a range or tag, so advisories cannot be checked for it. */
+  invalidVersion: 'invalid_version',
+} as const;
+export const DEPENDENCY_CHECK_ERRORS = Object.values(DEPENDENCY_CHECK_ERROR);
+export type DependencyCheckError = (typeof DEPENDENCY_CHECK_ERRORS)[number];
+
+export const ADVISORY_SEVERITY = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  /** The advisory source gave no severity. */
+  unknown: 'unknown',
+} as const;
+export const ADVISORY_SEVERITIES = Object.values(ADVISORY_SEVERITY);
+export type AdvisorySeverity = (typeof ADVISORY_SEVERITIES)[number];
+
+/** What an app's health score is made of. Each dimension reports its own deductions. */
+export const HEALTH_DIMENSION = {
+  dependencies: 'dependencies',
+  hosting: 'hosting',
+  licence: 'licence',
+  pricing: 'pricing',
+} as const;
+export const HEALTH_DIMENSIONS = Object.values(HEALTH_DIMENSION);
+export type HealthDimension = (typeof HEALTH_DIMENSIONS)[number];
+
+export const HEALTH_STATUS = {
+  ok: 'ok',
+  attention: 'attention',
+  critical: 'critical',
+  /** Nothing recorded to check. */
+  na: 'na',
+} as const;
+export const HEALTH_STATUSES = Object.values(HEALTH_STATUS);
+export type HealthStatus = (typeof HEALTH_STATUSES)[number];
+
+/** A score starts here and loses points per deduction, never going below zero. */
+export const HEALTH_MAX_SCORE = 100;
+/** Below this a score is `critical`. */
+export const HEALTH_CRITICAL_BELOW = 80;
+/** Below this (and not critical) a score is `attention`; at or above it the app is healthy. */
+export const HEALTH_ATTENTION_BELOW = 95;
+
+/** Points one known advisory costs, by severity. Unknown severity counts as medium so it is never ignored. */
+export const ADVISORY_POINTS: Record<AdvisorySeverity, number> = {
+  critical: 10,
+  high: 5,
+  medium: 2,
+  low: 0,
+  unknown: 2,
+};
+/** Points a runtime dependency costs when its tracked version is a major / a minor version behind the latest. */
+export const MAJOR_BEHIND_POINTS = 3;
+export const MINOR_BEHIND_POINTS = 1;
+/** Points a dependency costs when its tracked version is a range or tag: its advisories cannot be checked. */
+export const RANGE_VERSION_POINTS = 1;
+
+export const VERSION_LAG = {
+  major: 'major',
+  minor: 'minor',
+} as const;
+export type VersionLag = (typeof VERSION_LAG)[keyof typeof VERSION_LAG];
+
+/** The free, keyless sources dependency monitoring reads. Only package names and versions are ever sent. */
+export const NPM_REGISTRY_URL = 'https://registry.npmjs.org';
+export const OSV_API_URL = 'https://api.osv.dev/v1';
+export const OSV_ADVISORY_PAGE_URL = 'https://osv.dev/vulnerability';
+export const OSV_ECOSYSTEM_NPM = 'npm';
+/** Sent as User-Agent on every monitoring request. No personal or workspace data. */
+export const MONITORING_USER_AGENT = 'app-register';
+export const MONITORING_TIMEOUT_MS = 8_000;
+/** At most this many monitoring requests are in flight at once. */
+export const MONITORING_CONCURRENCY = 6;
+/** OSV accepts up to 1000 queries per batch. */
+export const OSV_BATCH_SIZE = 500;
+/** Most pages of advisory ids followed for one batch (OSV pages long answers with `next_page_token`). */
+export const OSV_MAX_PAGES = 10;
+/** Largest answer read from the registry or OSV; anything longer counts as no answer. */
+export const MONITORING_MAX_RESPONSE_BYTES = BYTES_PER_MB;
+/** Largest status feed or endoflife.date document read (the big provider feeds run to a few hundred KB); longer counts as no answer. */
+export const HOSTING_FEED_MAX_RESPONSE_BYTES = 4 * BYTES_PER_MB;
+/**
+ * Longest the check that follows a write (import, add, edit) may hold up its response.
+ * Whatever is not checked by then stays unchecked until the next refresh.
+ */
+export const MONITORING_FOLLOW_UP_BUDGET_MS = 15_000;
+/** Limits on what is stored of one advisory; anything longer is cut (or, for an id, dropped). */
+export const ADVISORY_ID_MAX_LENGTH = 100;
+export const ADVISORY_SUMMARY_MAX_LENGTH = 300;
+export const ADVISORY_MAX_ALIASES = 20;

@@ -1,91 +1,89 @@
 import {
   END_OF_SUPPORT_SOON_DAYS,
-  HOSTING_CRITICAL_POINTS,
-  HOSTING_DIMENSION,
-  HOSTING_HEALTH_STATUS,
+  HEALTH_DIMENSION,
+  HEALTH_STATUS,
   HOSTING_POINTS,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
-  type HostingHealthStatus,
+  type HealthStatus,
 } from '@/lib/constants';
-import type {HostingIncident} from '@/lib/db/schema';
+import type {AppHostingRow, HostingIncident} from '@/lib/db/schema';
 import {findProvider} from '@/lib/hosting-catalog';
 import {addDaysIso} from '@/lib/notice-alerts';
+import type {Deduction} from './health';
+import {normaliseCheckError, normaliseIncidents} from './hosting-incidents';
 
 /**
  * Hosting's share of an app's health: what the last hosting check stored on
- * each row, turned into point deductions and a status pill. Pure functions,
- * no database and no network.
+ * each row, turned into point deductions and a status. Pure functions, no
+ * database and no network.
  */
 
-/**
- * One finding that takes points off the 100-point health score (`points` is negative).
- * TODO after `claude/dependency-health` merges: import this type from `./health`
- * instead; the shape is the same.
- */
-export type Deduction = {
-  dimension: string;
-  label: string;
-  detail: string;
-  points: number;
-};
-
-/** The parts of a hosting row the rules read. */
-export type HostingHealthRow = {
-  provider: string;
-  service: string;
-  version: string | null;
-  runtime: string | null;
-  runtimeVersion: string | null;
-  endOfSupportOn: string | null;
-  incidents: HostingIncident[];
-};
-
-export type HostingHealth = {status: HostingHealthStatus; deductions: Deduction[]};
+/** What scoring reads from a hosting row. */
+export type HostingFacts = Pick<
+  AppHostingRow,
+  'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion' | 'endOfSupportOn' | 'incidents' | 'healthCheckedAt' | 'healthError'
+>;
 
 /**
- * Deductions for an app's hosting rows on `today` (UTC YYYY-MM-DD):
- * - −25 per row past its end-of-support date;
- * - −12 per row whose end of support is today or within 90 days;
- * - −8 per active major incident the provider's feed ties to a row's service or region;
- * - −3 per other notice: maintenance, a minor incident, or a major incident
+ * The points an app loses for its hosting on `today` (UTC YYYY-MM-DD), or null
+ * when there is nothing to go on: it records no hosting, or no row is monitored
+ * and checked (see `hostingStatus`).
+ * - 25 per row past its end-of-support date;
+ * - 12 per row whose end of support is today or within 90 days;
+ * - 8 per active major incident the provider's feed ties to a row's service or region;
+ * - 3 per other notice: maintenance, a minor incident, or a major incident
  *   that only names the provider.
  * An incident shared by several rows counts once, at its heaviest.
  */
-export function hostingDeductions(rows: HostingHealthRow[], today: string): Deduction[] {
+export function hostingDeductions(rows: HostingFacts[], today: string): Deduction[] | null {
+  if (rows.every((row) => hostingStatus(row, today) === HEALTH_STATUS.na)) {
+    return null;
+  }
   return [...rows.flatMap((row) => endOfSupportDeduction(row, today)), ...incidentDeductions(rows)];
 }
 
-/** `critical` when a row is past end of support or in an outage, `attention` for any other finding, else `ok`. */
-export function hostingStatus(deductions: Deduction[]): Exclude<HostingHealthStatus, typeof HOSTING_HEALTH_STATUS.na> {
-  if (deductions.some((deduction) => HOSTING_CRITICAL_POINTS.includes(deduction.points))) {
-    return HOSTING_HEALTH_STATUS.critical;
-  }
-  return deductions.length > 0 ? HOSTING_HEALTH_STATUS.attention : HOSTING_HEALTH_STATUS.ok;
-}
-
 /**
- * An app's hosting status and deductions. `na` when there is nothing to judge:
- * no hosting rows, or none with an end-of-support date or a provider whose
- * status feed is watched.
+ * One hosting row's own status: `critical` when it is past end of support or in
+ * an outage, `attention` for any other finding. Otherwise `ok`, but only when
+ * the row is monitored and its last check read every source; a row that is not
+ * monitored, was never checked, or whose last check failed is `na`.
  */
-export function hostingHealth(rows: HostingHealthRow[], today: string): HostingHealth {
-  const deductions = hostingDeductions(rows, today);
-  const isMonitored = rows.some((row) => row.endOfSupportOn !== null || findProvider(row.provider)?.statusFeed);
-  return {
-    status: isMonitored ? hostingStatus(deductions) : HOSTING_HEALTH_STATUS.na,
-    deductions,
-  };
+export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
+  const incidents = storedIncidents(row);
+  const [endOfSupport] = endOfSupportDeduction(row, today);
+  if (endOfSupport?.points === HOSTING_POINTS.pastEndOfSupport || incidents.some(isOutage)) {
+    return HEALTH_STATUS.critical;
+  }
+  if (endOfSupport || incidents.length > 0) {
+    return HEALTH_STATUS.attention;
+  }
+  return isMonitored(row) && row.healthCheckedAt && !normaliseCheckError(row.healthError) ? HEALTH_STATUS.ok : HEALTH_STATUS.na;
 }
 
-function endOfSupportDeduction(row: HostingHealthRow, today: string): Deduction[] {
+/** Monitored: the row has an end-of-support date, or its provider's status feed is watched. */
+export function isMonitored(row: HostingFacts): boolean {
+  return row.endOfSupportOn !== null || findProvider(row.provider)?.statusFeed !== undefined;
+}
+
+/** Only a major incident the feed ties to the row's own service or region counts as an outage. */
+export function isOutage(incident: HostingIncident): boolean {
+  return incident.impact === INCIDENT_IMPACT.major && incident.scope === INCIDENT_SCOPE.service;
+}
+
+/** A row's stored incidents, with whatever is not a usable incident left out rather than failing the read. */
+function storedIncidents(row: HostingFacts): HostingIncident[] {
+  return normaliseIncidents(row.incidents, row.provider);
+}
+
+function endOfSupportDeduction(row: HostingFacts, today: string): Deduction[] {
   if (!row.endOfSupportOn || row.endOfSupportOn > addDaysIso(today, END_OF_SUPPORT_SOON_DAYS)) {
     return [];
   }
   const isPast = row.endOfSupportOn < today;
   return [
     {
-      dimension: HOSTING_DIMENSION,
+      dimension: HEALTH_DIMENSION.hosting,
       label: `${rowName(row)} ${isPast ? 'is past end of support' : 'nears end of support'}`,
       detail: `${isPast ? 'Support ended' : 'Support ends'} ${row.endOfSupportOn}`,
       points: isPast ? HOSTING_POINTS.pastEndOfSupport : HOSTING_POINTS.endOfSupportSoon,
@@ -93,15 +91,15 @@ function endOfSupportDeduction(row: HostingHealthRow, today: string): Deduction[
   ];
 }
 
-function incidentDeductions(rows: HostingHealthRow[]): Deduction[] {
+function incidentDeductions(rows: HostingFacts[]): Deduction[] {
   const byIncident = new Map<string, Deduction>();
   for (const row of rows) {
-    for (const incident of row.incidents) {
+    for (const incident of storedIncidents(row)) {
       const key = `${incident.url} ${incident.title}`;
       const points = incidentPoints(incident);
-      if (points < (byIncident.get(key)?.points ?? 0)) {
+      if (points > (byIncident.get(key)?.points ?? 0)) {
         byIncident.set(key, {
-          dimension: HOSTING_DIMENSION,
+          dimension: HEALTH_DIMENSION.hosting,
           label: incident.title,
           detail: `${row.provider} ${incidentKind(incident)}`,
           points,
@@ -110,11 +108,6 @@ function incidentDeductions(rows: HostingHealthRow[]): Deduction[] {
     }
   }
   return [...byIncident.values()];
-}
-
-/** Only a major incident the feed ties to the row's own service or region counts as an outage. */
-export function isOutage(incident: HostingIncident): boolean {
-  return incident.impact === INCIDENT_IMPACT.major && incident.scope === INCIDENT_SCOPE.service;
 }
 
 function incidentPoints(incident: HostingIncident): number {
@@ -129,7 +122,7 @@ function incidentKind(incident: HostingIncident): string {
 }
 
 /** "Azure Database for PostgreSQL 12", "Azure App Service (Node.js 18)". */
-function rowName(row: HostingHealthRow): string {
+function rowName(row: HostingFacts): string {
   const service = [row.provider, row.service, row.version].filter(Boolean).join(' ');
   const runtime = [row.runtime, row.runtimeVersion].filter(Boolean).join(' ');
   return runtime ? `${service} (${runtime})` : service;

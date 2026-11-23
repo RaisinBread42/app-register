@@ -1,11 +1,7 @@
-import {vi} from 'vitest';
-
 /**
- * Unit tests never touch the network: every outbound feed request fails here
- * unless a test hands the hosting check its own `fetchText`.
+ * Unit tests never use the network. Any test that reaches an outside source
+ * must pass or stub a fake `fetch` (see `src/lib/services/test/fake-registry.ts`).
  */
-vi.mock('@/lib/monitoring/http', () => ({
-  fetchText: vi.fn(async () => {
-    throw new Error('no network in tests');
-  }),
-}));
+globalThis.fetch = async (input) => {
+  throw new Error(`Tests must not use the network: ${String(input)}`);
+};

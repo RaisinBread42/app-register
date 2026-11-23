@@ -2,15 +2,24 @@ import {readdirSync} from 'node:fs';
 import path from 'node:path';
 import {eq, sql} from 'drizzle-orm';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {END_OF_SUPPORT_SOURCE, HOSTING_HEALTH_STATUS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {
+  API_HEADER,
+  DEPENDENCY_CHECK_ERROR,
+  DEPENDENCY_IMPORT_MAX_BYTES,
+  END_OF_SUPPORT_SOURCE,
+  HEALTH_STATUS,
+  NOTICE_ALERT_STATUS,
+  PERSON_STATUS,
+} from '@/lib/constants';
 import {callApi, ROUTES, type RequestOptions} from '@/lib/api/test/client';
 import {openApiSpec} from '@/lib/api/openapi';
 import {newId} from '@/lib/db/ids';
 import {apiKeys, apps, idempotencyKeys, people, workspaces} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
-import {fetchText} from '@/lib/monitoring/http';
 import {ALL_CLEAR, FEED_URL, NODEJS, POSTGRES_ON_AZURE, azureStatusRss, endOfLifeUrlFor, fakeFeeds} from '@/lib/monitoring/test/feeds';
+import {END_OF_LIFE_API} from '@/lib/hosting-catalog';
 import {createApiKey, revokeApiKey} from '@/lib/services/api-keys';
+import {fakeRegistry} from '@/lib/services/test/fake-registry';
 
 let t: TestDb;
 
@@ -31,7 +40,40 @@ describe('JSON API', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
+
+  /** A fictional app's package.json, and what the outside sources know about its packages. */
+  const PACKAGE_JSON = JSON.stringify({
+    name: 'contoso-portal',
+    dependencies: {'quill-forms': '3.9.0', 'tally-ui': '^2.4.9'},
+    devDependencies: {'lint-kit': '9.2.0'},
+  });
+  function stubRegistry() {
+    const registry = fakeRegistry({
+      latest: {'quill-forms': '5.0.2', 'tally-ui': '2.4.9', 'lint-kit': '9.2.0', 'harbor-http': '1.6.0'},
+      advisories: {
+        'quill-forms@3.9.0': [{id: 'GHSA-qqqq-1111-aaaa', severity: 'CRITICAL', summary: 'Template injection in quill-forms'}],
+      },
+    });
+    vi.stubGlobal('fetch', registry.fetch);
+    return registry;
+  }
+
+  /** The (fake) hosting sources, with the fake registry behind them for everything else. */
+  function stubFeeds() {
+    const registry = stubRegistry();
+    const feeds = fakeFeeds({
+      [endOfLifeUrlFor('azure-database-for-postgresql')]: POSTGRES_ON_AZURE,
+      [endOfLifeUrlFor('nodejs')]: NODEJS,
+      [FEED_URL.azure]: azureStatusRss([]),
+      [FEED_URL.vercel]: ALL_CLEAR,
+    });
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url.startsWith(END_OF_LIFE_API) || Object.values(FEED_URL).includes(url) ? feeds.fetch(url, init) : registry.fetch(url, init),
+    );
+    return feeds;
+  }
 
   async function seedApp(name = 'Contoso CRM') {
     const ada = (await api('POST', '/api/people', {body: {name: 'Ada Owner', email: `ada.${name.length}@example.test`}})).body.person;
@@ -174,43 +216,75 @@ describe('JSON API', () => {
     expect(back.body.person).toMatchObject({status: PERSON_STATUS.active, leftOn: null});
   });
 
-  it('saving hosting checks it at once, apps carry their hosting health, and the check can be run again for one app or the whole workspace', async () => {
+  it('saving hosting answers with the row as saved and then checks it, so the app’s health carries the hosting findings; the check can be run again for one app or the whole workspace', async () => {
     const {app} = await seedApp();
-    const feeds = fakeFeeds({
-      [endOfLifeUrlFor('azure-database-for-postgresql')]: POSTGRES_ON_AZURE,
-      [endOfLifeUrlFor('nodejs')]: NODEJS,
-      [FEED_URL.azure]: azureStatusRss([]),
-      [FEED_URL.vercel]: ALL_CLEAR,
+    const feeds = stubFeeds();
+
+    const database = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', region: 'centralus', version: '12'}});
+    expect(database.body.hosting).toMatchObject({endOfSupportOn: null, healthCheckedAt: null, status: HEALTH_STATUS.na, isMonitored: true});
+    const site = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'}});
+
+    const checked = (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting;
+    expect(checked).toMatchObject([
+      {service: 'Database for PostgreSQL', endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, incidents: [], healthError: null, status: HEALTH_STATUS.critical},
+      {service: 'Hosting', endOfSupportOn: '2025-04-30', status: HEALTH_STATUS.critical},
+    ]);
+    expect(checked.every((row: {healthCheckedAt: string | null}) => row.healthCheckedAt !== null)).toBe(true);
+
+    await api('PATCH', `/api/apps/${app.id}/hosting/${site.body.hosting.id}`, {body: {runtimeVersion: '24'}});
+    expect((await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting[1]).toMatchObject({endOfSupportOn: '2028-04-30', status: HEALTH_STATUS.ok});
+
+    const one = await api('POST', `/api/apps/${app.id}/hosting/refresh`, {idempotencyKey: null});
+    expect(one.status).toBe(200);
+    expect(one.body.hosting).toHaveLength(2);
+    const all = await api('POST', '/api/monitoring/hosting/refresh', {idempotencyKey: null});
+    expect(all.body).toEqual({refresh: {apps: 1, hosting: 2, failedSources: []}});
+    expect(feeds.requested.length).toBeGreaterThan(0);
+
+    const catalog = await api('GET', '/api/hosting/catalog');
+    expect(catalog.body.catalog.providers.map((provider: {name: string}) => provider.name)).toContain('Azure');
+    expect((await api('GET', '/api/hosting/catalog', {key: null})).status).toBe(401);
+  });
+
+  it('hosting health has one home: health.dimensions.hosting on the app list and detail, counted in the score next to dependencies, and no separate hostingHealth field', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const hostingNa = {status: HEALTH_STATUS.na, deductions: []};
+    expect((await api('GET', `/api/apps/${app.id}`)).body.app.health.dimensions.hosting).toEqual(hostingNa);
+
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', version: '12'}});
+    await api('POST', `/api/apps/${app.id}/dependencies/import`, {body: PACKAGE_JSON});
+
+    const detail = (await api('GET', `/api/apps/${app.id}`)).body.app;
+    const [listed] = (await api('GET', '/api/apps')).body.apps;
+    // 100 − 25 (past end of support) − 10 (critical advisory) − 3 (a major version behind).
+    expect(detail.health).toMatchObject({score: 62, status: HEALTH_STATUS.critical});
+    expect(detail.health.dimensions.hosting).toEqual({
+      status: HEALTH_STATUS.critical,
+      deductions: [{dimension: 'hosting', label: 'Azure Database for PostgreSQL 12 is past end of support', detail: 'Support ended 2026-07-31', points: 25}],
     });
-    vi.mocked(fetchText).mockImplementation(feeds.fetchText);
-    try {
-      expect((await api('GET', `/api/apps/${app.id}`)).body.app.hostingHealth).toEqual({status: HOSTING_HEALTH_STATUS.na, deductions: []});
+    expect(detail.health.dimensions.dependencies).toMatchObject({status: HEALTH_STATUS.attention, deductions: [{points: 10}, {points: 3}]});
+    expect([detail.health.dimensions.licence, detail.health.dimensions.pricing]).toEqual([null, null]);
+    expect(listed.health).toEqual(detail.health);
+    expect('hostingHealth' in detail || 'hostingHealth' in listed).toBe(false);
+  });
 
-      const database = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', region: 'centralus', version: '12'}});
-      expect(database.body.hosting).toMatchObject({endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, incidents: [], healthError: null});
-      expect(database.body.hosting.healthCheckedAt).not.toBeNull();
-      const site = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'}});
-      expect(site.body.hosting.endOfSupportOn).toBe('2025-04-30');
+  it('the scheduler’s one endpoint runs both workspace checks without an Idempotency-Key and returns both summaries', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '24'}});
+    await api('POST', `/api/apps/${app.id}/dependencies`, {body: {name: 'quill-forms', currentVersion: '3.9.0'}});
 
-      const critical = {status: HOSTING_HEALTH_STATUS.critical, deductions: [{points: -25}, {points: -25}]};
-      expect((await api('GET', `/api/apps/${app.id}`)).body.app.hostingHealth).toMatchObject(critical);
-      expect((await api('GET', '/api/apps')).body.apps[0].hostingHealth).toMatchObject(critical);
+    const refreshed = await api('POST', '/api/monitoring/refresh', {idempotencyKey: null});
 
-      const upgraded = await api('PATCH', `/api/apps/${app.id}/hosting/${site.body.hosting.id}`, {body: {runtimeVersion: '24'}});
-      expect(upgraded.body.hosting.endOfSupportOn).toBe('2028-04-30');
-
-      const one = await api('POST', `/api/apps/${app.id}/hosting/refresh`);
-      expect(one.status).toBe(200);
-      expect(one.body.hosting).toHaveLength(2);
-      const all = await api('POST', '/api/monitoring/hosting/refresh');
-      expect(all.body.refreshed).toEqual({apps: 1, hosting: 2, failedSources: []});
-
-      const catalog = await api('GET', '/api/hosting/catalog');
-      expect(catalog.body.catalog.providers.map((provider: {name: string}) => provider.name)).toContain('Azure');
-      expect((await api('GET', '/api/hosting/catalog', {key: null})).status).toBe(401);
-    } finally {
-      vi.mocked(fetchText).mockReset();
-    }
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body).toEqual({
+      refresh: {
+        dependencies: {apps: 1, checked: 1, notFound: 0, unavailable: 0, advisories: 1},
+        hosting: {apps: 1, hosting: 1, failedSources: []},
+      },
+    });
+    expect((await api('POST', '/api/monitoring/refresh', {idempotencyKey: null, key: null})).status).toBe(401);
   });
 
   it('every route is documented in the OpenAPI spec, and nothing in the spec is missing a route', () => {
@@ -298,6 +372,119 @@ describe('JSON API', () => {
     }
     expect((await api('PATCH', `/api/people/${newId()}`, {body: {name: 'Nobody'}})).status).toBe(404);
     expect((await api('POST', '/api/apps', {body: {...input, name: 'Cross', ownerId: cy.id}})).status).toBe(400);
+  });
+
+  // Dependency import and monitoring.
+
+  it('posting a package file imports it once per Idempotency-Key and then checks the dependencies, so a pipeline can send its lockfile on every build', async () => {
+    const {app} = await seedApp();
+    const registry = stubRegistry();
+    const path = `/api/apps/${app.id}/dependencies/import`;
+
+    const first = await api('POST', path, {idempotencyKey: 'build-481', body: PACKAGE_JSON});
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({import: {added: 3, updated: 0, unchanged: 0, removed: 0}});
+    const retry = await api('POST', path, {idempotencyKey: 'build-481', body: PACKAGE_JSON});
+    expect(retry.body).toEqual(first.body);
+    expect((await api('POST', path, {idempotencyKey: 'build-481', body: '{"name":"other"}'})).status).toBe(422);
+
+    const {dependencies, health} = (await api('GET', `/api/apps/${app.id}`)).body.app;
+    expect(dependencies.map((d: {name: string}) => d.name).sort()).toEqual(['lint-kit', 'quill-forms', 'tally-ui']);
+    expect(dependencies.find((d: {name: string}) => d.name === 'quill-forms')).toMatchObject({
+      latestVersion: '5.0.2',
+      status: HEALTH_STATUS.critical,
+      advisories: [{id: 'GHSA-qqqq-1111-aaaa', severity: 'critical'}],
+    });
+    // 100 − 10 (critical advisory) − 3 (a major version behind).
+    expect(health).toMatchObject({score: 87, status: HEALTH_STATUS.attention});
+    expect(registry.requests.length).toBeGreaterThan(0);
+  });
+
+  it('a dependency added or edited by hand is checked against the registry straight away', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+
+    const added = (await api('POST', `/api/apps/${app.id}/dependencies`, {body: {name: 'harbor-http', currentVersion: '1.2.7'}})).body.dependency;
+    const afterAdd = (await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies[0];
+    expect(afterAdd).toMatchObject({latestVersion: '1.6.0', checkError: null, status: HEALTH_STATUS.attention});
+    expect(afterAdd.checkedAt).not.toBeNull();
+
+    await api('PATCH', `/api/apps/${app.id}/dependencies/${added.id}`, {body: {name: 'contoso-internal-sdk'}});
+    const afterEdit = (await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies[0];
+    expect(afterEdit).toMatchObject({name: 'contoso-internal-sdk', checkError: DEPENDENCY_CHECK_ERROR.notFound, advisories: []});
+  });
+
+  it('the app list and the app detail carry a health score with one entry per dimension; dimensions not monitored yet are null', async () => {
+    const {app} = await seedApp();
+    stubRegistry();
+    // Hosting is monitored; this app records none, so it has nothing to check there.
+    const unmonitored = {hosting: {status: HEALTH_STATUS.na, deductions: []}, licence: null, pricing: null};
+
+    const empty = (await api('GET', '/api/apps')).body.apps[0].health;
+    expect(empty).toEqual({score: null, status: HEALTH_STATUS.na, dimensions: {dependencies: {status: HEALTH_STATUS.na, deductions: []}, ...unmonitored}});
+
+    await api('POST', `/api/apps/${app.id}/dependencies/import`, {body: PACKAGE_JSON});
+    const listed = (await api('GET', '/api/apps')).body.apps[0].health;
+    expect(listed).toEqual({
+      score: 87,
+      status: HEALTH_STATUS.attention,
+      dimensions: {
+        dependencies: {
+          status: HEALTH_STATUS.attention,
+          deductions: [
+            {dimension: 'dependencies', label: 'Critical advisory in quill-forms 3.9.0', detail: 'GHSA-qqqq-1111-aaaa · Template injection in quill-forms', points: 10},
+            {dimension: 'dependencies', label: 'quill-forms is a major version behind', detail: '3.9.0 → 5.0.2', points: 3},
+          ],
+        },
+        ...unmonitored,
+      },
+    });
+    expect((await api('GET', `/api/apps/${app.id}`)).body.app.health).toEqual(listed);
+  });
+
+  it('the refresh endpoints re-check on demand without an Idempotency-Key: one app, or every active app in the workspace', async () => {
+    const {app} = await seedApp();
+    await api('POST', `/api/apps/${app.id}/dependencies`, {body: {name: 'quill-forms', currentVersion: '3.9.0'}});
+    expect((await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies[0].checkError).toBe(DEPENDENCY_CHECK_ERROR.unavailable);
+
+    stubRegistry();
+    const one = await api('POST', `/api/apps/${app.id}/dependencies/refresh`, {idempotencyKey: null});
+    expect(one.body).toEqual({refresh: {checked: 1, notFound: 0, unavailable: 0, advisories: 1}});
+    const all = await api('POST', '/api/monitoring/dependencies/refresh', {idempotencyKey: null});
+    expect(all.body).toEqual({refresh: {apps: 1, checked: 1, notFound: 0, unavailable: 0, advisories: 1}});
+    expect((await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies[0]).toMatchObject({latestVersion: '5.0.2', checkError: null});
+  });
+
+  it('an import that is not JSON, not a package file, or over the size cap gets 400 and imports nothing', async () => {
+    const {app} = await seedApp();
+    const path = `/api/apps/${app.id}/dependencies/import`;
+
+    for (const body of ['{"name": "contoso-portal", ', '[]', '{"compilerOptions": {}}']) {
+      const refused = await api('POST', path, {body});
+      expect(refused.status, body).toBe(400);
+    }
+    const oversized = await api('POST', path, {
+      body: PACKAGE_JSON,
+      headers: {[API_HEADER.contentLength]: String(DEPENDENCY_IMPORT_MAX_BYTES + 1)},
+    });
+    expect(oversized.status).toBe(400);
+    expect((await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies).toEqual([]);
+  });
+
+  it('a key cannot import into or refresh another workspace’s app, and a workspace refresh never touches another workspace', async () => {
+    const {app} = await seedApp();
+    await api('POST', `/api/apps/${app.id}/dependencies`, {body: {name: 'quill-forms', currentVersion: '3.9.0'}});
+    const other = await otherWorkspace();
+    const registry = stubRegistry();
+
+    expect((await other.call('POST', `/api/apps/${app.id}/dependencies/import`, {body: PACKAGE_JSON})).status).toBe(404);
+    expect((await other.call('POST', `/api/apps/${app.id}/dependencies/refresh`)).status).toBe(404);
+    expect((await other.call('POST', '/api/monitoring/dependencies/refresh')).body.refresh).toMatchObject({apps: 0, checked: 0});
+    expect((await api('POST', '/api/monitoring/dependencies/refresh', {key: null})).status).toBe(401);
+
+    expect(registry.requests).toEqual([]);
+    const mine = (await api('GET', `/api/apps/${app.id}/dependencies`)).body.dependencies;
+    expect(mine).toMatchObject([{name: 'quill-forms', latestVersion: null}]);
   });
 
   // Edge cases.

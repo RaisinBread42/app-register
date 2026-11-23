@@ -66,4 +66,9 @@ describe('UI boundaries', () => {
     const shell = uiFiles.find(({file}) => file.endsWith('RegisterShell.tsx'));
     expect(shell?.text).not.toMatch(/notice/i);
   });
+
+  it("the app stays in light mode even when the reader's system is in dark mode", () => {
+    const providers = files.find(({file}) => file === path.join('app', 'providers.tsx'));
+    expect(providers?.text).toMatch(/<Theme[^>]*\bmode="light"/);
+  });
 });

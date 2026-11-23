@@ -111,7 +111,8 @@ describe('hosting check', () => {
         title: 'Workers scripts failing to deploy',
         impact: INCIDENT_IMPACT.major,
         scope: INCIDENT_SCOPE.service,
-        url: expect.stringContaining('https://status.example.test/incidents/'),
+        // Rebuilt from the incident id on the provider's own status host, not the feed's short link.
+        url: 'https://www.cloudflarestatus.com/incidents/inc0',
         startedAt: '2026-11-20T08:15:00.000Z',
       },
     ]);

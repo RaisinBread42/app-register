@@ -1,9 +1,10 @@
 import {END_OF_LIFE_API, findProvider} from '@/lib/hosting-catalog';
-import type {FetchText} from '../http';
+import type {Fetch} from '@/lib/services/package-sources';
+import {createFetchText, type FetchText} from '../http';
 
 /**
  * Test-only: small, fictional copies of each source's real response shape
- * (copied from the live feeds in Nov 2026), and a fake `fetchText` that serves them.
+ * (copied from the live feeds in Nov 2026), and a fake `fetch` that serves them.
  */
 
 const feedUrl = (provider: string) => findProvider(provider)!.statusFeed!.url;
@@ -14,7 +15,11 @@ export const FEED_URL = {
   googleCloud: feedUrl('Google Cloud'),
   vercel: feedUrl('Vercel'),
   cloudflare: feedUrl('Cloudflare'),
+  netlify: feedUrl('Netlify'),
 };
+
+/** The provider's own status page, where its incident links must point. */
+export const statusPage = (provider: string) => findProvider(provider)!.statusFeed!.page;
 
 export const endOfLifeUrlFor = (product: string) => `${END_OF_LIFE_API}/${product}`;
 
@@ -43,12 +48,12 @@ export const NODEJS = endOfLifeDocument([
   {name: '18', eolFrom: '2025-04-30'},
 ]);
 
-type StatuspageEntry = {name: string; impact: string; components: string[]; scheduledFor?: string};
+type StatuspageEntry = {name: string; impact: string; components: string[]; scheduledFor?: string; id?: string};
 
 /** Atlassian Statuspage `GET /api/v2/summary.json`. */
 export function statuspageSummary(incidents: StatuspageEntry[], maintenances: StatuspageEntry[] = []): string {
   const entry = (item: StatuspageEntry, index: number) => ({
-    id: `inc${index}`,
+    id: item.id ?? `inc${index}`,
     name: item.name,
     status: item.scheduledFor ? 'scheduled' : 'identified',
     impact: item.impact,
@@ -109,10 +114,10 @@ export function googleCloudIncidents(incidents: GoogleEntry[]): string {
 }
 
 /** Azure status RSS: one `<item>` per open incident, none when all is well. */
-export function azureStatusRss(items: {title: string; description: string}[]): string {
+export function azureStatusRss(items: {title: string; description: string; link?: string}[]): string {
   const entries = items
     .map(
-      (item) => `<item><title>${item.title}</title><link>https://azure.status.microsoft/en-us/status/</link>` +
+      (item) => `<item><title>${item.title}</title><link>${item.link ?? 'https://azure.status.microsoft/en-us/status/'}</link>` +
         `<pubDate>Sat, 21 Nov 2026 09:30:00 Z</pubDate><description><![CDATA[<p>${item.description}</p>]]></description></item>`,
     )
     .join('');
@@ -120,20 +125,19 @@ export function azureStatusRss(items: {title: string; description: string}[]): s
 }
 
 /**
- * A fake network: serves `bodies` by URL, throws for an `Error` body or an
- * unknown URL, and remembers every URL asked for.
+ * A fake network: serves `bodies` by URL, throws for an `Error` body, answers
+ * 404 for an unknown URL, and remembers every URL asked for. `fetchText` is the
+ * real reader (timeout, size cap, decoding) on top of the fake `fetch`.
  */
-export function fakeFeeds(bodies: Record<string, string | Error>): {fetchText: FetchText; requested: string[]} {
+export function fakeFeeds(bodies: Record<string, string | Error>): {fetch: Fetch; fetchText: FetchText; requested: string[]} {
   const requested: string[] = [];
-  return {
-    requested,
-    fetchText: async (url) => {
-      requested.push(url);
-      const body = bodies[url];
-      if (body === undefined || body instanceof Error) {
-        throw body ?? new Error(`HTTP 404`);
-      }
-      return body;
-    },
+  const fetch: Fetch = async (url) => {
+    requested.push(url);
+    const body = bodies[url];
+    if (body instanceof Error) {
+      throw body;
+    }
+    return body === undefined ? new Response('Not found', {status: 404}) : new Response(body);
   };
+  return {requested, fetch, fetchText: createFetchText(fetch)};
 }

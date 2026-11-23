@@ -8,6 +8,7 @@ import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {Card} from '@astryxdesign/core/Card';
 import {Divider} from '@astryxdesign/core/Divider';
+import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Grid, GridSpan} from '@astryxdesign/core/Grid';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
@@ -16,14 +17,25 @@ import {Link} from '@astryxdesign/core/Link';
 import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_TAB, ROUTES, editAppRoute, type AppTab} from '@/lib/constants';
-import type {AppDetail, HostingCatalog} from '@/lib/ui/api-client';
-import {COMING_SOON, HEALTH_COMING_SOON, KIND_LABEL, NOT_SET, formatCost, orDash} from '@/lib/ui/copy';
+import {APP_TAB, HEALTH_MAX_SCORE, ROUTES, editAppRoute, type AppTab} from '@/lib/constants';
+import type {AppDetail, Deduction, Health, HostingCatalog} from '@/lib/ui/api-client';
+import {
+  HEALTH_BASIS_NOTE,
+  HEALTH_STATUS_VARIANT,
+  KIND_LABEL,
+  NO_SCORE_HINT,
+  NO_SCORE_TITLE,
+  NOT_SET,
+  formatCost,
+  healthVerdict,
+  orDash,
+} from '@/lib/ui/copy';
 import {BackArrowIcon, PencilIcon} from '@/lib/ui/icons';
 import {formatDate, primaryHosting} from '@/lib/ui/register-view';
 import {archiveAppAction} from '../../actions';
-import {AppIcon, PendingPill, StatusPill} from '../../_components/AppIdentity';
-import {ComingSoon, FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
+import {AppIcon, PendingPill} from '../../_components/AppIdentity';
+import {FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
+import {DimensionPill, STATUS_TEXT_COLOR, ScorePill} from '../../_components/Health';
 import {FormError} from '../../_components/FormError';
 import {PageFrame} from '../../_components/PageFrame';
 import {useAction} from '../../_components/use-action';
@@ -33,8 +45,8 @@ import {HostingTab} from './HostingTab';
 export type AppDetailKeys = {
   archive: string;
   addDependency: string;
+  importDependencies: string;
   addHosting: string;
-  refreshHosting: string;
   dependencies: Record<string, string>;
   hosting: Record<string, string>;
 };
@@ -97,7 +109,13 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
         </TabList>
         {tab === APP_TAB.overview && <OverviewTab app={app} hosting={hosting} />}
         {tab === APP_TAB.dependencies && (
-          <DependenciesTab app={app} addKey={keys.addDependency} editKeys={keys.dependencies} isReadOnly={isArchived} />
+          <DependenciesTab
+            app={app}
+            addKey={keys.addDependency}
+            importKey={keys.importDependencies}
+            editKeys={keys.dependencies}
+            isReadOnly={isArchived}
+          />
         )}
         {tab === APP_TAB.hosting && (
           <HostingTab
@@ -105,7 +123,6 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
             catalog={catalog}
             today={today}
             addKey={keys.addHosting}
-            refreshKey={keys.refreshHosting}
             editKeys={keys.hosting}
             isReadOnly={isArchived}
           />
@@ -141,15 +158,7 @@ function Hero({app, hosting}: {app: AppDetail; hosting: string}) {
               </HStack>
             </VStack>
           </HStack>
-          <VStack gap={1} hAlign="start">
-            <Text type="supporting" color="secondary">
-              HEALTH SCORE
-            </Text>
-            <Text type="display-3" color="secondary">
-              {NOT_SET}
-            </Text>
-            <Badge label={COMING_SOON} variant="neutral" />
-          </VStack>
+          <HeroScore health={app.health} />
         </HStack>
         <VStack gap={5}>
           <Divider />
@@ -171,16 +180,103 @@ function Hero({app, hosting}: {app: AppDetail; hosting: string}) {
   );
 }
 
+/** The prototype's hero score: a label, the big coloured number "/ 100", and a Healthy / Needs attention badge. */
+function HeroScore({health}: {health: Health}) {
+  const variant = HEALTH_STATUS_VARIANT[health.status];
+  return (
+    <VStack gap={1} hAlign="start">
+      <Text type="supporting" color="secondary">
+        HEALTH SCORE
+      </Text>
+      <HStack gap={1} vAlign="end" style={{color: STATUS_TEXT_COLOR[variant]}}>
+        <Text type="display-3" color="inherit">
+          {health.score ?? NOT_SET}
+        </Text>
+        {health.score !== null && (
+          <Text size="lg" weight="medium" color="secondary">
+            {`/ ${HEALTH_MAX_SCORE}`}
+          </Text>
+        )}
+      </HStack>
+      <Badge label={health.score === null ? NO_SCORE_TITLE : healthVerdict(health.score)} variant={variant} />
+      <Text type="supporting" color="secondary">
+        {HEALTH_BASIS_NOTE}
+      </Text>
+    </VStack>
+  );
+}
+
+/** The prototype's deductions list: the starting score, each deduction with its points, then the score. */
+function HealthBreakdown({health}: {health: Health}) {
+  if (health.score === null) {
+    return <EmptyState title={NO_SCORE_TITLE} description={NO_SCORE_HINT} isCompact />;
+  }
+  const deductions = Object.values(health.dimensions)
+    .flatMap((dimension) => dimension?.deductions ?? [])
+    .sort((a, b) => b.points - a.points);
+  return (
+    <VStack gap={0}>
+      <BreakdownRow title="Starting score" detail="Every monitored check starts clear">
+        <Text weight="bold" size="sm">{`${HEALTH_MAX_SCORE} pts`}</Text>
+      </BreakdownRow>
+      {deductions.map((deduction) => (
+        <DeductionRow key={`${deduction.label} ${deduction.detail}`} deduction={deduction} />
+      ))}
+      {deductions.length === 0 && (
+        <BreakdownRow title="No active deductions">
+          <HStack style={{color: STATUS_TEXT_COLOR.green}}>
+            <Text color="inherit" weight="bold">
+              ✓
+            </Text>
+          </HStack>
+        </BreakdownRow>
+      )}
+      <BreakdownRow title="Current health score">
+        <ScorePill health={health} />
+      </BreakdownRow>
+      <FootNote>{HEALTH_BASIS_NOTE}</FootNote>
+    </VStack>
+  );
+}
+
+function DeductionRow({deduction}: {deduction: Deduction}) {
+  return (
+    <BreakdownRow title={deduction.label} detail={deduction.detail}>
+      <HStack style={{color: STATUS_TEXT_COLOR.red, flex: 'none'}}>
+        <Text color="inherit" weight="bold" size="sm">{`−${deduction.points} pts`}</Text>
+      </HStack>
+    </BreakdownRow>
+  );
+}
+
+function BreakdownRow({title, detail, children}: {title: string; detail?: string; children: React.ReactNode}) {
+  return (
+    <VStack gap={0}>
+      <HStack gap={3} hAlign="between" vAlign="center" paddingBlock={3}>
+        <VStack gap={0.5}>
+          <Text weight="bold" size="sm">
+            {title}
+          </Text>
+          {detail && (
+            <Text type="supporting" color="secondary">
+              {detail}
+            </Text>
+          )}
+        </VStack>
+        {children}
+      </HStack>
+      <Divider />
+    </VStack>
+  );
+}
+
 function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
   return (
     <Grid columns={12} gap={4} align="start">
       <GridSpan columns={7}>
         <VStack gap={4}>
           <PanelCard title="Health breakdown" subtitle="How the 0–100 score is calculated">
-            <ComingSoon
-              title={HEALTH_COMING_SOON}
-              description="Scores will be worked out from dependencies, hosting, licence and pricing checks."
-            />
+            <HealthBreakdown health={app.health} />
           </PanelCard>
         </VStack>
       </GridSpan>
@@ -190,8 +286,8 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
             <KeyValueRows
               isLabelStrong
               rows={[
-                {label: 'Dependencies', value: <PendingPill />},
-                {label: 'Hosting & infrastructure', value: <StatusPill status={app.hostingHealth.status} />},
+                {label: 'Dependencies', value: <DimensionPill dimension={app.health.dimensions.dependencies} />},
+                {label: 'Hosting & infrastructure', value: <DimensionPill dimension={app.health.dimensions.hosting} />},
                 {label: 'Licence', value: <PendingPill />},
                 {label: 'Pricing', value: <PendingPill />},
               ]}
