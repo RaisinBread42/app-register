@@ -17,7 +17,7 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import {END_OF_SUPPORT_SOURCE} from '@/lib/constants';
 import type {AppDetail, Hosting, HostingCatalog} from '@/lib/ui/api-client';
-import {NOT_CHECKED_YET, NOT_SET, orDash} from '@/lib/ui/copy';
+import {NOT_CHECKED_YET, NOT_SET, VERSION_NOT_EXACT, orDash} from '@/lib/ui/copy';
 import {
   checkErrors,
   endOfSupportNote,
@@ -212,6 +212,11 @@ function EndOfSupport({hosting, today}: {hosting: Hosting; today: string}) {
       <Text type="supporting" color="secondary">
         {source}
       </Text>
+      {hosting.isVersionInexact && (
+        <Text type="supporting" color="secondary">
+          {VERSION_NOT_EXACT}
+        </Text>
+      )}
     </VStack>
   );
 }

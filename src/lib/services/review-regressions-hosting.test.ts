@@ -170,6 +170,28 @@ describe('review regressions: hosting health', () => {
     expect(endOfSupportDate(mysql, '8')).not.toBe('2032-04-30');
   });
 
+  it('a row whose version matches several releases gets the earliest of their dates and says the version is not exact; an exact version or a date set by hand does not', async () => {
+    const mysqlOnRds = endOfLifeUrlFor('amazon-rds-mysql');
+    const feeds = fakeFeeds({
+      [mysqlOnRds]: endOfLifeDocument([{name: '8.4', eolFrom: '2032-04-30'}, {name: '8.0', eolFrom: '2026-04-30'}]),
+      [FEED_URL.aws]: NO_AWS_EVENTS,
+    });
+    const added = await add({provider: 'AWS', service: 'RDS for MySQL', version: '8'});
+
+    const [inexact] = await check(feeds.fetchText);
+    expect(inexact).toMatchObject({endOfSupportOn: '2026-04-30', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, isVersionInexact: true, status: HEALTH_STATUS.critical});
+
+    await updateHosting(t.db, t.workspaceId, appId, added.id, {version: '8.4'});
+    const [exact] = await check(feeds.fetchText);
+    expect(exact).toMatchObject({endOfSupportOn: '2032-04-30', isVersionInexact: false});
+
+    await updateHosting(t.db, t.workspaceId, appId, added.id, {version: '8'});
+    expect((await check(feeds.fetchText))[0].isVersionInexact).toBe(true);
+    const byHand = await updateHosting(t.db, t.workspaceId, appId, added.id, {endOfSupportOn: '2030-01-01'});
+    expect(byHand).toMatchObject({endOfSupportSource: END_OF_SUPPORT_SOURCE.manual, isVersionInexact: false});
+    expect((await check(feeds.fetchText))[0]).toMatchObject({endOfSupportOn: '2030-01-01', isVersionInexact: false});
+  });
+
   // ---- A region written another way never hides an outage of the row's service ----
 
   it('an outage of the row’s own service still reaches a row whose region is written another way (availability zone, display name)', async () => {

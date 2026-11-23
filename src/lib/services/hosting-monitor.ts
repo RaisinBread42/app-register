@@ -4,7 +4,7 @@ import {END_OF_SUPPORT_SOURCE, HOSTING_CHECK_ERROR_MAX_LENGTH, MONITORING_FOLLOW
 import type {AppDatabase} from '@/lib/db/client';
 import {appHosting, apps} from '@/lib/db/schema';
 import {findProvider, findRuntime, findService, type StatusFeed} from '@/lib/hosting-catalog';
-import {endOfLifeUrl, endOfSupportDate} from '@/lib/monitoring/end-of-life';
+import {endOfLifeUrl, endOfSupport as readEndOfSupport} from '@/lib/monitoring/end-of-life';
 import {cleanText} from '@/lib/monitoring/feed-values';
 import {createFetchText, type FetchText} from '@/lib/monitoring/http';
 import {incidentScope, parseStatusFeed, type FeedIncident} from '@/lib/monitoring/status-feeds';
@@ -121,7 +121,9 @@ async function checkRows(
   return {stored, failedSources: [...failed]};
 }
 
-type Found = Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource' | 'healthCheckedAt' | 'healthError'> & {
+type EndOfSupportFound = Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource' | 'isVersionInexact'>;
+
+type Found = EndOfSupportFound & Pick<HostingRecord, 'healthCheckedAt' | 'healthError'> & {
   /** Null when the provider's feed could not be read: the incidents the row had are kept. */
   incidents: HostingIncident[] | null;
 };
@@ -238,31 +240,33 @@ function endOfLifeLookups(row: HostingRecord): Lookup[] {
   return lookups;
 }
 
-/** The earliest end-of-support date found. A manual date, or a lookup that failed, leaves the row as it is. */
-function endOfSupport(
-  row: HostingRecord,
-  answers: Map<string, Answer>,
-  errors: string[],
-): Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource'> {
-  const unchanged = {endOfSupportOn: row.endOfSupportOn, endOfSupportSource: row.endOfSupportSource};
+/**
+ * The earliest end-of-support date found, and whether a version named several
+ * releases (the date is then the earliest of those too). A manual date, or a
+ * lookup that failed, leaves the row as it is.
+ */
+function endOfSupport(row: HostingRecord, answers: Map<string, Answer>, errors: string[]): EndOfSupportFound {
+  const unchanged = {endOfSupportOn: row.endOfSupportOn, endOfSupportSource: row.endOfSupportSource, isVersionInexact: row.isVersionInexact};
   if (row.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual) {
     return unchanged;
   }
   const dates: string[] = [];
+  let isVersionInexact = false;
   for (const {product, version} of endOfLifeLookups(row)) {
-    const found = read(answers.get(endOfLifeUrl(product)), END_OF_SUPPORT_SOURCE.endOfLifeDate, (body) => endOfSupportDate(body, version));
+    const found = read(answers.get(endOfLifeUrl(product)), END_OF_SUPPORT_SOURCE.endOfLifeDate, (body) => readEndOfSupport(body, version));
     if (isFailure(found)) {
       errors.push(found.error);
       return unchanged;
     }
-    if (found.value) {
-      dates.push(found.value);
+    if (found.value.date) {
+      dates.push(found.value.date);
+      isVersionInexact ||= found.value.isVersionInexact;
     }
   }
   const [earliest] = dates.sort();
   return earliest
-    ? {endOfSupportOn: earliest, endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate}
-    : {endOfSupportOn: null, endOfSupportSource: null};
+    ? {endOfSupportOn: earliest, endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, isVersionInexact}
+    : {endOfSupportOn: null, endOfSupportSource: null, isVersionInexact: false};
 }
 
 /** The open incidents that reach this row; null (keep what it had) when its provider's feed could not be read. */

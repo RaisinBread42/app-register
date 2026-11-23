@@ -143,10 +143,12 @@ The check (`src/lib/services/hosting-monitor.ts`) writes, per row:
 
 | Field | Meaning |
 | --- | --- |
-| `endOfSupportOn`, `endOfSupportSource` | The date and who set it. `manual`: sent by a client, never overwritten. `endoflife.date`: looked up from the service's `version` and/or the `runtimeVersion` (the earlier of the two). A looked-up date is cleared when the row's provider, service, version or runtime changes, and only then (see the date rule below). |
+| `endOfSupportOn`, `endOfSupportSource` | The date and who set it. `manual`: sent by a client, never overwritten. `endoflife.date`: looked up from the service's `version` and/or the `runtimeVersion` (the earlier of the two). `isVersionInexact` is `true` when a version matched more than one release (below). A looked-up date is cleared when the row's provider, service, version or runtime changes, and only then (see the date rule below). |
 | `incidents[]` | Open provider incidents and announced maintenance that reach the row (at most 20): `title`, `impact` (`major` / `minor` / `maintenance`), `scope` (`service` / `provider`), `url` (or `null`), `startedAt`. |
 | `healthCheckedAt` | When the check last ran for the row as it is now; `null` until then. |
 | `healthError` | Sources that could not be read last time, e.g. `Cloudflare status could not be reached (HTTP 503)`. What the row had from that source is kept. |
+
+**How a version is matched to a release on endoflife.date.** `12`, `v12` and `12.4` are release `12`; `2022` is SQL Server's release labelled `2022 'Dallas'`. When a version matches more than one release (MySQL `8` is both `8.0` and `8.4`), the **earliest** end-of-support date among them is used, the cautious answer, and the row carries `isVersionInexact: true`; the UI then shows "Version is not exact; using the earliest matching release". Record the exact version (`8.4`) to get that release's own date. One exception: a product released in service packs (SQL Server) by its bare year (`2016`) means the latest service pack of that year (`2016 SP3`), the one still supported, and is not flagged.
 
 **The date rule on `PATCH`** (what the edit form relies on):
 

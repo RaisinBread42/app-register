@@ -100,6 +100,8 @@ export const CHECK_ERROR_LABEL: Record<DependencyCheckError, string> = {
     "Version is a range; import package-lock.json for exact versions",
 };
 /** Why a dependency has no status when no check has failed: none has finished yet. */
+/** Beside a looked-up end-of-support date whose version matched several releases. */
+export const VERSION_NOT_EXACT = 'Version is not exact; using the earliest matching release';
 export const NOT_CHECKED_YET = "Not checked yet";
 
 export const NOT_SET = "—";
