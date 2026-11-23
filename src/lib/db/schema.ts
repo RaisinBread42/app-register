@@ -18,6 +18,8 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
+  ADVISORY_SEVERITIES,
+  ADVISORY_SOURCES,
   APP_KINDS,
   DEPENDENCY_CHECK_ERRORS,
   DEPENDENCY_SOURCE,
@@ -29,6 +31,7 @@ import {
   PERSON_STATUS,
   PERSON_STATUSES,
   type AdvisorySeverity,
+  type AdvisorySource,
 } from '../constants';
 
 /** CHECK (column IN (...)) built from a constants array, so TS and DB share one list. */
@@ -311,16 +314,6 @@ export const reviewItems = pgTable(
   ],
 );
 
-/** One known security advisory for a dependency's tracked version, as monitoring found it. */
-export type StoredAdvisory = {
-  id: string;
-  /** Other ids for the same advisory (e.g. the CVE for a GHSA). */
-  aliases: string[];
-  severity: AdvisorySeverity;
-  summary: string;
-  url: string;
-};
-
 /** What an app runs on or pulls in: a library or SDK, added by hand or imported from a package file. */
 export const appDependencies = pgTable(
   'app_dependencies',
@@ -331,14 +324,10 @@ export const appDependencies = pgTable(
     name: text('name').notNull(),
     currentVersion: text('current_version').notNull(),
     latestVersion: text('latest_version'),
-    /** Advisory ids such as CVE-2026-1234; empty when none are known. */
-    vulnerabilities: text('vulnerabilities').array().notNull().default(sql`'{}'::text[]`),
     recommendedAction: text('recommended_action'),
     /** `import` rows came from a package file and are removed when a later import no longer lists them. */
     source: text('source').notNull().default(DEPENDENCY_SOURCE.manual),
     isDev: boolean('is_dev').notNull().default(false),
-    /** Advisories monitoring found for the tracked version; `vulnerabilities` stays hand-recorded. */
-    advisories: jsonb('advisories').$type<StoredAdvisory[]>().notNull().default([]),
     /** When monitoring last checked this row; null until the first check. */
     checkedAt: timestamp('checked_at', {withTimezone: true}),
     checkError: text('check_error'),
@@ -346,6 +335,7 @@ export const appDependencies = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    unique('app_dependencies_id_workspace_unique').on(t.id, t.workspaceId),
     foreignKey({
       name: 'app_dependencies_app_fk',
       columns: [t.appId, t.workspaceId],
@@ -355,6 +345,59 @@ export const appDependencies = pgTable(
     uniqueIndex('app_dependencies_app_name_unique').on(t.appId, sql`lower(${t.name})`),
     check('app_dependencies_source_allowed', oneOf(t.source, DEPENDENCY_SOURCES)),
     check('app_dependencies_check_error_allowed', oneOf(t.checkError, DEPENDENCY_CHECK_ERRORS)),
+  ],
+);
+
+/**
+ * One advisory known for a dependency's tracked version: an id a person recorded
+ * by hand (`manual`, severity unknown) or one the OSV check found (`osv`).
+ * `position` keeps the order the ids were given in.
+ */
+export const dependencyAdvisories = pgTable(
+  'dependency_advisories',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    dependencyId: uuid('dependency_id').notNull(),
+    /** The advisory's own id, such as CVE-2026-1234 or GHSA-xxxx-xxxx-xxxx. */
+    advisoryId: text('advisory_id').notNull(),
+    source: text('source').$type<AdvisorySource>().notNull(),
+    severity: text('severity').$type<AdvisorySeverity>().notNull(),
+    summary: text('summary').notNull().default(''),
+    position: integer('position').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique('dependency_advisories_id_workspace_unique').on(t.id, t.workspaceId),
+    foreignKey({
+      name: 'dependency_advisories_dependency_fk',
+      columns: [t.dependencyId, t.workspaceId],
+      foreignColumns: [appDependencies.id, appDependencies.workspaceId],
+    }).onDelete('cascade'),
+    // Also serves "a dependency's advisories".
+    unique('dependency_advisories_dependency_advisory_source_unique').on(t.dependencyId, t.advisoryId, t.source),
+    check('dependency_advisories_source_allowed', oneOf(t.source, ADVISORY_SOURCES)),
+    check('dependency_advisories_severity_allowed', oneOf(t.severity, ADVISORY_SEVERITIES)),
+  ],
+);
+
+/** Another id for the same advisory (e.g. the CVE for a GHSA), so an id recorded by hand is counted once. */
+export const dependencyAdvisoryAliases = pgTable(
+  'dependency_advisory_aliases',
+  {
+    workspaceId: workspaceId(),
+    advisoryRowId: uuid('advisory_row_id').notNull(),
+    alias: text('alias').notNull(),
+    position: integer('position').notNull(),
+  },
+  (t) => [
+    // Also serves "an advisory's aliases".
+    primaryKey({name: 'dependency_advisory_aliases_pk', columns: [t.advisoryRowId, t.alias]}),
+    foreignKey({
+      name: 'dependency_advisory_aliases_advisory_fk',
+      columns: [t.advisoryRowId, t.workspaceId],
+      foreignColumns: [dependencyAdvisories.id, dependencyAdvisories.workspaceId],
+    }).onDelete('cascade'),
   ],
 );
 

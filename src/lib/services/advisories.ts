@@ -7,22 +7,47 @@ import {
   OSV_ADVISORY_PAGE_URL,
   type AdvisorySeverity,
 } from '@/lib/constants';
-import type {StoredAdvisory} from '@/lib/db/schema';
 
 /**
- * The one shape an advisory may have, on the way into the database and on the
- * way out. Advisories come from an outside source, so nothing is trusted: a
- * wrong type is dropped or replaced, long text is cut, and the link is always
- * rebuilt from the id so it can only point at OSV.
+ * The one shape an advisory may have before it is stored. Advisories come from
+ * an outside source, so nothing is trusted: a wrong type is dropped or replaced,
+ * long text is cut, and the link is always built from the id so it can only
+ * point at OSV.
  */
 
-/** True for an id worth storing: text, not blank, not absurdly long. */
+/** One known security advisory for a dependency's tracked version. */
+export type Advisory = {
+  id: string;
+  /** Other ids for the same advisory (e.g. the CVE for a GHSA). */
+  aliases: string[];
+  severity: AdvisorySeverity;
+  summary: string;
+  url: string;
+};
+
+/** What Postgres refuses in text: NUL, and half of a surrogate pair. */
+const NOT_STORABLE = /[\p{Cs}\0]/gu;
+
+/**
+ * Text cut to `maxLength` that the database will accept. A cut that lands
+ * inside a surrogate pair (an emoji, say) drops the half that is left.
+ */
+export function storableText(text: string, maxLength: number): string {
+  return text.slice(0, maxLength).replace(NOT_STORABLE, '');
+}
+
+/** True for an id worth storing: text, not blank, not absurdly long, nothing the database refuses. */
 export function isAdvisoryId(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== '' && value.length <= ADVISORY_ID_MAX_LENGTH;
+  return typeof value === 'string' && value.trim() !== '' && storableText(value, ADVISORY_ID_MAX_LENGTH) === value;
+}
+
+/** The link to an advisory, always on OSV whatever the id says. */
+export function advisoryUrl(id: string): string {
+  return `${OSV_ADVISORY_PAGE_URL}/${encodeURIComponent(id)}`;
 }
 
 /** The advisory as it may be stored and shown, or null when it has no usable id. */
-export function normaliseAdvisory(value: unknown): StoredAdvisory | null {
+export function normaliseAdvisory(value: unknown): Advisory | null {
   if (typeof value !== 'object' || value === null) {
     return null;
   }
@@ -32,19 +57,11 @@ export function normaliseAdvisory(value: unknown): StoredAdvisory | null {
   }
   return {
     id,
-    aliases: Array.isArray(aliases) ? aliases.filter(isAdvisoryId).slice(0, ADVISORY_MAX_ALIASES) : [],
+    aliases: Array.isArray(aliases) ? [...new Set(aliases.filter(isAdvisoryId))].slice(0, ADVISORY_MAX_ALIASES) : [],
     severity: (ADVISORY_SEVERITIES as readonly unknown[]).includes(severity)
       ? (severity as AdvisorySeverity)
       : ADVISORY_SEVERITY.unknown,
-    summary: typeof summary === 'string' ? summary.slice(0, ADVISORY_SUMMARY_MAX_LENGTH) : '',
-    url: `${OSV_ADVISORY_PAGE_URL}/${encodeURIComponent(id)}`,
+    summary: typeof summary === 'string' ? storableText(summary, ADVISORY_SUMMARY_MAX_LENGTH) : '',
+    url: advisoryUrl(id),
   };
-}
-
-/** A stored `advisories` value made safe to read: whatever is not a usable advisory is left out. */
-export function normaliseAdvisories(value: unknown): StoredAdvisory[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map(normaliseAdvisory).filter((advisory) => advisory !== null);
 }

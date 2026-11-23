@@ -1,4 +1,5 @@
 import {
+  ADVISORY_ID_MAX_LENGTH,
   ADVISORY_SEVERITIES,
   BYTES_PER_MB,
   APP_KINDS,
@@ -126,7 +127,11 @@ const dependencyFields = {
     description: 'Changing it clears the advisories and check state, which were about the old version',
   },
   latestVersion: nullable('string', {maxLength: DEPENDENCY_VERSION_MAX_LENGTH}),
-  vulnerabilities: {type: 'array', items: text, description: 'Advisory ids, e.g. CVE-2026-1234'},
+  vulnerabilities: {
+    type: 'array',
+    items: {...text, maxLength: ADVISORY_ID_MAX_LENGTH},
+    description: 'Advisory ids, e.g. CVE-2026-1234',
+  },
   recommendedAction: nullable('string'),
 };
 

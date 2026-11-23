@@ -2,6 +2,7 @@ import {and, asc, eq, inArray} from 'drizzle-orm';
 import {
   ADVISORY_POINTS,
   ADVISORY_SEVERITY,
+  ADVISORY_SOURCE,
   DEPENDENCY_CHECK_ERROR,
   DEPENDENCY_FOLLOW_UP_BUDGET_MS,
   HEALTH_DIMENSION,
@@ -15,9 +16,10 @@ import {
   type HealthStatus,
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
-import {appDependencies, apps, type AppDependencyRow, type StoredAdvisory} from '@/lib/db/schema';
-import {normaliseAdvisories} from './advisories';
+import {appDependencies, apps, type AppDependencyRow} from '@/lib/db/schema';
+import type {Advisory} from './advisories';
 import {activeAppsIn, assertActiveApp} from './app-scope';
+import {replaceAdvisories, type KnownAdvisories} from './dependency-advisories';
 import {NotFoundError} from './errors';
 import type {Deduction} from './health';
 import {createPackageSources, isNpmPackageName, mapWithLimit, type PackageSources} from './package-sources';
@@ -29,20 +31,18 @@ import {isExactVersion, versionLag} from './package-versions';
  */
 
 /** What scoring reads from a dependency. */
-export type DependencyFacts = Pick<
-  AppDependencyRow,
-  'name' | 'currentVersion' | 'latestVersion' | 'vulnerabilities' | 'advisories' | 'isDev' | 'checkedAt' | 'checkError'
->;
+export type DependencyFacts = Pick<AppDependencyRow, 'name' | 'currentVersion' | 'latestVersion' | 'isDev' | 'checkedAt' | 'checkError'> &
+  KnownAdvisories;
 
-type MonitoringResults = Pick<AppDependencyRow, 'latestVersion' | 'advisories' | 'checkedAt' | 'checkError'>;
+type MonitoringResults = Pick<AppDependencyRow, 'latestVersion' | 'checkedAt' | 'checkError'>;
 
 /**
  * A dependency whose advisories have not been checked. Every write that changes
- * a dependency's name or version puts it back here: what monitoring found was
- * about another package or version. (The latest version belongs to the name
- * alone, so only a rename clears it.)
+ * a dependency's name or version puts it back here and clears the advisories the
+ * check found (`clearFoundAdvisories`): they were about another package or
+ * version. (The latest version belongs to the name alone, so only a rename clears it.)
  */
-export const UNCHECKED: Omit<MonitoringResults, 'latestVersion'> = {advisories: [], checkedAt: null, checkError: null};
+export const UNCHECKED: Omit<MonitoringResults, 'latestVersion'> = {checkedAt: null, checkError: null};
 
 /** What one refresh did. Every count is a number of dependencies, except `advisories`. */
 export type RefreshSummary = {
@@ -69,11 +69,10 @@ const URGENT_SEVERITIES: readonly AdvisorySeverity[] = [ADVISORY_SEVERITY.critic
 
 /**
  * Every advisory known for a dependency: what monitoring found, plus ids recorded
- * by hand that monitoring did not find (severity unknown). A stored advisory that
- * is not in the expected shape is left out rather than failing the read.
+ * by hand that monitoring did not find (severity unknown).
  */
-export function knownAdvisories(dependency: DependencyFacts): Pick<StoredAdvisory, 'id' | 'severity' | 'summary'>[] {
-  const monitored = normaliseAdvisories(dependency.advisories);
+export function knownAdvisories(dependency: DependencyFacts): Pick<Advisory, 'id' | 'severity' | 'summary'>[] {
+  const monitored = dependency.advisories;
   const found = new Set(monitored.flatMap((advisory) => [advisory.id, ...advisory.aliases]).map((id) => id.toUpperCase()));
   const byHand = dependency.vulnerabilities
     .filter((id) => !found.has(id.toUpperCase()))
@@ -152,7 +151,7 @@ type CheckResult = {
   /** Null keeps the stored value: the registry does not know the package, or gave no usable answer. */
   latestVersion: string | null;
   /** Null keeps the stored advisories: the source gave no usable answer, or the version is not exact. */
-  advisories: StoredAdvisory[] | null;
+  advisories: Advisory[] | null;
   checkError: DependencyCheckError | null;
 };
 
@@ -187,18 +186,31 @@ export async function refreshDependencyHealth(
 
   const now = new Date();
   for (const result of results) {
-    await db
-      .update(appDependencies)
-      .set(toStore(result, now))
-      .where(
-        and(
-          eq(appDependencies.id, result.id),
-          eq(appDependencies.name, result.name),
-          eq(appDependencies.currentVersion, result.version),
-        ),
-      );
+    await db.transaction((tx) => storeResult(tx, workspaceId, result, now));
   }
   return summarize(results);
+}
+
+/**
+ * Stores one answer, but only while the row still has the name and version that
+ * were checked. The row stays locked until the advisories are replaced, so a
+ * rename cannot slip in between and keep them.
+ */
+async function storeResult(tx: AppDatabase, workspaceId: string, result: CheckResult, now: Date): Promise<void> {
+  const stillSame = await tx
+    .update(appDependencies)
+    .set(toStore(result, now))
+    .where(
+      and(
+        eq(appDependencies.id, result.id),
+        eq(appDependencies.name, result.name),
+        eq(appDependencies.currentVersion, result.version),
+      ),
+    )
+    .returning({id: appDependencies.id});
+  if (stillSame.length > 0 && result.advisories !== null) {
+    await replaceAdvisories(tx, {id: result.id, workspaceId}, ADVISORY_SOURCE.osv, result.advisories);
+  }
 }
 
 /**
@@ -267,7 +279,6 @@ function toStore(result: CheckResult, now: Date): Partial<MonitoringResults> {
     checkError: result.checkError,
     ...checkedAt,
     ...(result.latestVersion === null ? {} : {latestVersion: result.latestVersion}),
-    ...(result.advisories === null ? {} : {advisories: result.advisories}),
   };
 }
 

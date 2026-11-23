@@ -5,6 +5,7 @@ import {newId} from '@/lib/db/ids';
 import {appDependencies} from '@/lib/db/schema';
 import {lockActiveApp} from './app-scope';
 import {dependencyName, dependencyVersion} from './dependencies';
+import {clearFoundAdvisories} from './dependency-advisories';
 import {UNCHECKED} from './dependency-health';
 import {ValidationError} from './errors';
 import {stripRange} from './package-versions';
@@ -107,6 +108,7 @@ export async function importDependencies(
           .update(appDependencies)
           .set({currentVersion, isDev, ...UNCHECKED})
           .where(eq(appDependencies.id, known.id));
+        await clearFoundAdvisories(tx, known);
         summary.updated++;
       } else {
         if (known.isDev !== isDev) {

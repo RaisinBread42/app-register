@@ -6,6 +6,8 @@ import {drizzle} from 'drizzle-orm/pglite';
 import {migrate} from 'drizzle-orm/pglite/migrator';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {
+  ADVISORY_SEVERITY,
+  ADVISORY_SOURCE,
   DEFAULT_WORKSPACE_SLUG,
   NOTICE_ALERT_STATUS,
   OWNERSHIP_CHANGE_REASON,
@@ -18,6 +20,8 @@ import {
   appDependencies,
   apps,
   attachments,
+  dependencyAdvisories,
+  dependencyAdvisoryAliases,
   noticeAlerts,
   ownershipChanges,
   people,
@@ -26,6 +30,7 @@ import {
   workspaces,
 } from './schema';
 import {createTestDb, type TestDb} from './test-db';
+import {listDependencies} from '@/lib/services/dependencies';
 import {ensureDefaultWorkspace} from '@/lib/services/workspaces';
 
 const ALL_TABLES = [
@@ -34,6 +39,8 @@ const ALL_TABLES = [
   'app_hosting',
   'apps',
   'attachments',
+  'dependency_advisories',
+  'dependency_advisory_aliases',
   'idempotency_keys',
   'notice_alerts',
   'ownership_changes',
@@ -46,6 +53,17 @@ const ALL_TABLES = [
 const TABLES_0001 = ['api_keys', 'app_dependencies', 'app_hosting', 'idempotency_keys'];
 
 const COLUMNS_0002 = ['advisories', 'check_error', 'checked_at', 'is_dev', 'source'];
+
+const TABLES_0003 = ['dependency_advisories', 'dependency_advisory_aliases'];
+
+/** Rollback files, newest first: the order they must run in. */
+const ROLLBACK_0003 = '0003_relational_advisories.down.sql';
+const ROLLBACK_0002 = '0002_dependency_health.down.sql';
+const ROLLBACK_0001 = '0001_api_keys_idempotency_deps_hosting.down.sql';
+
+function rollbackSql(file: string): string {
+  return readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8');
+}
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
 async function seedWorkspace(t: TestDb, workspaceId: string) {
@@ -200,15 +218,110 @@ describe('database schema', () => {
     }
   });
 
+  it('the database itself rejects an advisory row that breaks a listed constraint, and advisories go with their dependency', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const dependencyId = newId();
+    await t.db.insert(appDependencies).values({id: dependencyId, workspaceId: w.workspaceId, appId: w.appId, name: 'left-pad', currentVersion: '1.3.0'});
+    const advisory = {
+      workspaceId: w.workspaceId,
+      dependencyId,
+      advisoryId: 'GHSA-aaaa-1111-bbbb',
+      source: ADVISORY_SOURCE.osv,
+      severity: ADVISORY_SEVERITY.high,
+      position: 0,
+    };
+    const rowId = newId();
+    await t.db.insert(dependencyAdvisories).values({id: rowId, ...advisory});
+    const alias = {workspaceId: w.workspaceId, advisoryRowId: rowId, alias: 'CVE-2026-4411', position: 0};
+    await t.db.insert(dependencyAdvisoryAliases).values(alias);
+    // The same id recorded by hand is another row: the unique key includes the source.
+    await t.db.insert(dependencyAdvisories).values({id: newId(), ...advisory, source: ADVISORY_SOURCE.manual, severity: ADVISORY_SEVERITY.unknown});
+
+    const cases: [string, () => Promise<unknown>][] = [
+      ['dependency_advisories_dependency_advisory_source_unique', () => t.db.insert(dependencyAdvisories).values({id: newId(), ...advisory, position: 1})],
+      ['dependency_advisories_source_allowed', () => t.client.query(`insert into dependency_advisories (id, workspace_id, dependency_id, advisory_id, source, severity, position) values ($1, $2, $3, 'GHSA-x', 'rumour', 'high', 1)`, [newId(), w.workspaceId, dependencyId])],
+      ['dependency_advisories_severity_allowed', () => t.client.query(`insert into dependency_advisories (id, workspace_id, dependency_id, advisory_id, source, severity, position) values ($1, $2, $3, 'GHSA-y', 'osv', 'scary', 1)`, [newId(), w.workspaceId, dependencyId])],
+      ['null value in column "advisory_id"', () => t.client.query(`insert into dependency_advisories (id, workspace_id, dependency_id, source, severity, position) values ($1, $2, $3, 'osv', 'high', 1)`, [newId(), w.workspaceId, dependencyId])],
+      ['dependency_advisories_dependency_fk', () => t.db.insert(dependencyAdvisories).values({id: newId(), ...advisory, dependencyId: newId()})],
+      ['dependency_advisory_aliases_pk', () => t.db.insert(dependencyAdvisoryAliases).values({...alias, position: 1})],
+      ['dependency_advisory_aliases_advisory_fk', () => t.db.insert(dependencyAdvisoryAliases).values({...alias, advisoryRowId: newId()})],
+    ];
+    for (const [rule, write] of cases) {
+      await expect(write(), rule).rejects.toThrow(rule);
+    }
+
+    await t.db.delete(appDependencies).where(eq(appDependencies.id, dependencyId));
+    expect(await t.db.select().from(dependencyAdvisories)).toHaveLength(0);
+    expect(await t.db.select().from(dependencyAdvisoryAliases)).toHaveLength(0);
+  });
+
+  it('an advisory cannot point at a dependency in another workspace, nor an alias at an advisory in another workspace', async () => {
+    const a = await seedWorkspace(t, t.workspaceId);
+    const otherId = newId();
+    await t.db.insert(workspaces).values({id: otherId, name: 'Fabrikam', slug: 'fabrikam'});
+    const b = await seedWorkspace(t, otherId);
+    const theirDependencyId = newId();
+    const theirAdvisoryRowId = newId();
+    await t.db.insert(appDependencies).values({id: theirDependencyId, workspaceId: b.workspaceId, appId: b.appId, name: 'left-pad', currentVersion: '1.3.0'});
+    const advisory = {dependencyId: theirDependencyId, advisoryId: 'GHSA-aaaa-1111-bbbb', source: ADVISORY_SOURCE.osv, severity: ADVISORY_SEVERITY.high, position: 0};
+    await t.db.insert(dependencyAdvisories).values({id: theirAdvisoryRowId, workspaceId: b.workspaceId, ...advisory});
+
+    await expect(
+      t.db.insert(dependencyAdvisories).values({id: newId(), workspaceId: a.workspaceId, ...advisory, advisoryId: 'GHSA-cross'}),
+    ).rejects.toThrow('dependency_advisories_dependency_fk');
+    await expect(
+      t.db.insert(dependencyAdvisoryAliases).values({workspaceId: a.workspaceId, advisoryRowId: theirAdvisoryRowId, alias: 'CVE-2026-4411', position: 0}),
+    ).rejects.toThrow('dependency_advisory_aliases_advisory_fk');
+  });
+
+  it('migration 0003 moves stored advisories and hand-recorded ids into tables, and its rollback puts them back in the old columns', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    const advisories = [
+      {id: 'GHSA-qqqq-1111-aaaa', aliases: ['CVE-2026-4411', 'PYSEC-2026-7'], severity: 'high', summary: 'Prototype pollution in merge()', url: 'https://osv.dev/vulnerability/GHSA-qqqq-1111-aaaa'},
+      {id: 'MAL-2026-0042', aliases: [], severity: 'critical', summary: '', url: 'https://osv.dev/vulnerability/MAL-2026-0042'},
+    ];
+    const vulnerabilities = ['INTERNAL-77', 'cve-2026-4411'];
+    // Odd stored JSON the copy must skip without failing: not objects, no text id, a repeated id.
+    const odd = [{aliases: ['no id']}, null, 'text', {id: 7}, {...advisories[0], summary: 'repeat'}];
+    const quillId = newId();
+    const brokenId = newId();
+    const insertOld = `insert into app_dependencies (id, workspace_id, app_id, name, current_version, vulnerabilities, advisories) values ($1, $2, $3, $4, '3.9.0', $5, $6)`;
+    await t.client.query(insertOld, [quillId, w.workspaceId, w.appId, 'quill-forms', vulnerabilities, JSON.stringify([...advisories, ...odd])]);
+    await t.client.query(insertOld, [brokenId, w.workspaceId, w.appId, 'tally-ui', [], JSON.stringify({not: 'a list'})]);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    const stored = await t.client.query<{advisory_id: string; source: string; severity: string; position: number}>(
+      `select advisory_id, source, severity, position from dependency_advisories where dependency_id = $1 order by source, position`,
+      [quillId],
+    );
+    expect(stored.rows).toEqual([
+      {advisory_id: 'INTERNAL-77', source: 'manual', severity: 'unknown', position: 0},
+      {advisory_id: 'cve-2026-4411', source: 'manual', severity: 'unknown', position: 1},
+      {advisory_id: 'GHSA-qqqq-1111-aaaa', source: 'osv', severity: 'high', position: 0},
+      {advisory_id: 'MAL-2026-0042', source: 'osv', severity: 'critical', position: 1},
+    ]);
+    const [quill, tally] = await listDependencies(t.db, w.workspaceId, w.appId);
+    expect(quill).toMatchObject({name: 'quill-forms', vulnerabilities, advisories});
+    expect(tally).toMatchObject({name: 'tally-ui', vulnerabilities: [], advisories: []});
+
+    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    const old = await t.client.query<{vulnerabilities: string[]; advisories: unknown}>(
+      `select vulnerabilities, advisories from app_dependencies where id = $1`,
+      [quillId],
+    );
+    expect(old.rows).toEqual([{vulnerabilities, advisories}]);
+  });
+
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    // Rollbacks run newest first: 0002 changed a table that 0001 created.
-    for (const file of ['0002_dependency_health.down.sql', '0001_api_keys_idempotency_deps_hosting.down.sql']) {
-      await t.client.exec(readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8'));
+    // Rollbacks run newest first: 0003 and 0002 changed a table that 0001 created.
+    for (const file of [ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
+      await t.client.exec(rollbackSql(file));
     }
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
-    expect(after.rows.map((r) => r.table_name)).toEqual(ALL_TABLES.filter((n) => !TABLES_0001.includes(n)));
+    expect(after.rows.map((r) => r.table_name)).toEqual(ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003].includes(n)));
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     const restored = await t.client.query<{table_name: string}>(
@@ -228,9 +341,10 @@ describe('database schema', () => {
       ).rows.map((r) => r.column_name);
     const before = await columns();
 
-    const down = readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', '0002_dependency_health.down.sql'), 'utf8');
-    await t.client.exec(down);
-    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0002.includes(name)));
+    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    const at0002 = await columns();
+    await t.client.exec(rollbackSql(ROLLBACK_0002));
+    expect(await columns()).toEqual(at0002.filter((name) => !COLUMNS_0002.includes(name)));
     const kept = await t.client.query<{name: string}>(`select name from app_dependencies`);
     expect(kept.rows).toEqual([{name: 'left-pad'}]);
 

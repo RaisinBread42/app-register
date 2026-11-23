@@ -279,6 +279,14 @@ export const ADVISORY_SEVERITY = {
 export const ADVISORY_SEVERITIES = Object.values(ADVISORY_SEVERITY);
 export type AdvisorySeverity = (typeof ADVISORY_SEVERITIES)[number];
 
+/** Who recorded an advisory on a dependency: a person by hand, or the OSV check. */
+export const ADVISORY_SOURCE = {
+  manual: 'manual',
+  osv: 'osv',
+} as const;
+export const ADVISORY_SOURCES = Object.values(ADVISORY_SOURCE);
+export type AdvisorySource = (typeof ADVISORY_SOURCES)[number];
+
 /** What an app's health score is made of. Each dimension reports its own deductions. */
 export const HEALTH_DIMENSION = {
   dependencies: 'dependencies',

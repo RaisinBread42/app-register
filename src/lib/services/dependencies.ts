@@ -1,10 +1,16 @@
-import {and, asc, eq} from 'drizzle-orm';
+import {and, eq} from 'drizzle-orm';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {DEPENDENCY_NAME_MAX_LENGTH, DEPENDENCY_VERSION_MAX_LENGTH, type HealthStatus} from '@/lib/constants';
-import {appDependencies, type AppDependencyRow} from '@/lib/db/schema';
-import {normaliseAdvisories} from './advisories';
+import {
+  ADVISORY_ID_MAX_LENGTH,
+  DEPENDENCY_NAME_MAX_LENGTH,
+  DEPENDENCY_VERSION_MAX_LENGTH,
+  type HealthStatus,
+} from '@/lib/constants';
+import {appDependencies} from '@/lib/db/schema';
+import {isAdvisoryId} from './advisories';
 import {assertActiveApp} from './app-scope';
+import {clearFoundAdvisories, loadDependencies, replaceManualAdvisories, type DependencyRecord} from './dependency-advisories';
 import {dependencyStatus, UNCHECKED} from './dependency-health';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
 import {atMost, optionalText, requiredText} from './validation';
@@ -18,7 +24,7 @@ export type DependencyInput = {
 };
 
 /** JSON shape of an app dependency in the API: the row plus its own status. */
-export type DependencyView = Omit<AppDependencyRow, 'workspaceId'> & {status: HealthStatus};
+export type DependencyView = Omit<DependencyRecord, 'workspaceId'> & {status: HealthStatus};
 
 /** An app's dependencies (archived apps too, as history), by name. */
 export async function listDependencies(
@@ -29,11 +35,7 @@ export async function listDependencies(
   if (!isUuid(appId)) {
     return [];
   }
-  const rows = await db
-    .select()
-    .from(appDependencies)
-    .where(and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId)))
-    .orderBy(asc(appDependencies.name));
+  const rows = await loadDependencies(db, and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId)));
   return rows.map(toView);
 }
 
@@ -44,14 +46,17 @@ export async function addDependency(
   input: DependencyInput,
 ): Promise<DependencyView> {
   await assertActiveApp(db, workspaceId, appId);
-  const values = validateDependency(input);
-  return withNameCheck(async () => {
-    const [row] = await db
-      .insert(appDependencies)
-      .values({id: newId(), workspaceId, appId, ...values})
-      .returning();
-    return toView(row);
-  });
+  const {vulnerabilities, ...values} = validateDependency(input);
+  return withNameCheck(() =>
+    db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(appDependencies)
+        .values({id: newId(), workspaceId, appId, ...values})
+        .returning();
+      await replaceManualAdvisories(tx, row, vulnerabilities);
+      return toView({...row, vulnerabilities, advisories: []});
+    }),
+  );
 }
 
 export async function updateDependency(
@@ -63,20 +68,26 @@ export async function updateDependency(
 ): Promise<DependencyView> {
   await assertActiveApp(db, workspaceId, appId);
   const current = await findDependency(db, workspaceId, appId, id);
-  const values = validateDependency({...current, ...patch});
+  const {vulnerabilities, ...values} = validateDependency({...current, ...patch});
   const isRenamed = values.name !== current.name;
   const isSamePackage = !isRenamed && values.currentVersion === current.currentVersion;
   // The stored latest version was the old package's; one the caller sends with the rename is kept.
   const isOldLatest = isRenamed && values.latestVersion === current.latestVersion;
   const monitoring = {...(isSamePackage ? {} : UNCHECKED), ...(isOldLatest ? {latestVersion: null} : {})};
-  return withNameCheck(async () => {
-    const [row] = await db
-      .update(appDependencies)
-      .set({...values, ...monitoring})
-      .where(eq(appDependencies.id, current.id))
-      .returning();
-    return toView(row);
-  });
+  return withNameCheck(() =>
+    db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(appDependencies)
+        .set({...values, ...monitoring})
+        .where(eq(appDependencies.id, current.id))
+        .returning();
+      await replaceManualAdvisories(tx, row, vulnerabilities);
+      if (!isSamePackage) {
+        await clearFoundAdvisories(tx, row);
+      }
+      return toView(await findDependency(tx, workspaceId, appId, row.id));
+    }),
+  );
 }
 
 export async function removeDependency(
@@ -95,18 +106,12 @@ async function findDependency(
   workspaceId: string,
   appId: string,
   id: string,
-): Promise<AppDependencyRow> {
+): Promise<DependencyRecord> {
   const [row] = isUuid(id)
-    ? await db
-        .select()
-        .from(appDependencies)
-        .where(
-          and(
-            eq(appDependencies.workspaceId, workspaceId),
-            eq(appDependencies.appId, appId),
-            eq(appDependencies.id, id),
-          ),
-        )
+    ? await loadDependencies(
+        db,
+        and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId), eq(appDependencies.id, id)),
+      )
     : [];
   if (!row) {
     throw new NotFoundError('Dependency not found');
@@ -143,7 +148,11 @@ function textList(value: unknown): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new ValidationError('vulnerabilities must be a list of advisory ids');
   }
-  return [...new Set(value.map((item: string) => item.trim()).filter(Boolean))];
+  const ids = [...new Set(value.map((item: string) => item.trim()).filter(Boolean))];
+  if (!ids.every(isAdvisoryId)) {
+    throw new ValidationError(`An advisory id is plain text of at most ${ADVISORY_ID_MAX_LENGTH} characters`);
+  }
+  return ids;
 }
 
 /** Dependency names are unique per app (case-insensitive). */
@@ -158,7 +167,7 @@ async function withNameCheck<T>(write: () => Promise<T>): Promise<T> {
   }
 }
 
-function toView(row: AppDependencyRow): DependencyView {
+function toView(row: DependencyRecord): DependencyView {
   return {
     id: row.id,
     appId: row.appId,
@@ -169,7 +178,7 @@ function toView(row: AppDependencyRow): DependencyView {
     recommendedAction: row.recommendedAction,
     source: row.source,
     isDev: row.isDev,
-    advisories: normaliseAdvisories(row.advisories),
+    advisories: row.advisories,
     checkedAt: row.checkedAt,
     checkError: row.checkError,
     status: dependencyStatus(row),
