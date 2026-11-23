@@ -101,7 +101,7 @@ describe('dependency monitoring', () => {
     const {fetch, requests} = fakeRegistry(REGISTRY);
 
     await refreshDependencyHealth(t.db, t.workspaceId, appId, {sources: createPackageSources(fetch)});
-    expect((await byName())['quill-forms']).toMatchObject({latestVersion: '5.0.2', advisories: [], checkError: DEPENDENCY_CHECK_ERROR.invalidVersion});
+    expect((await byName())['quill-forms']).toMatchObject({latestVersion: '5.0.2', advisories: [], checkError: DEPENDENCY_CHECK_ERROR.invalidVersion, status: HEALTH_STATUS.attention});
     expect(requests.map((r) => r.url)).toEqual(['https://registry.npmjs.org/quill-forms/latest']);
   });
 

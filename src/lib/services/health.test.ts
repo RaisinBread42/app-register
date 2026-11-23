@@ -12,6 +12,7 @@ function dependency(name: string, overrides: Partial<DependencyFacts> = {}): Dep
     advisories: [],
     isDev: false,
     checkedAt: new Date('2026-11-20T06:00:00Z'),
+    checkError: null,
     ...overrides,
   };
 }

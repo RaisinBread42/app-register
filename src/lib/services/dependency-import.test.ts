@@ -88,6 +88,7 @@ describe('dependency import', () => {
       ['{}', /not a package\.json/],
       ['["quill-forms"]', /not a package\.json/],
       ['{"compilerOptions": {"strict": true}}', /not a package\.json/],
+      ['{"name": "harbor-portal", "version": "1.0.0"}', /not a package\.json/],
       ['{"name": "x", "dependencies": ["quill-forms"]}', /must map package names/],
       ['{"name": "x", "dependencies": {"quill-forms": 2}}', /must map package names/],
       [tooLarge, /larger than 5 MB/],
@@ -102,8 +103,8 @@ describe('dependency import', () => {
     await expect(importDependencies(t.db, t.workspaceId, appId, npm6)).rejects.toThrow(/npm 7 or newer/);
   });
 
-  it('a package.json with no dependencies at all is a valid import that removes what earlier imports added', async () => {
+  it('a package.json with an empty dependency list is a valid import that removes what earlier imports added', async () => {
     await importDependencies(t.db, t.workspaceId, appId, LOCKFILE);
-    expect(await importDependencies(t.db, t.workspaceId, appId, '{"name": "harbor-portal"}')).toEqual({added: 0, updated: 0, unchanged: 0, removed: 3});
+    expect(await importDependencies(t.db, t.workspaceId, appId, '{"name": "harbor-portal", "dependencies": {}}')).toEqual({added: 0, updated: 0, unchanged: 0, removed: 3});
   });
 });

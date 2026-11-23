@@ -1,12 +1,13 @@
 import {and, asc, eq} from 'drizzle-orm';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import type {HealthStatus} from '@/lib/constants';
+import {DEPENDENCY_NAME_MAX_LENGTH, DEPENDENCY_VERSION_MAX_LENGTH, type HealthStatus} from '@/lib/constants';
 import {appDependencies, type AppDependencyRow} from '@/lib/db/schema';
+import {normaliseAdvisories} from './advisories';
 import {assertActiveApp} from './app-scope';
-import {dependencyStatus} from './dependency-health';
+import {dependencyStatus, UNCHECKED} from './dependency-health';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
-import {optionalText, requiredText} from './validation';
+import {atMost, optionalText, requiredText} from './validation';
 
 export type DependencyInput = {
   name: string;
@@ -63,9 +64,11 @@ export async function updateDependency(
   await assertActiveApp(db, workspaceId, appId);
   const current = await findDependency(db, workspaceId, appId, id);
   const values = validateDependency({...current, ...patch});
-  // What monitoring found was about the old package or version.
-  const isSamePackage = values.name === current.name && values.currentVersion === current.currentVersion;
-  const monitoring = isSamePackage ? {} : {advisories: [], checkedAt: null, checkError: null};
+  const isRenamed = values.name !== current.name;
+  const isSamePackage = !isRenamed && values.currentVersion === current.currentVersion;
+  // The stored latest version was the old package's; one the caller sends with the rename is kept.
+  const isOldLatest = isRenamed && values.latestVersion === current.latestVersion;
+  const monitoring = {...(isSamePackage ? {} : UNCHECKED), ...(isOldLatest ? {latestVersion: null} : {})};
   return withNameCheck(async () => {
     const [row] = await db
       .update(appDependencies)
@@ -111,11 +114,22 @@ async function findDependency(
   return row;
 }
 
+/** A dependency's name: required, and no longer than npm allows (a longer one would not fit the unique index either). */
+export function dependencyName(value: unknown): string {
+  return atMost(requiredText(value, 'dependency name'), DEPENDENCY_NAME_MAX_LENGTH, 'dependency name');
+}
+
+/** A dependency's version, range or tag: required, with a length cap. `label` names it in the 400. */
+export function dependencyVersion(value: unknown, label: string): string {
+  return atMost(requiredText(value, label), DEPENDENCY_VERSION_MAX_LENGTH, label);
+}
+
 function validateDependency(input: DependencyInput) {
+  const latestVersion = optionalText(input.latestVersion, 'latest version');
   return {
-    name: requiredText(input.name, 'dependency name'),
-    currentVersion: requiredText(input.currentVersion, 'current version'),
-    latestVersion: optionalText(input.latestVersion, 'latest version'),
+    name: dependencyName(input.name),
+    currentVersion: dependencyVersion(input.currentVersion, 'current version'),
+    latestVersion: latestVersion && atMost(latestVersion, DEPENDENCY_VERSION_MAX_LENGTH, 'latest version'),
     vulnerabilities: textList(input.vulnerabilities),
     recommendedAction: optionalText(input.recommendedAction, 'recommended action'),
   };
@@ -155,7 +169,7 @@ function toView(row: AppDependencyRow): DependencyView {
     recommendedAction: row.recommendedAction,
     source: row.source,
     isDev: row.isDev,
-    advisories: row.advisories,
+    advisories: normaliseAdvisories(row.advisories),
     checkedAt: row.checkedAt,
     checkError: row.checkError,
     status: dependencyStatus(row),
