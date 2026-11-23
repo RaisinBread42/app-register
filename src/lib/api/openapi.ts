@@ -677,6 +677,18 @@ export const openApiSpec = {
         },
       },
     },
+    '/api/notice-alerts/send': {
+      post: {
+        summary: 'Send every due notice-deadline alert email (the daily scheduled job calls this)',
+        description:
+          'Safe to repeat, so it needs no Idempotency-Key. Each alert is emailed at most once per app per offset to the owner and backup.',
+        responses: {
+          200: json(strict({send: strict({sent: {type: 'integer', minimum: 0}})}), 'Sent'),
+          400: errors[400],
+          401: errors[401],
+        },
+      },
+    },
     '/api/notice-alerts/{id}/acknowledge': {
       post: {
         summary: 'Mark an alert seen (first time wins; never changes the app)',

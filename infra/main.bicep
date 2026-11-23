@@ -137,6 +137,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(image)) {
               {name: 'NODE_ENV', value: 'production'}
               // The UI's server code calls this same process's /api over loopback.
               {name: 'APP_URL', value: 'http://localhost:3000'}
+              // UAT keeps the email sink until a real provider is wired (names match ENV in constants.ts).
+              {name: 'EMAIL_PROVIDER', value: 'sink'}
+              {name: 'EMAIL_FROM', value: 'alerts@example.com'}
             ],
             empty(uiApiKey) ? [] : [{name: 'APP_REGISTER_API_KEY', secretRef: 'ui-api-key'}]
           )
@@ -150,10 +153,13 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(image)) {
   dependsOn: [identityCanPull, database, allowAzure]
 }
 
-// Daily health refresh: one small job that asks the app to re-check every app's
-// dependencies and hosting. It reuses the app's image (already in the registry) and
-// the UI's API key; nothing new to build or store.
-var refreshScript = 'fetch(process.env.REFRESH_URL,{method:"POST",headers:{authorization:"Bearer "+process.env.APP_REGISTER_API_KEY}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e.name);process.exit(1)})'
+// Daily jobs: small containers that POST to the app with the UI's API key.
+// They reuse the app's image (already in the registry); nothing new to build or store.
+var postScript = 'fetch(process.env.JOB_URL,{method:"POST",headers:{authorization:"Bearer "+process.env.APP_REGISTER_API_KEY}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e.name);process.exit(1)})'
+var jobCommand = ['node', '-e', postScript]
+var jobSecretName = 'ui-api-key'
+var jobUrlEnv = 'JOB_URL'
+var appFqdn = empty(image) ? '' : app!.properties.configuration.ingress.fqdn
 
 resource refreshJob 'Microsoft.App/jobs@2024-03-01' = if (!empty(image) && !empty(uiApiKey)) {
   name: '${name}-refresh'
@@ -170,18 +176,54 @@ resource refreshJob 'Microsoft.App/jobs@2024-03-01' = if (!empty(image) && !empt
       replicaTimeout: 600
       replicaRetryLimit: 1
       registries: [{server: registry.properties.loginServer, identity: identity.id}]
-      secrets: [{name: 'ui-api-key', value: uiApiKey}]
+      secrets: [{name: jobSecretName, value: uiApiKey}]
     }
     template: {
       containers: [
         {
           name: 'refresh'
           image: image
-          command: ['node', '-e', refreshScript]
+          command: jobCommand
           resources: {cpu: json('0.25'), memory: '0.5Gi'}
           env: [
-            {name: 'REFRESH_URL', value: 'https://${app!.properties.configuration.ingress.fqdn}/api/monitoring/refresh'}
-            {name: 'APP_REGISTER_API_KEY', secretRef: 'ui-api-key'}
+            {name: jobUrlEnv, value: 'https://${appFqdn}/api/monitoring/refresh'}
+            {name: 'APP_REGISTER_API_KEY', secretRef: jobSecretName}
+          ]
+        }
+      ]
+    }
+  }
+  dependsOn: [identityCanPull]
+}
+
+// Notice-deadline emails at 90 / 60 / 30 days: same shape as the health refresh job.
+resource noticeAlertsJob 'Microsoft.App/jobs@2024-03-01' = if (!empty(image) && !empty(uiApiKey)) {
+  name: '${name}-notices'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {'${identity.id}': {}}
+  }
+  properties: {
+    environmentId: environment.id
+    configuration: {
+      triggerType: 'Schedule'
+      scheduleTriggerConfig: {cronExpression: '27 5 * * *', parallelism: 1, replicaCompletionCount: 1} // 05:27 UTC daily
+      replicaTimeout: 300
+      replicaRetryLimit: 1
+      registries: [{server: registry.properties.loginServer, identity: identity.id}]
+      secrets: [{name: jobSecretName, value: uiApiKey}]
+    }
+    template: {
+      containers: [
+        {
+          name: 'notices'
+          image: image
+          command: jobCommand
+          resources: {cpu: json('0.25'), memory: '0.5Gi'}
+          env: [
+            {name: jobUrlEnv, value: 'https://${appFqdn}/api/notice-alerts/send'}
+            {name: 'APP_REGISTER_API_KEY', secretRef: jobSecretName}
           ]
         }
       ]
