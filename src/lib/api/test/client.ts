@@ -1,5 +1,7 @@
 import Ajv2020 from 'ajv/dist/2020';
 import {expect} from 'vitest';
+import * as apiKeyRevoke from '@/app/api/api-keys/[id]/revoke/route';
+import * as apiKeys from '@/app/api/api-keys/route';
 import * as appArchive from '@/app/api/apps/[id]/archive/route';
 import * as appDependency from '@/app/api/apps/[id]/dependencies/[dependencyId]/route';
 import * as appDependencyImport from '@/app/api/apps/[id]/dependencies/import/route';
@@ -19,6 +21,7 @@ import * as alerts from '@/app/api/notice-alerts/route';
 import * as openapi from '@/app/api/openapi.json/route';
 import * as personById from '@/app/api/people/[id]/route';
 import * as people from '@/app/api/people/route';
+import * as monitoringSources from '@/app/api/settings/monitoring-sources/route';
 import {API_HEADER, BEARER_PREFIX, IDEMPOTENT_METHODS} from '@/lib/constants';
 import {openApiSpec} from '../openapi';
 
@@ -47,6 +50,9 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/people/{id}': personById,
   '/api/notice-alerts': alerts,
   '/api/notice-alerts/{id}/acknowledge': acknowledge,
+  '/api/api-keys': apiKeys,
+  '/api/api-keys/{id}/revoke': apiKeyRevoke,
+  '/api/settings/monitoring-sources': monitoringSources,
   '/api/openapi.json': openapi,
 };
 

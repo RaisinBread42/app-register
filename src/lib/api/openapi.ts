@@ -1,6 +1,9 @@
 import {
   ADVISORY_ID_MAX_LENGTH,
   ADVISORY_SEVERITIES,
+  API_KEY_NAME_MAX_LENGTH,
+  API_KEY_SCOPES,
+  API_KEY_STATUSES,
   BYTES_PER_MB,
   APP_KINDS,
   APP_SORTS,
@@ -12,6 +15,7 @@ import {
   HOSTING_POINTS,
   HOSTING_VERSION_MAX_LENGTH,
   MONITORING_FOLLOW_UP_BUDGET_MS,
+  MONITORING_SOURCE_STATUSES,
   DEPENDENCY_IMPORT_MAX_BYTES,
   DEPENDENCY_NAME_MAX_LENGTH,
   DEPENDENCY_VERSION_MAX_LENGTH,
@@ -68,7 +72,8 @@ function json(schema: Schema, description: string) {
 
 const errors = {
   400: json(ref('Error'), 'Invalid input, missing Idempotency-Key, or a duplicate name/email'),
-  401: json(ref('Error'), 'Missing, unknown or revoked API key'),
+  401: json(ref('Error'), 'Missing, unknown, revoked or expired API key'),
+  403: json(ref('Error'), 'API key is valid but not scoped for this action'),
   404: json(ref('Error'), 'Unknown id, malformed id, or an id from another workspace'),
   422: json(ref('Error'), 'Idempotency-Key already used for a different request'),
   500: json(ref('Error'), 'Unexpected error (details are logged by error code only)'),
@@ -407,6 +412,35 @@ const schemas = {
   }),
   HostingInput: input(hostingFields, ['provider', 'service']),
   HostingPatch: input(hostingFields),
+  ApiKey: strict({
+    id,
+    name: text,
+    keyPrefix: text,
+    scopeLabel: text,
+    scopes: {type: 'array', items: {type: 'string', enum: [...API_KEY_SCOPES]}},
+    createdAt: timestamp,
+    expiresAt: nullable('string', {format: 'date-time'}),
+    lastUsedAt: nullable('string', {format: 'date-time'}),
+    status: {type: 'string', enum: [...API_KEY_STATUSES]},
+    revokedAt: nullable('string', {format: 'date-time'}),
+    /** Present only on create; null on an Idempotency-Key replay. Never stored. */
+    key: nullable('string'),
+  }, ['key', 'revokedAt']),
+  ApiKeyInput: input(
+    {
+      name: {type: 'string', maxLength: API_KEY_NAME_MAX_LENGTH},
+      expiresOn: nullable('string', {format: 'date', description: 'YYYY-MM-DD; omit or null for no expiry'}),
+    },
+    ['name'],
+  ),
+  MonitoringSource: strict({
+    id: text,
+    name: text,
+    monitors: text,
+    status: {type: 'string', enum: [...MONITORING_SOURCE_STATUSES]},
+    lastRefreshedAt: nullable('string', {format: 'date-time'}),
+    url: text,
+  }),
 };
 
 const appId = pathId('id', 'App id');
@@ -425,7 +459,10 @@ export const openApiSpec = {
     version: '1.0.0',
     description:
       'Register of bought SaaS and in-house apps. Every request except this document needs ' +
-      '`Authorization: Bearer <API key>`; the key decides the workspace. POST and PATCH need an ' +
+      '`Authorization: Bearer <API key>`; the key decides the workspace. Keys created in Settings ' +
+      'are scoped to the applications register (apps, dependencies, hosting); keys from ' +
+      '`npm run api-key:create` (including APP_REGISTER_API_KEY) have full access. Expired and ' +
+      'revoked keys get 401; a scoped key on an out-of-scope route gets 403. POST and PATCH need an ' +
       '`Idempotency-Key` header (except the refresh endpoints, which are safe to repeat). Dates are YYYY-MM-DD; timestamps are ISO 8601 UTC.',
   },
   servers: [{url: '/'}],
@@ -435,7 +472,8 @@ export const openApiSpec = {
       bearerAuth: {
         type: 'http',
         scheme: 'bearer',
-        description: 'Create one with `npm run api-key:create -- <name>`',
+        description:
+          'Create a full-access key with `npm run api-key:create -- <name>`, or a scoped applications-register key from Settings / POST /api/api-keys. Optional expiry; only the SHA-256 hash is stored.',
       },
     },
     schemas,
@@ -458,6 +496,7 @@ export const openApiSpec = {
           200: json(strict({apps: {type: 'array', items: ref('App')}}), 'Apps'),
           400: errors[400],
           401: errors[401],
+          403: errors[403],
         },
       },
       post: {
@@ -474,6 +513,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({app: ref('AppDetail')}), 'App'),
           401: errors[401],
+          403: errors[403],
           404: errors[404],
         },
       },
@@ -498,6 +538,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({dependencies: {type: 'array', items: ref('Dependency')}}), 'Dependencies'),
           401: errors[401],
+          403: errors[403],
           404: errors[404],
         },
       },
@@ -536,6 +577,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({refresh: ref('DependencyRefresh')}), 'Checked'),
           401: errors[401],
+          403: errors[403],
           404: errors[404],
         },
       },
@@ -550,7 +592,7 @@ export const openApiSpec = {
       delete: {
         summary: 'Remove a dependency (a second delete answers 404)',
         parameters: [appId, pathId('dependencyId', 'Dependency id')],
-        responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
+        responses: {204: {description: 'Removed'}, 401: errors[401], 403: errors[403], 404: errors[404]},
       },
     },
     '/api/apps/{id}/hosting': {
@@ -560,6 +602,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Hosting'),
           401: errors[401],
+          403: errors[403],
           404: errors[404],
         },
       },
@@ -581,6 +624,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Checked'),
           401: errors[401],
+          403: errors[403],
           404: errors[404],
         },
       },
@@ -596,13 +640,13 @@ export const openApiSpec = {
       delete: {
         summary: 'Remove a hosting entry (a second delete answers 404)',
         parameters: [appId, pathId('hostingId', 'Hosting entry id')],
-        responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
+        responses: {204: {description: 'Removed'}, 401: errors[401], 403: errors[403], 404: errors[404]},
       },
     },
     '/api/hosting/catalog': {
       get: {
         summary: 'Providers, services and runtimes the hosting check knows (anything else is free text, unmonitored)',
-        responses: {200: json(strict({catalog: ref('HostingCatalog')}), 'Catalog'), 401: errors[401]},
+        responses: {200: json(strict({catalog: ref('HostingCatalog')}), 'Catalog'), 401: errors[401], 403: errors[403]},
       },
     },
     '/api/monitoring/dependencies/refresh': {
@@ -612,6 +656,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({refresh: ref('WorkspaceDependencyRefresh')}), 'Checked'),
           401: errors[401],
+          403: errors[403],
         },
       },
     },
@@ -622,6 +667,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({refresh: ref('WorkspaceHostingRefresh')}), 'Checked'),
           401: errors[401],
+          403: errors[403],
         },
       },
     },
@@ -637,6 +683,7 @@ export const openApiSpec = {
             'Checked',
           ),
           401: errors[401],
+          403: errors[403],
         },
       },
     },
@@ -646,6 +693,7 @@ export const openApiSpec = {
         responses: {
           200: json(strict({people: {type: 'array', items: ref('Person')}}), 'People'),
           401: errors[401],
+          403: errors[403],
         },
       },
       post: {
@@ -674,6 +722,7 @@ export const openApiSpec = {
           200: json(strict({alerts: {type: 'array', items: ref('NoticeAlert')}}), 'Alerts'),
           400: errors[400],
           401: errors[401],
+          403: errors[403],
         },
       },
     },
@@ -682,6 +731,39 @@ export const openApiSpec = {
         summary: 'Mark an alert seen (first time wins; never changes the app)',
         parameters: [pathId('id', 'Alert id'), idempotencyKey],
         responses: {200: json(strict({alert: ref('NoticeAlert')}), 'Acknowledged'), ...errors},
+      },
+    },
+    '/api/api-keys': {
+      get: {
+        summary: 'List API keys for the workspace (name, prefix, scope, dates, status; never the secret)',
+        responses: {
+          200: json(strict({apiKeys: {type: 'array', items: ref('ApiKey')}}), 'Keys'),
+          401: errors[401],
+          403: errors[403],
+        },
+      },
+      post: {
+        summary: 'Create a Settings-scoped API key (applications register); the full key is returned once',
+        parameters: [idempotencyKey],
+        requestBody: body('ApiKeyInput'),
+        responses: {201: json(strict({apiKey: ref('ApiKey')}), 'Created'), ...errors},
+      },
+    },
+    '/api/api-keys/{id}/revoke': {
+      post: {
+        summary: 'Revoke an active API key; later requests with it get 401',
+        parameters: [pathId('id', 'API key id'), idempotencyKey],
+        responses: {200: json(strict({apiKey: ref('ApiKey')}), 'Revoked'), ...errors},
+      },
+    },
+    '/api/settings/monitoring-sources': {
+      get: {
+        summary: 'Monitoring data sources the app uses (npm, OSV, endoflife.date, provider status feeds)',
+        responses: {
+          200: json(strict({sources: {type: 'array', items: ref('MonitoringSource')}}), 'Sources'),
+          401: errors[401],
+          403: errors[403],
+        },
       },
     },
     '/api/openapi.json': {

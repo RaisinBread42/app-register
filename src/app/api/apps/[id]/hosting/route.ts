@@ -1,4 +1,4 @@
-import {RESOURCE_KIND} from '@/lib/constants';
+import {API_KEY_SCOPE, RESOURCE_KIND} from '@/lib/constants';
 import {created, handle, jsonObject, ok} from '@/lib/api/http';
 import {getApp} from '@/lib/services/apps';
 import {addHosting, type HostingInput, type HostingView} from '@/lib/services/hosting';
@@ -9,8 +9,10 @@ type Context = {params: Promise<{id: string}>};
 /** GET /api/apps/:id/hosting → `{ hosting: Hosting[] }` */
 export async function GET(request: Request, {params}: Context): Promise<Response> {
   const {id} = await params;
-  return handle(request, async ({db, workspaceId}) =>
-    ok({hosting: (await getApp(db, workspaceId, id)).hosting}),
+  return handle(
+    request,
+    async ({db, workspaceId}) => ok({hosting: (await getApp(db, workspaceId, id)).hosting}),
+    {requiredScope: API_KEY_SCOPE.hostingRead},
   );
 }
 
@@ -24,6 +26,7 @@ export async function POST(request: Request, {params}: Context): Promise<Respons
       return created({hosting}, {kind: RESOURCE_KIND.hosting, id: hosting.id});
     },
     {
+      requiredScope: API_KEY_SCOPE.hostingWrite,
       afterCommit: ({db, workspaceId}, result) =>
         checkHostingAfterWrite(db, workspaceId, id, [(result.body as {hosting: HostingView}).hosting.id]),
     },
