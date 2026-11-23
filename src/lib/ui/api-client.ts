@@ -1,5 +1,6 @@
 import {
   API_HEADER,
+  API_HOSTING_CATALOG,
   API_MONITORING_DEPENDENCIES_REFRESH,
   API_QUERY,
   API_ROUTES,
@@ -14,8 +15,11 @@ import {
   type AppSort,
   type DependencyCheckError,
   type DependencySource,
+  type EndOfSupportSource,
   type HealthDimension,
   type HealthStatus,
+  type IncidentImpact,
+  type IncidentScope,
   type NoticeAlertStatus,
   type PersonStatus,
 } from '@/lib/constants';
@@ -110,10 +114,39 @@ type HostingFields = {
   service: string;
   region: string | null;
   version: string | null;
+  runtime: string | null;
+  runtimeVersion: string | null;
   endOfSupportOn: string | null;
 };
 
-export type Hosting = HostingFields & {id: string; appId: string; createdAt: string; updatedAt: string};
+export type HostingIncident = {
+  title: string;
+  impact: IncidentImpact;
+  scope: IncidentScope;
+  /** A page on the provider's own status site, or null when the feed gave none. */
+  url: string | null;
+  startedAt: string | null;
+};
+
+/** What the hosting check stores on a row. */
+type HostingCheckFields = {
+  endOfSupportSource: EndOfSupportSource | null;
+  /** The version matched several releases; the date is the earliest among them. */
+  isVersionInexact: boolean;
+  incidents: HostingIncident[];
+  healthCheckedAt: string | null;
+  healthError: string | null;
+  isMonitored: boolean;
+  status: HealthStatus;
+};
+
+export type Hosting = HostingFields & HostingCheckFields & {id: string; appId: string; createdAt: string; updatedAt: string};
+
+export type HostingCatalogService = {name: string; hasVersion: boolean; hasRuntime: boolean; isEndOfSupportTracked: boolean};
+export type HostingCatalog = {
+  providers: {name: string; isStatusMonitored: boolean; services: HostingCatalogService[]}[];
+  runtimes: {name: string}[];
+};
 
 export type AppDetail = App & {alerts: NoticeAlert[]; dependencies: Dependency[]; hosting: Hosting[]};
 
@@ -131,7 +164,8 @@ export type Person = {
 
 export type AppInput = Omit<AppFields, 'kind'> & {kind: string; ownerId: string; backupOwnerId: string};
 export type DependencyInput = DependencyFields;
-export type HostingInput = HostingFields;
+/** `endOfSupportOn` left out keeps the date as it is; null hands a date set by hand back to the hosting check. */
+export type HostingInput = Omit<HostingFields, 'endOfSupportOn'> & {endOfSupportOn?: string | null};
 export type PersonInput = {name: string; email: string};
 export type PersonPatch = Partial<PersonInput> & {status?: PersonStatus; leftOn?: string | null};
 
@@ -255,6 +289,14 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     },
     removeHosting(appId: string, id: string): Promise<void> {
       return remove(`${appPath(appId)}/${API_SUB_ROUTE.hosting}/${segment(id)}`);
+    },
+    /** Safe to repeat, so it sends no Idempotency-Key. */
+    async refreshHosting(appId: string): Promise<Hosting[]> {
+      const path = `${appPath(appId)}/${API_SUB_ROUTE.hosting}/${API_SUB_ROUTE.refresh}`;
+      return (await request<{hosting: Hosting[]}>(HTTP_METHOD.post, path)).hosting;
+    },
+    async getHostingCatalog(): Promise<HostingCatalog> {
+      return (await get<{catalog: HostingCatalog}>(API_HOSTING_CATALOG)).catalog;
     },
     async listPeople(): Promise<Person[]> {
       return (await get<{people: Person[]}>(API_ROUTES.people)).people;

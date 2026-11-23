@@ -3,15 +3,15 @@ import {alias} from 'drizzle-orm/pg-core';
 import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appDependencies, apps, people} from '@/lib/db/schema';
+import {appDependencies, appHosting, apps, people} from '@/lib/db/schema';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
 import {loadDependencies, type DependencyRecord} from './dependency-advisories';
-import type {DependencyFacts} from './dependency-health';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
-import {appHealth, type AppHealth} from './health';
+import {appHealth, type AppHealth, type HealthFacts} from './health';
 import {listHosting, type HostingView} from './hosting';
+import {loadHosting, type HostingRecord} from './hosting-incidents';
 import {
   listAlertsForApp,
   removeScheduledAlerts,
@@ -129,8 +129,12 @@ export async function listActiveApps(
   const rows = await selectAppViews(db)
     .where(and(...filters))
     .orderBy(...order);
-  const dependencies = await dependenciesByApp(db, workspaceId, rows.map((row) => row.app.id));
-  return rows.map((row) => toAppView(row, dependencies.get(row.app.id) ?? []));
+  const appIds = rows.map((row) => row.app.id);
+  const dependencies = await dependenciesByApp(db, workspaceId, appIds);
+  const hosting = await hostingByApp(db, workspaceId, appIds);
+  return rows.map((row) =>
+    toAppView(row, {dependencies: dependencies.get(row.app.id) ?? [], hosting: hosting.get(row.app.id) ?? [], today}),
+  );
 }
 
 /** The dependencies of several apps in one query, for their health scores. */
@@ -149,11 +153,28 @@ async function dependenciesByApp(
   return byApp;
 }
 
+/** The hosting rows of several apps in one query, for their health scores. */
+async function hostingByApp(
+  db: AppDatabase,
+  workspaceId: string,
+  appIds: string[],
+): Promise<Map<string, HostingRecord[]>> {
+  const rows = appIds.length
+    ? await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, appIds)))
+    : [];
+  const byApp = new Map<string, HostingRecord[]>();
+  for (const row of rows) {
+    byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row]);
+  }
+  return byApp;
+}
+
 /** One app (archived ones too, as history) with its alerts, dependencies and hosting. 404 outside the workspace. */
 export async function getApp(
   db: AppDatabase,
   workspaceId: string,
   id: string,
+  today = todayIso(),
 ): Promise<AppDetailView> {
   const [row] = isUuid(id)
     ? await selectAppViews(db).where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, id)))
@@ -162,11 +183,12 @@ export async function getApp(
     throw new NotFoundError('App not found');
   }
   const dependencies = await listDependencies(db, workspaceId, id);
+  const hosting = await listHosting(db, workspaceId, id);
   return {
-    ...toAppView(row, dependencies),
+    ...toAppView(row, {dependencies, hosting, today}),
     alerts: await listAlertsForApp(db, workspaceId, id),
     dependencies,
-    hosting: await listHosting(db, workspaceId, id),
+    hosting,
   };
 }
 
@@ -310,7 +332,7 @@ function toAppView(
     owner: {id: string; name: string};
     backupOwner: {id: string; name: string};
   },
-  dependencies: DependencyFacts[],
+  facts: HealthFacts,
 ): AppView {
   const {app} = row;
   return {
@@ -329,7 +351,7 @@ function toAppView(
     runtimeLocation: app.runtimeLocation,
     dataAndKeys: app.dataAndKeys,
     whatBreaksIfStopped: app.whatBreaksIfStopped,
-    health: appHealth({dependencies}),
+    health: appHealth(facts),
     archivedAt: app.archivedAt,
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,

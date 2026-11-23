@@ -36,6 +36,13 @@
       "when": 1795400610403,
       "tag": "0004_relational_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795401980030,
+      "tag": "0005_hosting_health",
+      "breakpoints": true
     }
   ]
 }

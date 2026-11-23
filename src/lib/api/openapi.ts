@@ -5,7 +5,13 @@ import {
   APP_KINDS,
   APP_SORTS,
   DEPENDENCY_CHECK_ERRORS,
-  DEPENDENCY_FOLLOW_UP_BUDGET_MS,
+  END_OF_SUPPORT_SOON_DAYS,
+  END_OF_SUPPORT_SOURCES,
+  HOSTING_MAX_INCIDENTS,
+  HOSTING_NAME_MAX_LENGTH,
+  HOSTING_POINTS,
+  HOSTING_VERSION_MAX_LENGTH,
+  MONITORING_FOLLOW_UP_BUDGET_MS,
   DEPENDENCY_IMPORT_MAX_BYTES,
   DEPENDENCY_NAME_MAX_LENGTH,
   DEPENDENCY_VERSION_MAX_LENGTH,
@@ -19,6 +25,8 @@ import {
   RANGE_VERSION_POINTS,
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_TTL_HOURS,
+  INCIDENT_IMPACTS,
+  INCIDENT_SCOPES,
   NOTICE_ALERT_STATUSES,
   NOTICE_WINDOW_MAX_DAYS,
   PERSON_STATUSES,
@@ -183,11 +191,64 @@ const refreshCounts = {
 };
 
 const hostingFields = {
-  provider: {...text, examples: ['Azure', 'AWS', 'Vercel']},
-  service: {...text, examples: ['SQL Server', 'App Service']},
-  region: nullable('string'),
-  version: nullable('string'),
-  endOfSupportOn: nullable('string', {format: 'date'}),
+  provider: {...text, maxLength: HOSTING_NAME_MAX_LENGTH, examples: ['Azure', 'AWS', 'Vercel']},
+  service: {...text, maxLength: HOSTING_NAME_MAX_LENGTH, examples: ['SQL Server', 'App Service']},
+  region: nullable('string', {maxLength: HOSTING_NAME_MAX_LENGTH}),
+  version: {
+    ...nullable('string', {maxLength: HOSTING_VERSION_MAX_LENGTH}),
+    description: 'Version of the service itself, e.g. 16 for a database',
+  },
+  runtime: {...nullable('string', {maxLength: HOSTING_NAME_MAX_LENGTH}), examples: ['Node.js', 'Python', '.NET']},
+  runtimeVersion: {...nullable('string', {maxLength: HOSTING_VERSION_MAX_LENGTH}), examples: ['22']},
+  endOfSupportOn: {
+    ...nullable('string', {format: 'date'}),
+    description:
+      'Send a date to set it by hand: any date a client sends is kept as `manual` and never overwritten, ' +
+      'also when it equals the date the check had found. On PATCH, leave the field out to keep the date as it is ' +
+      '(looked up or set by hand). Send null to hand a date set by hand back to the hosting check, which looks it up on ' +
+      'endoflife.date from the service version or the runtime version; the row is then unchecked (status na) until ' +
+      'that check completes. null does nothing to a looked-up date.',
+  },
+};
+
+/** What the hosting check stores on a row; read-only. */
+const hostingCheckFields = {
+  endOfSupportSource: {type: ['string', 'null'], enum: [...END_OF_SUPPORT_SOURCES, null]},
+  isVersionInexact: {
+    type: 'boolean',
+    description:
+      'true when the version or runtime version matched more than one release on endoflife.date (e.g. MySQL "8" is 8.0 and 8.4), ' +
+      'so endOfSupportOn is the earliest date among them. Always false for a date set by hand.',
+  },
+  incidents: {
+    type: 'array',
+    items: ref('HostingIncident'),
+    maxItems: HOSTING_MAX_INCIDENTS,
+    description:
+      'Open provider incidents and announced maintenance that reach this row, as the last check found them: ' +
+      'outages on the row’s own service first. Stored as rows of hosting_incidents.',
+  },
+  healthCheckedAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'When the hosting check last ran for this row as it is now. null until then; ' +
+      'changing the provider, service, region, version or runtime sets it back to null.',
+  },
+  healthError: {
+    ...nullable('string'),
+    description: 'Sources that could not be read on the last check; what earlier checks found from them is kept',
+  },
+  isMonitored: {
+    type: 'boolean',
+    description: 'false when the check has nothing to look at: no end-of-support date and no watched status feed for the provider',
+  },
+  status: {
+    ...healthStatus,
+    description:
+      'critical when past end of support or in an outage (a major incident the feed ties to this service or region); ' +
+      'attention for any other finding; ok only when the row is monitored and its last check read every source; ' +
+      'otherwise na (not monitored, not checked yet, or the last check failed: see healthError).',
+  },
 };
 
 const schemas = {
@@ -253,14 +314,19 @@ const schemas = {
     points: {type: 'integer', minimum: 0, description: 'Points taken off the score'},
   }),
   DimensionHealth: strict({
-    status: {...healthStatus, description: 'na: the app records nothing for this dimension, or none of it has been checked yet'},
+    status: {
+      ...healthStatus,
+      description: 'From the points this dimension lost. na: the app records nothing for it, or none of it is monitored and checked',
+    },
     deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
   }),
   Health: {
     ...strict({
       score: {
         ...nullable('integer', {minimum: 0, maximum: HEALTH_MAX_SCORE}),
-        description: 'null when no monitored dimension has anything checked: no dependencies, or none of them checked yet',
+        description:
+          'null when no monitored dimension has anything checked: no dependencies or none of them checked yet, ' +
+          'and no monitored hosting or none of it checked yet',
       },
       status: healthStatus,
       dimensions: strict(
@@ -275,7 +341,11 @@ const schemas = {
     description:
       `Starts at ${HEALTH_MAX_SCORE} and loses the points of every deduction (floor 0). ` +
       `Below ${HEALTH_CRITICAL_BELOW} is critical, below ${HEALTH_ATTENTION_BELOW} is attention, otherwise ok. ` +
-      `Only \`${HEALTH_DIMENSION.dependencies}\` is monitored so far.`,
+      `\`${HEALTH_DIMENSION.dependencies}\` and \`${HEALTH_DIMENSION.hosting}\` are monitored; ` +
+      `\`${HEALTH_DIMENSION.licence}\` and \`${HEALTH_DIMENSION.pricing}\` are not yet (null). ` +
+      `Hosting loses ${HOSTING_POINTS.pastEndOfSupport} per row past its end-of-support date, ` +
+      `${HOSTING_POINTS.endOfSupportSoon} per row within ${END_OF_SUPPORT_SOON_DAYS} days of it, ` +
+      `${HOSTING_POINTS.outage} per outage and ${HOSTING_POINTS.notice} per other provider notice (each incident once).`,
   },
   DependencyImport: strict({
     added: count,
@@ -294,12 +364,58 @@ const schemas = {
   },
   DependencyInput: input(dependencyFields, ['name', 'currentVersion']),
   DependencyPatch: input(dependencyFields),
-  Hosting: strict({id, appId: id, ...hostingFields, createdAt: timestamp, updatedAt: timestamp}),
+  Hosting: strict({id, appId: id, ...hostingFields, ...hostingCheckFields, createdAt: timestamp, updatedAt: timestamp}),
+  HostingIncident: strict({
+    title: text,
+    impact: {type: 'string', enum: [...INCIDENT_IMPACTS]},
+    scope: {
+      type: 'string',
+      enum: [...INCIDENT_SCOPES],
+      description:
+        'service: the feed names this service or region. provider: a notice, not an outage on this row: the feed only names ' +
+        'the provider, names other regions in free text, or names regions this row’s region cannot be compared with.',
+    },
+    url: {
+      ...nullable('string', {format: 'uri'}),
+      description: "An https link on the provider's own status host; null when the feed gave no such link",
+    },
+    startedAt: nullable('string', {format: 'date-time'}),
+  }),
+  WorkspaceHostingRefresh: strict({
+    apps: {...count, description: 'Active apps a hosting answer was stored for'},
+    hosting: {...count, description: 'Hosting rows an answer was stored on'},
+    failedSources: {type: 'array', items: text, description: 'Sources that could not be read, each named once'},
+  }),
+  HostingCatalog: strict({
+    providers: {
+      type: 'array',
+      items: strict({
+        name: text,
+        isStatusMonitored: {type: 'boolean'},
+        services: {
+          type: 'array',
+          items: strict({
+            name: text,
+            hasVersion: {type: 'boolean'},
+            hasRuntime: {type: 'boolean'},
+            isEndOfSupportTracked: {type: 'boolean'},
+          }),
+        },
+      }),
+    },
+    runtimes: {type: 'array', items: strict({name: text})},
+  }),
   HostingInput: input(hostingFields, ['provider', 'service']),
   HostingPatch: input(hostingFields),
 };
 
 const appId = pathId('id', 'App id');
+
+const HOSTING_WRITE_NOTE =
+  `400 when the provider, service, region or runtime is longer than ${HOSTING_NAME_MAX_LENGTH} characters, or a version longer than ${HOSTING_VERSION_MAX_LENGTH}. ` +
+  'The answer is the row as saved; the check runs after the write has committed, never inside its transaction, ' +
+  `and takes at most ${MONITORING_FOLLOW_UP_BUDGET_MS / 1000} seconds. A row it does not reach stays unchecked (status na) until the next refresh. ` +
+  'Replaying a stored response (same Idempotency-Key) does not check again.';
 const body = (name: string) => ({required: true, content: {'application/json': {schema: ref(name)}}});
 
 export const openApiSpec = {
@@ -405,7 +521,7 @@ export const openApiSpec = {
           '400 and nothing changes when: the body is not JSON or not a package file, it is larger than the cap, ' +
           'two entries of one list have the same name after trimming (ignoring case), ' +
           `a name is longer than ${DEPENDENCY_NAME_MAX_LENGTH} characters or a version longer than ${DEPENDENCY_VERSION_MAX_LENGTH}. ` +
-          `The check afterwards takes at most ${DEPENDENCY_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
+          `The check afterwards takes at most ${MONITORING_FOLLOW_UP_BUDGET_MS / 1000} seconds; what it does not reach stays unchecked until the next refresh. ` +
           'A replay (same Idempotency-Key) does not check again.',
         parameters: [appId, idempotencyKey],
         requestBody: body('PackageFile'),
@@ -448,15 +564,31 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: 'Add a hosting entry (one per provider + service + region)',
+        summary: 'Add a hosting entry (one per provider + service + region); it is then checked against the monitoring sources',
+        description: HOSTING_WRITE_NOTE,
         parameters: [appId, idempotencyKey],
         requestBody: body('HostingInput'),
         responses: {201: json(strict({hosting: ref('Hosting')}), 'Added'), ...errors},
       },
     },
+    '/api/apps/{id}/hosting/refresh': {
+      post: {
+        summary: "Check an app's hosting now: end-of-support dates and open provider incidents",
+        description:
+          'Safe to repeat, so it needs no Idempotency-Key. One source failing never fails the check: it is named in ' +
+          '`healthError` and what earlier checks found from it is kept. An answer is dropped when the row changed meanwhile.',
+        parameters: [appId],
+        responses: {
+          200: json(strict({hosting: {type: 'array', items: ref('Hosting')}}), 'Checked'),
+          401: errors[401],
+          404: errors[404],
+        },
+      },
+    },
     '/api/apps/{id}/hosting/{hostingId}': {
       patch: {
-        summary: 'Update a hosting entry',
+        summary: 'Update a hosting entry; it is then checked again',
+        description: HOSTING_WRITE_NOTE,
         parameters: [appId, pathId('hostingId', 'Hosting entry id'), idempotencyKey],
         requestBody: body('HostingPatch'),
         responses: {200: json(strict({hosting: ref('Hosting')}), 'Updated'), ...errors},
@@ -467,12 +599,43 @@ export const openApiSpec = {
         responses: {204: {description: 'Removed'}, 401: errors[401], 404: errors[404]},
       },
     },
+    '/api/hosting/catalog': {
+      get: {
+        summary: 'Providers, services and runtimes the hosting check knows (anything else is free text, unmonitored)',
+        responses: {200: json(strict({catalog: ref('HostingCatalog')}), 'Catalog'), 401: errors[401]},
+      },
+    },
     '/api/monitoring/dependencies/refresh': {
       post: {
-        summary: 'Check the dependencies of every active app (the daily scheduled job calls this)',
+        summary: 'Check the dependencies of every active app',
         description: 'Safe to repeat, so it needs no Idempotency-Key.',
         responses: {
           200: json(strict({refresh: ref('WorkspaceDependencyRefresh')}), 'Checked'),
+          401: errors[401],
+        },
+      },
+    },
+    '/api/monitoring/hosting/refresh': {
+      post: {
+        summary: 'Check the hosting of every active app',
+        description: 'Safe to repeat, so it needs no Idempotency-Key. An app archived while it runs is skipped.',
+        responses: {
+          200: json(strict({refresh: ref('WorkspaceHostingRefresh')}), 'Checked'),
+          401: errors[401],
+        },
+      },
+    },
+    '/api/monitoring/refresh': {
+      post: {
+        summary: 'Run both checks for every active app: dependencies, then hosting (the daily scheduled job calls this)',
+        description: 'Safe to repeat, so it needs no Idempotency-Key.',
+        responses: {
+          200: json(
+            strict({
+              refresh: strict({dependencies: ref('WorkspaceDependencyRefresh'), hosting: ref('WorkspaceHostingRefresh')}),
+            }),
+            'Checked',
+          ),
           401: errors[401],
         },
       },

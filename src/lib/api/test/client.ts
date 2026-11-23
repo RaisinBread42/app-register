@@ -6,10 +6,14 @@ import * as appDependencyImport from '@/app/api/apps/[id]/dependencies/import/ro
 import * as appDependencyRefresh from '@/app/api/apps/[id]/dependencies/refresh/route';
 import * as appDependencies from '@/app/api/apps/[id]/dependencies/route';
 import * as appHostingEntry from '@/app/api/apps/[id]/hosting/[hostingId]/route';
+import * as appHostingRefresh from '@/app/api/apps/[id]/hosting/refresh/route';
 import * as appHosting from '@/app/api/apps/[id]/hosting/route';
 import * as appById from '@/app/api/apps/[id]/route';
 import * as apps from '@/app/api/apps/route';
+import * as hostingCatalog from '@/app/api/hosting/catalog/route';
 import * as monitoringDependencyRefresh from '@/app/api/monitoring/dependencies/refresh/route';
+import * as monitoringHostingRefresh from '@/app/api/monitoring/hosting/refresh/route';
+import * as monitoringRefresh from '@/app/api/monitoring/refresh/route';
 import * as acknowledge from '@/app/api/notice-alerts/[id]/acknowledge/route';
 import * as alerts from '@/app/api/notice-alerts/route';
 import * as openapi from '@/app/api/openapi.json/route';
@@ -32,8 +36,13 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/apps/{id}/dependencies/refresh': appDependencyRefresh,
   '/api/apps/{id}/dependencies/{dependencyId}': appDependency,
   '/api/apps/{id}/hosting': appHosting,
+  // Before `{hostingId}`: a fixed segment wins over a parameter, as in Next.js.
+  '/api/apps/{id}/hosting/refresh': appHostingRefresh,
   '/api/apps/{id}/hosting/{hostingId}': appHostingEntry,
+  '/api/hosting/catalog': hostingCatalog,
   '/api/monitoring/dependencies/refresh': monitoringDependencyRefresh,
+  '/api/monitoring/hosting/refresh': monitoringHostingRefresh,
+  '/api/monitoring/refresh': monitoringRefresh,
   '/api/people': people,
   '/api/people/{id}': personById,
   '/api/notice-alerts': alerts,

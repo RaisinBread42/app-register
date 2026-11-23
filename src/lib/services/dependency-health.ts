@@ -4,7 +4,7 @@ import {
   ADVISORY_SEVERITY,
   ADVISORY_SOURCE,
   DEPENDENCY_CHECK_ERROR,
-  DEPENDENCY_FOLLOW_UP_BUDGET_MS,
+  MONITORING_FOLLOW_UP_BUDGET_MS,
   HEALTH_DIMENSION,
   HEALTH_STATUS,
   MAJOR_BEHIND_POINTS,
@@ -215,11 +215,11 @@ async function storeResult(tx: AppDatabase, workspaceId: string, result: CheckRe
 
 /**
  * The check that follows a write (import, add, edit). It gives up after
- * DEPENDENCY_FOLLOW_UP_BUDGET_MS so the response is not held up; what was not
+ * MONITORING_FOLLOW_UP_BUDGET_MS so the response is not held up; what was not
  * checked stays unchecked until the next refresh.
  */
 export function checkAfterWrite(db: AppDatabase, workspaceId: string, appId: string, only?: string[]): Promise<RefreshSummary> {
-  return refreshDependencyHealth(db, workspaceId, appId, {only, budgetMs: DEPENDENCY_FOLLOW_UP_BUDGET_MS});
+  return refreshDependencyHealth(db, workspaceId, appId, {only, budgetMs: MONITORING_FOLLOW_UP_BUDGET_MS});
 }
 
 /**

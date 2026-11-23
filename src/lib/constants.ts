@@ -100,8 +100,85 @@ export const API_SUB_ROUTE = {
   refresh: 'refresh',
 } as const;
 
-/** `POST` here re-checks every active app's dependencies; the daily scheduled job calls it. */
+/** `POST` here re-checks every active app's dependencies. */
 export const API_MONITORING_DEPENDENCIES_REFRESH = `${API_PATH_PREFIX}/monitoring/dependencies/refresh`;
+/** `POST` here re-checks every active app's hosting. */
+export const API_MONITORING_HOSTING_REFRESH = `${API_PATH_PREFIX}/monitoring/hosting/refresh`;
+/** `POST` here runs both checks for the workspace; the daily scheduled job calls it. */
+export const API_MONITORING_REFRESH = `${API_PATH_PREFIX}/monitoring/refresh`;
+/** `GET` here lists the hosting providers, services and runtimes the add-hosting dialog offers. */
+export const API_HOSTING_CATALOG = `${API_PATH_PREFIX}/hosting/catalog`;
+
+/** Who set a hosting row's end-of-support date. A manual date is never overwritten by a check. */
+export const END_OF_SUPPORT_SOURCE = {
+  manual: 'manual',
+  endOfLifeDate: 'endoflife.date',
+} as const;
+export const END_OF_SUPPORT_SOURCES = Object.values(END_OF_SUPPORT_SOURCE);
+export type EndOfSupportSource = (typeof END_OF_SUPPORT_SOURCES)[number];
+
+/** How bad a provider says an incident is (their words, normalised). */
+export const INCIDENT_IMPACT = {
+  major: 'major',
+  minor: 'minor',
+  maintenance: 'maintenance',
+} as const;
+export const INCIDENT_IMPACTS = Object.values(INCIDENT_IMPACT);
+export type IncidentImpact = (typeof INCIDENT_IMPACTS)[number];
+
+/** `service`: the feed names this row's service or region. `provider`: it only names the provider. */
+export const INCIDENT_SCOPE = {
+  service: 'service',
+  provider: 'provider',
+} as const;
+export const INCIDENT_SCOPES = Object.values(INCIDENT_SCOPE);
+export type IncidentScope = (typeof INCIDENT_SCOPES)[number];
+
+/** The shapes of provider status feed the hosting check can read. */
+export const STATUS_FEED_KIND = {
+  statuspage: 'statuspage',
+  azureRss: 'azure-rss',
+  awsHealth: 'aws-health',
+  gcpIncidents: 'gcp-incidents',
+} as const;
+export type StatusFeedKind = (typeof STATUS_FEED_KIND)[keyof typeof STATUS_FEED_KIND];
+
+/** Points a hosting finding takes off the 100-point health score. */
+export const HOSTING_POINTS = {
+  pastEndOfSupport: 25,
+  endOfSupportSoon: 12,
+  outage: 8,
+  notice: 3,
+} as const;
+
+/** "End of support soon" means within this many days. */
+export const END_OF_SUPPORT_SOON_DAYS = 90;
+
+/** Longest provider, service, region or runtime name a hosting row stores; longer is a 400. */
+export const HOSTING_NAME_MAX_LENGTH = 100;
+/** Longest version or runtime version a hosting row stores; longer is a 400. */
+export const HOSTING_VERSION_MAX_LENGTH = 50;
+
+/** Limits on what is stored of one provider incident; longer text is cut, extra incidents are left out. */
+export const INCIDENT_TITLE_MAX_LENGTH = 200;
+export const INCIDENT_URL_MAX_LENGTH = 500;
+export const HOSTING_MAX_INCIDENTS = 20;
+/** Longest stored note on why a hosting check gave no full answer. */
+export const HOSTING_CHECK_ERROR_MAX_LENGTH = 300;
+
+/** Limits on what is read from one status feed or endoflife.date document; more than this counts as no answer. */
+export const FEED_MAX_INCIDENTS = 200;
+/** Fewer from a free-text feed (Azure's RSS), whose every item is searched for service and region names. */
+export const FEED_MAX_TEXT_INCIDENTS = 50;
+export const FEED_NAME_MAX_LENGTH = 200;
+/** Most of one RSS item that is read, markup included, and most of its text that is searched. */
+export const FEED_ITEM_MAX_LENGTH = 20_000;
+export const FEED_TEXT_MAX_LENGTH = 2_000;
+export const END_OF_LIFE_MAX_RELEASES = 500;
+/** The only scheme an incident link may use. */
+export const HTTPS_PROTOCOL = 'https:';
+
+export const MS_PER_DAY = 86_400_000;
 
 /** What the UI's Basic auth check decides for a request. */
 export const BASIC_AUTH_VERDICT = {
@@ -366,11 +443,13 @@ export const OSV_BATCH_SIZE = 500;
 export const OSV_MAX_PAGES = 10;
 /** Largest answer read from the registry or OSV; anything longer counts as no answer. */
 export const MONITORING_MAX_RESPONSE_BYTES = BYTES_PER_MB;
+/** Largest status feed or endoflife.date document read (the big provider feeds run to a few hundred KB); longer counts as no answer. */
+export const HOSTING_FEED_MAX_RESPONSE_BYTES = 4 * BYTES_PER_MB;
 /**
  * Longest the check that follows a write (import, add, edit) may hold up its response.
  * Whatever is not checked by then stays unchecked until the next refresh.
  */
-export const DEPENDENCY_FOLLOW_UP_BUDGET_MS = 15_000;
+export const MONITORING_FOLLOW_UP_BUDGET_MS = 15_000;
 /** Limits on what is stored of one advisory; anything longer is cut (or, for an id, dropped). */
 export const ADVISORY_ID_MAX_LENGTH = 100;
 export const ADVISORY_SUMMARY_MAX_LENGTH = 300;

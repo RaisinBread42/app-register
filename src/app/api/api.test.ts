@@ -6,7 +6,11 @@ import {
   API_HEADER,
   DEPENDENCY_CHECK_ERROR,
   DEPENDENCY_IMPORT_MAX_BYTES,
+  END_OF_SUPPORT_SOURCE,
   HEALTH_STATUS,
+  HOSTING_CHECK_ERROR_MAX_LENGTH,
+  HOSTING_NAME_MAX_LENGTH,
+  HOSTING_VERSION_MAX_LENGTH,
   NOTICE_ALERT_STATUS,
   PERSON_STATUS,
   RESOURCE_KIND,
@@ -16,6 +20,8 @@ import {openApiSpec} from '@/lib/api/openapi';
 import {newId} from '@/lib/db/ids';
 import {apiKeys, apps, idempotencyKeys, people, workspaces} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
+import {ALL_CLEAR, FEED_URL, NODEJS, POSTGRES_ON_AZURE, azureStatusRss, endOfLifeUrlFor, fakeFeeds} from '@/lib/monitoring/test/feeds';
+import {END_OF_LIFE_API} from '@/lib/hosting-catalog';
 import {createApiKey, revokeApiKey} from '@/lib/services/api-keys';
 import {fakeRegistry} from '@/lib/services/test/fake-registry';
 
@@ -56,6 +62,21 @@ describe('JSON API', () => {
     });
     vi.stubGlobal('fetch', registry.fetch);
     return registry;
+  }
+
+  /** The (fake) hosting sources, with the fake registry behind them for everything else. */
+  function stubFeeds() {
+    const registry = stubRegistry();
+    const feeds = fakeFeeds({
+      [endOfLifeUrlFor('azure-database-for-postgresql')]: POSTGRES_ON_AZURE,
+      [endOfLifeUrlFor('nodejs')]: NODEJS,
+      [FEED_URL.azure]: azureStatusRss([]),
+      [FEED_URL.vercel]: ALL_CLEAR,
+    });
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      url.startsWith(END_OF_LIFE_API) || Object.values(FEED_URL).includes(url) ? feeds.fetch(url, init) : registry.fetch(url, init),
+    );
+    return feeds;
   }
 
   async function seedApp(name = 'Contoso CRM') {
@@ -196,7 +217,9 @@ describe('JSON API', () => {
       expect(Object.keys(replay.body), url).toEqual(Object.keys(first.body));
       firsts.push(first);
     }
-    const hosting = firsts[1].body.hosting;
+    // The hosting row as it is now (the check that followed the first run has stored its answer on it).
+    const [hosting] = (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting;
+    expect(hosting.id).toBe(firsts[1].body.hosting.id);
     expect((await api('POST', writes[1][1], {idempotencyKey: writes[1][1], body: writes[1][2]})).body).toEqual({hosting});
 
     await t.db.execute(sql`delete from app_hosting where id = ${hosting.id}`);
@@ -274,6 +297,215 @@ describe('JSON API', () => {
     expect(back.body.person).toMatchObject({status: PERSON_STATUS.active, leftOn: null});
   });
 
+  it('saving hosting answers with the row as saved and then checks it, so the app’s health carries the hosting findings; the check can be run again for one app or the whole workspace', async () => {
+    const {app} = await seedApp();
+    const feeds = stubFeeds();
+
+    const database = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', region: 'centralus', version: '12'}});
+    expect(database.body.hosting).toMatchObject({endOfSupportOn: null, healthCheckedAt: null, status: HEALTH_STATUS.na, isMonitored: true});
+    const site = await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'}});
+
+    const checked = (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting;
+    expect(checked).toMatchObject([
+      {service: 'Database for PostgreSQL', endOfSupportOn: '2026-07-31', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate, incidents: [], healthError: null, status: HEALTH_STATUS.critical},
+      {service: 'Hosting', endOfSupportOn: '2025-04-30', status: HEALTH_STATUS.critical},
+    ]);
+    expect(checked.every((row: {healthCheckedAt: string | null}) => row.healthCheckedAt !== null)).toBe(true);
+
+    await api('PATCH', `/api/apps/${app.id}/hosting/${site.body.hosting.id}`, {body: {runtimeVersion: '24'}});
+    expect((await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting[1]).toMatchObject({endOfSupportOn: '2028-04-30', status: HEALTH_STATUS.ok});
+
+    const one = await api('POST', `/api/apps/${app.id}/hosting/refresh`, {idempotencyKey: null});
+    expect(one.status).toBe(200);
+    expect(one.body.hosting).toHaveLength(2);
+    const all = await api('POST', '/api/monitoring/hosting/refresh', {idempotencyKey: null});
+    expect(all.body).toEqual({refresh: {apps: 1, hosting: 2, failedSources: []}});
+    expect(feeds.requested.length).toBeGreaterThan(0);
+
+    const catalog = await api('GET', '/api/hosting/catalog');
+    expect(catalog.body.catalog.providers.map((provider: {name: string}) => provider.name)).toContain('Azure');
+    expect((await api('GET', '/api/hosting/catalog', {key: null})).status).toBe(401);
+  });
+
+  it('hosting health has one home: health.dimensions.hosting on the app list and detail, counted in the score next to dependencies, and no separate hostingHealth field', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const hostingNa = {status: HEALTH_STATUS.na, deductions: []};
+    expect((await api('GET', `/api/apps/${app.id}`)).body.app.health.dimensions.hosting).toEqual(hostingNa);
+
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Azure', service: 'Database for PostgreSQL', version: '12'}});
+    await api('POST', `/api/apps/${app.id}/dependencies/import`, {body: PACKAGE_JSON});
+
+    const detail = (await api('GET', `/api/apps/${app.id}`)).body.app;
+    const [listed] = (await api('GET', '/api/apps')).body.apps;
+    // 100 − 25 (past end of support) − 10 (critical advisory) − 3 (a major version behind).
+    expect(detail.health).toMatchObject({score: 62, status: HEALTH_STATUS.critical});
+    expect(detail.health.dimensions.hosting).toEqual({
+      status: HEALTH_STATUS.critical,
+      deductions: [{dimension: 'hosting', label: 'Azure Database for PostgreSQL 12 is past end of support', detail: 'Support ended 2026-07-31', points: 25}],
+    });
+    expect(detail.health.dimensions.dependencies).toMatchObject({status: HEALTH_STATUS.attention, deductions: [{points: 10}, {points: 3}]});
+    expect([detail.health.dimensions.licence, detail.health.dimensions.pricing]).toEqual([null, null]);
+    expect(listed.health).toEqual(detail.health);
+    expect('hostingHealth' in detail || 'hostingHealth' in listed).toBe(false);
+  });
+
+  it('the scheduler’s one endpoint runs both workspace checks without an Idempotency-Key and returns both summaries', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '24'}});
+    await api('POST', `/api/apps/${app.id}/dependencies`, {body: {name: 'quill-forms', currentVersion: '3.9.0'}});
+
+    const refreshed = await api('POST', '/api/monitoring/refresh', {idempotencyKey: null});
+
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body).toEqual({
+      refresh: {
+        dependencies: {apps: 1, checked: 1, notFound: 0, unavailable: 0, advisories: 1},
+        hosting: {apps: 1, hosting: 1, failedSources: []},
+      },
+    });
+    expect((await api('POST', '/api/monitoring/refresh', {idempotencyKey: null, key: null})).status).toBe(401);
+  });
+
+  // Hosting follows the same rules as dependencies.
+
+  it('the hosting check after a save runs once the write has committed, never inside its transaction, and not again when the request is replayed', async () => {
+    const {app} = await seedApp();
+    const feeds = stubFeeds();
+    let openTransactions = 0;
+    const openDuringFetch: number[] = [];
+    const transaction = t.db.transaction.bind(t.db);
+    const spy = vi.spyOn(t.db, 'transaction').mockImplementation((async (...args: Parameters<typeof transaction>) => {
+      openTransactions++;
+      try {
+        return await transaction(...args);
+      } finally {
+        openTransactions--;
+      }
+    }) as typeof transaction);
+    const send = globalThis.fetch as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      openDuringFetch.push(openTransactions);
+      return send(url, init);
+    });
+    const body = {provider: 'Vercel', service: 'Hosting', runtime: 'Node.js', runtimeVersion: '18'};
+
+    const first = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'save-1', body});
+    expect(first.status).toBe(201);
+    const afterFirst = feeds.requested.length;
+    expect(afterFirst).toBe(2);
+    expect(openDuringFetch).toEqual([0, 0]);
+    expect(spy).toHaveBeenCalled();
+
+    // A replay answers with the same status and the row as it is now: what the first run's check has found since.
+    const replay = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'save-1', body});
+    expect(replay.status).toBe(201);
+    expect(replay.body.hosting).toEqual({
+      ...first.body.hosting,
+      endOfSupportOn: '2025-04-30',
+      endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate,
+      status: HEALTH_STATUS.critical,
+      healthCheckedAt: expect.any(String),
+      updatedAt: expect.any(String),
+    });
+    expect(replay.body).toEqual({hosting: (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting[0]});
+    expect(feeds.requested.length).toBe(afterFirst);
+
+    await api('PATCH', `/api/apps/${app.id}/hosting/${first.body.hosting.id}`, {idempotencyKey: 'edit-1', body: {runtimeVersion: '24'}});
+    await api('PATCH', `/api/apps/${app.id}/hosting/${first.body.hosting.id}`, {idempotencyKey: 'edit-1', body: {runtimeVersion: '24'}});
+    expect(feeds.requested.length).toBe(afterFirst + 2);
+    expect(openDuringFetch.every((open) => open === 0)).toBe(true);
+  });
+
+  it('when the sources are down the hosting save still stands, is not repeated, and the row shows as not checked with the reason, never ok', async () => {
+    const {app} = await seedApp();
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('fetch failed');
+    });
+
+    const saved = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}});
+    expect(saved.status).toBe(201);
+    const replay = await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: 'k1', body: {provider: 'Vercel', service: 'Hosting'}});
+
+    const {hosting, health} = (await api('GET', `/api/apps/${app.id}`)).body.app;
+    expect(hosting).toHaveLength(1);
+    expect(replay.status).toBe(201);
+    expect(replay.body).toEqual({hosting: hosting[0]});
+    expect(hosting[0].id).toBe(saved.body.hosting.id);
+    expect(hosting[0]).toMatchObject({status: HEALTH_STATUS.na, healthError: 'Vercel status could not be reached (fetch failed)', incidents: []});
+    expect(health).toMatchObject({score: null, status: HEALTH_STATUS.na, dimensions: {hosting: {status: HEALTH_STATUS.na, deductions: []}}});
+  });
+
+  it('the hosting refresh endpoints need no Idempotency-Key, a hosting save still needs one, and a refresh of an unknown or archived app is 404', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    expect((await api('POST', `/api/apps/${app.id}/hosting`, {idempotencyKey: null, body: {provider: 'Vercel', service: 'Hosting'}})).status).toBe(400);
+    await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting'}});
+
+    for (const path of [`/api/apps/${app.id}/hosting/refresh`, '/api/monitoring/hosting/refresh', '/api/monitoring/refresh']) {
+      expect((await api('POST', path, {idempotencyKey: null})).status, path).toBe(200);
+      expect((await api('POST', path, {idempotencyKey: null})).status, path).toBe(200);
+      expect((await api('POST', path, {idempotencyKey: null, key: null})).status, path).toBe(401);
+    }
+    expect((await api('POST', '/api/apps/not-a-uuid/hosting/refresh', {idempotencyKey: null})).status).toBe(404);
+    await api('POST', `/api/apps/${app.id}/archive`);
+    expect((await api('POST', `/api/apps/${app.id}/hosting/refresh`, {idempotencyKey: null})).status).toBe(404);
+    expect((await api('POST', '/api/monitoring/hosting/refresh', {idempotencyKey: null})).body).toEqual({refresh: {apps: 0, hosting: 0, failedSources: []}});
+  });
+
+  it('a provider, service, region or runtime longer than 100 characters, or a version longer than 50, gets 400 when added or edited', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const path = `/api/apps/${app.id}/hosting`;
+    const valid = {provider: 'Vercel', service: 'Hosting'};
+    const long = 'n'.repeat(HOSTING_NAME_MAX_LENGTH + 1);
+    const longVersion = '1'.repeat(HOSTING_VERSION_MAX_LENGTH + 1);
+    const tooLong = [{provider: long}, {service: long}, {region: long}, {runtime: long}, {version: longVersion}, {runtimeVersion: longVersion}, {provider: 'n'.repeat(200_000)}];
+
+    for (const field of tooLong) {
+      const refused = await api('POST', path, {body: {...valid, ...field}});
+      expect(refused.status, Object.keys(field)[0]).toBe(400);
+      expect(refused.body.error).toMatch(/is longer than (100|50) characters$/);
+    }
+    const atLimit = {provider: 'p'.repeat(HOSTING_NAME_MAX_LENGTH), service: 's'.repeat(HOSTING_NAME_MAX_LENGTH), version: '1'.repeat(HOSTING_VERSION_MAX_LENGTH)};
+    const added = await api('POST', path, {body: atLimit});
+    expect(added.status).toBe(201);
+    for (const field of tooLong) {
+      expect((await api('PATCH', `${path}/${added.body.hosting.id}`, {body: field})).status, Object.keys(field)[0]).toBe(400);
+    }
+    expect((await api('GET', path)).body.hosting).toMatchObject([atLimit]);
+  });
+
+  it('a bad hosting row in the database never turns the app list, the app or its hosting into a 500: a planted link and a time that is not a time are left out', async () => {
+    const {app} = await seedApp();
+    stubFeeds();
+    const {hosting} = (await api('POST', `/api/apps/${app.id}/hosting`, {body: {provider: 'Vercel', service: 'Hosting'}})).body;
+    const usable = {title: 'Builds are queued', impact: 'major', scope: 'service', url: 'https://www.vercel-status.com/incidents/abc', startedAt: '2026-11-22T07:10:00.000Z'};
+    // What the table's own constraints still let a stray write store: any link, an endless time, an endless check error.
+    await t.db.execute(sql`
+      insert into hosting_incidents (id, workspace_id, hosting_id, title, impact, scope, url, started_at, position) values
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, ${usable.title}, 'major', 'service', ${usable.url}, ${usable.startedAt}, 0),
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, 'Planted link', 'major', 'service', 'https://evil.example/login', 'infinity', 1),
+        (${newId()}, ${t.workspaceId}, ${hosting.id}, 'Script link', 'minor', 'provider', 'javascript:alert(1)', '-infinity', 2)`);
+    await t.db.execute(sql`update app_hosting set health_error = ${'x'.repeat(5_000)} where id = ${hosting.id}`);
+
+    expect((await api('GET', '/api/apps')).status).toBe(200);
+    expect((await api('GET', `/api/apps/${app.id}/hosting`)).status).toBe(200);
+    const detail = await api('GET', `/api/apps/${app.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.app.hosting[0].healthError).toHaveLength(HOSTING_CHECK_ERROR_MAX_LENGTH);
+
+    await t.db.execute(sql`update app_hosting set health_error = null where id = ${hosting.id}`);
+    const {app: read} = (await api('GET', `/api/apps/${app.id}`)).body;
+    expect(read.hosting[0].incidents).toEqual([
+      usable,
+      {...usable, title: 'Planted link', url: null, startedAt: null},
+      {title: 'Script link', impact: 'minor', scope: 'provider', url: null, startedAt: null},
+    ]);
+    expect(read.health.dimensions.hosting.deductions.map((deduction: {label: string}) => deduction.label)).toEqual(['Builds are queued', 'Planted link', 'Script link']);
+  });
+
   it('every route is documented in the OpenAPI spec, and nothing in the spec is missing a route', () => {
     const apiDir = path.join(process.cwd(), 'src/app/api');
     const routeFiles = (readdirSync(apiDir, {recursive: true}) as string[])
@@ -347,6 +579,7 @@ describe('JSON API', () => {
       expect((await api('PATCH', `/api/apps/${id}`, {body: {vendor: 'X'}})).status).toBe(404);
       expect((await api('POST', `/api/apps/${id}/archive`)).status).toBe(404);
       expect((await api('GET', `/api/apps/${id}/hosting`)).status).toBe(404);
+      expect((await api('POST', `/api/apps/${id}/hosting/refresh`)).status).toBe(404);
       expect((await api('POST', `/api/apps/${id}/dependencies`, {body: {name: 'x', currentVersion: '1'}})).status).toBe(404);
     }
     for (const id of [newId(), 'nope', otherDependency.id]) {
@@ -403,7 +636,8 @@ describe('JSON API', () => {
   it('the app list and the app detail carry a health score with one entry per dimension; dimensions not monitored yet are null', async () => {
     const {app} = await seedApp();
     stubRegistry();
-    const unmonitored = {hosting: null, licence: null, pricing: null};
+    // Hosting is monitored; this app records none, so it has nothing to check there.
+    const unmonitored = {hosting: {status: HEALTH_STATUS.na, deductions: []}, licence: null, pricing: null};
 
     const empty = (await api('GET', '/api/apps')).body.apps[0].health;
     expect(empty).toEqual({score: null, status: HEALTH_STATUS.na, dimensions: {dependencies: {status: HEALTH_STATUS.na, deductions: []}, ...unmonitored}});

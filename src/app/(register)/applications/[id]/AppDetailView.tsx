@@ -18,7 +18,7 @@ import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {APP_TAB, HEALTH_MAX_SCORE, ROUTES, editAppRoute, type AppTab} from '@/lib/constants';
-import type {AppDetail, Deduction, Health} from '@/lib/ui/api-client';
+import type {AppDetail, Deduction, Health, HostingCatalog} from '@/lib/ui/api-client';
 import {
   HEALTH_BASIS_NOTE,
   HEALTH_STATUS_VARIANT,
@@ -51,12 +51,12 @@ export type AppDetailKeys = {
   hosting: Record<string, string>;
 };
 
-type Props = {app: AppDetail; initialTab: AppTab; keys: AppDetailKeys};
+type Props = {app: AppDetail; initialTab: AppTab; keys: AppDetailKeys; catalog: HostingCatalog; today: string};
 
 const NOT_RECORDED = 'Not recorded';
 const dateOrDash = (iso: string | null) => (iso ? formatDate(iso) : NOT_SET);
 
-export function AppDetailView({app, initialTab, keys}: Props) {
+export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<string>(initialTab);
   const confirm = useImperativeAlertDialog();
@@ -117,7 +117,16 @@ export function AppDetailView({app, initialTab, keys}: Props) {
             isReadOnly={isArchived}
           />
         )}
-        {tab === APP_TAB.hosting && <HostingTab app={app} addKey={keys.addHosting} editKeys={keys.hosting} isReadOnly={isArchived} />}
+        {tab === APP_TAB.hosting && (
+          <HostingTab
+            app={app}
+            catalog={catalog}
+            today={today}
+            addKey={keys.addHosting}
+            editKeys={keys.hosting}
+            isReadOnly={isArchived}
+          />
+        )}
         {tab === APP_TAB.licence && <LicenceTab app={app} />}
       </VStack>
       {confirm.element}
@@ -278,7 +287,7 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
               isLabelStrong
               rows={[
                 {label: 'Dependencies', value: <DimensionPill dimension={app.health.dimensions.dependencies} />},
-                {label: 'Hosting & infrastructure', value: <PendingPill />},
+                {label: 'Hosting & infrastructure', value: <DimensionPill dimension={app.health.dimensions.hosting} />},
                 {label: 'Licence', value: <PendingPill />},
                 {label: 'Pricing', value: <PendingPill />},
               ]}

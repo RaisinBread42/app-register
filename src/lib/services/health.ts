@@ -9,6 +9,7 @@ import {
   type HealthStatus,
 } from '@/lib/constants';
 import {dependencyDeductions, type DependencyFacts} from './dependency-health';
+import {hostingDeductions, type HostingFacts} from './hosting-health';
 
 /**
  * An app's health score: start at 100 and take off the points of every
@@ -33,8 +34,8 @@ export type AppHealth = {
   dimensions: Record<HealthDimension, DimensionHealth | null>;
 };
 
-/** What the reporters read about one app. A new dimension adds its own field here. */
-export type HealthFacts = {dependencies: DependencyFacts[]};
+/** What the reporters read about one app. A new dimension adds its own field here. `today` is a UTC date (YYYY-MM-DD). */
+export type HealthFacts = {dependencies: DependencyFacts[]; hosting: HostingFacts[]; today: string};
 
 /** An app's deductions for one dimension, or null when the app records nothing for it. */
 type Reporter = (facts: HealthFacts) => Deduction[] | null;
@@ -42,6 +43,7 @@ type Reporter = (facts: HealthFacts) => Deduction[] | null;
 /** To monitor another dimension, add its reporter here. */
 const REPORTERS: Partial<Record<HealthDimension, Reporter>> = {
   [HEALTH_DIMENSION.dependencies]: (facts) => dependencyDeductions(facts.dependencies),
+  [HEALTH_DIMENSION.hosting]: (facts) => hostingDeductions(facts.hosting, facts.today),
 };
 
 export function computeHealth(deductions: Deduction[]): {score: number; status: HealthStatus} {

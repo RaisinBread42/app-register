@@ -1,7 +1,7 @@
 'use server';
 
 import {revalidatePath} from 'next/cache';
-import {PERSON_STATUS, ROUTES, appRoute} from '@/lib/constants';
+import {PERSON_STATUS, ROUTES} from '@/lib/constants';
 import {runAction, type ActionResult} from '@/lib/ui/action-result';
 import {apiClient, type DependencyImport, type PersonInput} from '@/lib/ui/api-client';
 import {
@@ -104,13 +104,20 @@ export async function saveHostingAction(
       ? apiClient().updateHosting(idempotencyKey, appId, hostingId, input)
       : apiClient().addHosting(idempotencyKey, appId, input);
   });
-  revalidatePath(appRoute(appId));
+  refreshApps();
+  return result;
+}
+
+/** Runs the hosting check for one app now: end-of-support dates and open provider incidents. Safe to repeat. */
+export async function refreshHostingAction(appId: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().refreshHosting(appId));
+  refreshApps();
   return result;
 }
 
 export async function removeHostingAction(appId: string, hostingId: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().removeHosting(appId, hostingId));
-  revalidatePath(appRoute(appId));
+  refreshApps();
   return result;
 }
 

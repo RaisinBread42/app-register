@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {PGlite} from '@electric-sql/pglite';
@@ -9,6 +10,9 @@ import {
   ADVISORY_SEVERITY,
   ADVISORY_SOURCE,
   DEFAULT_WORKSPACE_SLUG,
+  INCIDENT_IMPACT,
+  INCIDENT_SCOPE,
+  END_OF_SUPPORT_SOURCE,
   NOTICE_ALERT_STATUS,
   OWNERSHIP_CHANGE_REASON,
   OWNERSHIP_ROLE,
@@ -19,10 +23,12 @@ import {MIGRATIONS_FOLDER} from './client';
 import {newId} from './ids';
 import {
   appDependencies,
+  appHosting,
   apps,
   attachments,
   dependencyAdvisories,
   dependencyAdvisoryAliases,
+  hostingIncidents,
   idempotencyKeys,
   noticeAlerts,
   ownershipChanges,
@@ -43,6 +49,7 @@ const ALL_TABLES = [
   'attachments',
   'dependency_advisories',
   'dependency_advisory_aliases',
+  'hosting_incidents',
   'idempotency_keys',
   'notice_alerts',
   'ownership_changes',
@@ -58,7 +65,15 @@ const COLUMNS_0002 = ['advisories', 'check_error', 'checked_at', 'is_dev', 'sour
 
 const TABLES_0003 = ['dependency_advisories', 'dependency_advisory_aliases'];
 
-/** Rollback files, newest first: the order they must run in. */
+const TABLES_0005 = ['hosting_incidents'];
+const COLUMNS_0005 = ['end_of_support_source', 'health_checked_at', 'health_error', 'is_version_inexact', 'runtime', 'runtime_version'];
+
+/**
+ * Rollback files, newest first: the order they must run in. The migrator only
+ * applies migrations newer than the last one recorded, so an older one rolled
+ * back alone would never come back.
+ */
+const ROLLBACK_0005 = '0005_hosting_health.down.sql';
 const ROLLBACK_0004 = '0004_relational_idempotency.down.sql';
 const ROLLBACK_0003 = '0003_relational_advisories.down.sql';
 const ROLLBACK_0002 = '0002_dependency_health.down.sql';
@@ -66,6 +81,14 @@ const ROLLBACK_0001 = '0001_api_keys_idempotency_deps_hosting.down.sql';
 
 function rollbackSql(file: string): string {
   return readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8');
+}
+
+/** Runs the rollbacks down to and including `oldest`, newest first. */
+async function rollBackThrough(t: TestDb, oldest: string) {
+  const newestFirst = [ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
+  for (const file of newestFirst.slice(0, newestFirst.indexOf(oldest) + 1)) {
+    await t.client.exec(rollbackSql(file));
+  }
 }
 
 /** One valid row per table in a workspace, so each case breaks exactly one rule. */
@@ -277,10 +300,124 @@ describe('database schema', () => {
     ).rejects.toThrow('dependency_advisory_aliases_advisory_fk');
   });
 
+  it('the database itself rejects a hosting incident that breaks a listed constraint, and incidents go with their hosting row', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const hostingId = newId();
+    await t.db.insert(appHosting).values({id: hostingId, workspaceId: w.workspaceId, appId: w.appId, provider: 'AWS', service: 'S3'});
+    const incident = {
+      workspaceId: w.workspaceId,
+      hostingId,
+      title: 'Increased error rates',
+      impact: INCIDENT_IMPACT.major,
+      scope: INCIDENT_SCOPE.service,
+      position: 0,
+    };
+    await t.db.insert(hostingIncidents).values({id: newId(), ...incident});
+    // A link and a start time are optional; a second incident takes the next position.
+    await t.db.insert(hostingIncidents).values({id: newId(), ...incident, position: 1, url: 'https://health.aws.amazon.com/health/status', startedAt: new Date('2026-11-20T08:15:00Z')});
+
+    const raw = (columns: string, values: string) => () =>
+      t.client.query(`insert into hosting_incidents (id, workspace_id, hosting_id, position, ${columns}) values ($1, $2, $3, 2, ${values})`, [newId(), w.workspaceId, hostingId]);
+    const cases: [string, () => Promise<unknown>][] = [
+      ['hosting_incidents_hosting_position_unique', () => t.db.insert(hostingIncidents).values({id: newId(), ...incident})],
+      ['hosting_incidents_title_not_blank', raw('title, impact, scope', `'  ', 'major', 'service'`)],
+      ['hosting_incidents_impact_allowed', raw('title, impact, scope', `'t', 'catastrophic', 'service'`)],
+      ['hosting_incidents_scope_allowed', raw('title, impact, scope', `'t', 'major', 'galaxy'`)],
+      ['null value in column "title"', raw('impact, scope', `'major', 'service'`)],
+      ['null value in column "impact"', raw('title, scope', `'t', 'service'`)],
+      ['null value in column "scope"', raw('title, impact', `'t', 'major'`)],
+      ['hosting_incidents_hosting_fk', () => t.db.insert(hostingIncidents).values({id: newId(), ...incident, hostingId: newId(), position: 2})],
+    ];
+    for (const [rule, write] of cases) {
+      await expect(write(), rule).rejects.toThrow(rule);
+    }
+
+    await t.db.delete(appHosting).where(eq(appHosting.id, hostingId));
+    expect(await t.db.select().from(hostingIncidents)).toHaveLength(0);
+  });
+
+  it('a hosting incident cannot point at a hosting row in another workspace', async () => {
+    const a = await seedWorkspace(t, t.workspaceId);
+    const otherId = newId();
+    await t.db.insert(workspaces).values({id: otherId, name: 'Fabrikam', slug: 'fabrikam'});
+    const b = await seedWorkspace(t, otherId);
+    const theirHostingId = newId();
+    await t.db.insert(appHosting).values({id: theirHostingId, workspaceId: b.workspaceId, appId: b.appId, provider: 'AWS', service: 'S3'});
+
+    await expect(
+      t.db.insert(hostingIncidents).values({
+        id: newId(),
+        workspaceId: a.workspaceId,
+        hostingId: theirHostingId,
+        title: 'Increased error rates',
+        impact: INCIDENT_IMPACT.major,
+        scope: INCIDENT_SCOPE.service,
+        position: 0,
+      }),
+    ).rejects.toThrow('hosting_incidents_hosting_fk');
+  });
+
+  it('the database itself rejects a hosting row whose end-of-support date has no source, or whose version is marked inexact without a looked-up date', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const row = {workspaceId: w.workspaceId, appId: w.appId, provider: 'AWS'};
+    const lookedUp = {endOfSupportOn: '2027-02-04', endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate};
+    await t.db.insert(appHosting).values({id: newId(), ...row, service: 'RDS for MySQL', ...lookedUp, isVersionInexact: true});
+
+    const cases: [string, () => Promise<unknown>][] = [
+      ['app_hosting_end_of_support_has_source', () => t.db.insert(appHosting).values({id: newId(), ...row, service: 'S3', endOfSupportOn: '2027-02-04'})],
+      ['app_hosting_end_of_support_has_source', () => t.db.insert(appHosting).values({id: newId(), ...row, service: 'S3', endOfSupportSource: END_OF_SUPPORT_SOURCE.manual})],
+      ['app_hosting_end_of_support_source_allowed', () => t.client.query(`insert into app_hosting (id, workspace_id, app_id, provider, service, end_of_support_on, end_of_support_source) values ($1, $2, $3, 'AWS', 'S3', '2027-02-04', 'a guess')`, [newId(), w.workspaceId, w.appId])],
+      ['app_hosting_version_inexact_only_looked_up', () => t.db.insert(appHosting).values({id: newId(), ...row, service: 'S3', isVersionInexact: true})],
+      ['app_hosting_version_inexact_only_looked_up', () => t.db.insert(appHosting).values({id: newId(), ...row, service: 'S3', ...lookedUp, endOfSupportSource: END_OF_SUPPORT_SOURCE.manual, isVersionInexact: true})],
+    ];
+    for (const [rule, write] of cases) {
+      await expect(write(), rule).rejects.toThrow(rule);
+    }
+  });
+
+  it('rolling back migration 0005 removes only the hosting check’s table and columns and keeps the dates; migrating again restores them and marks existing dates as typed by hand', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const hostingId = newId();
+    await t.db.insert(appHosting).values({
+      id: hostingId,
+      workspaceId: w.workspaceId,
+      appId: w.appId,
+      provider: 'Azure',
+      service: 'SQL Server',
+      runtime: 'Node.js',
+      endOfSupportOn: '2027-02-04',
+      endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate,
+    });
+    await t.db.insert(hostingIncidents).values({id: newId(), workspaceId: w.workspaceId, hostingId, title: 'Outage', impact: INCIDENT_IMPACT.major, scope: INCIDENT_SCOPE.service, position: 0});
+    const columns = async () =>
+      (
+        await t.client.query<{column_name: string}>(
+          `select column_name from information_schema.columns where table_name = 'app_hosting' order by 1`,
+        )
+      ).rows.map((r) => r.column_name);
+    const tables = async () =>
+      (
+        await t.client.query<{table_name: string}>(`select table_name from information_schema.tables where table_schema = 'public' order by 1`)
+      ).rows.map((r) => r.table_name);
+    const before = await columns();
+
+    await rollBackThrough(t, ROLLBACK_0005);
+    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0005.includes(name)));
+    expect(await tables()).toEqual(ALL_TABLES.filter((name) => !TABLES_0005.includes(name)));
+    const kept = await t.client.query<{end_of_support_on: string}>(`select end_of_support_on::text from app_hosting`);
+    expect(kept.rows).toEqual([{end_of_support_on: '2027-02-04'}]);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await columns()).toEqual(before);
+    expect(await tables()).toEqual(ALL_TABLES);
+    const [restored] = await t.db.select().from(appHosting).where(eq(appHosting.id, hostingId));
+    expect(restored).toMatchObject({endOfSupportOn: '2027-02-04', endOfSupportSource: END_OF_SUPPORT_SOURCE.manual, runtime: null, isVersionInexact: false});
+    expect(await t.db.select().from(hostingIncidents)).toHaveLength(0);
+  });
+
   it('migration 0003 moves stored advisories and hand-recorded ids into tables, and its rollback puts them back in the old columns', async () => {
     const w = await seedWorkspace(t, t.workspaceId);
-    await t.client.exec(rollbackSql(ROLLBACK_0004));
-    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    await rollBackThrough(t, ROLLBACK_0003);
     const advisories = [
       {id: 'GHSA-qqqq-1111-aaaa', aliases: ['CVE-2026-4411', 'PYSEC-2026-7'], severity: 'high', summary: 'Prototype pollution in merge()', url: 'https://osv.dev/vulnerability/GHSA-qqqq-1111-aaaa'},
       {id: 'MAL-2026-0042', aliases: [], severity: 'critical', summary: '', url: 'https://osv.dev/vulnerability/MAL-2026-0042'},
@@ -309,8 +446,7 @@ describe('database schema', () => {
     expect(quill).toMatchObject({name: 'quill-forms', vulnerabilities, advisories});
     expect(tally).toMatchObject({name: 'tally-ui', vulnerabilities: [], advisories: []});
 
-    await t.client.exec(rollbackSql(ROLLBACK_0004));
-    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    await rollBackThrough(t, ROLLBACK_0003);
     const old = await t.client.query<{vulnerabilities: string[]; advisories: unknown}>(
       `select vulnerabilities, advisories from app_dependencies where id = $1`,
       [quillId],
@@ -351,7 +487,7 @@ describe('database schema', () => {
     expect(relational).not.toContain('response_body');
 
     await t.db.insert(idempotencyKeys).values({workspaceId: t.workspaceId, key: 'new-shape', requestHash: 'h', statusCode: 200});
-    await t.client.exec(rollbackSql(ROLLBACK_0004));
+    await rollBackThrough(t, ROLLBACK_0004);
     expect(await columns()).toEqual(['created_at', 'key', 'request_hash', 'response_body', 'status_code', 'workspace_id']);
     expect(await keys()).toEqual([]);
 
@@ -383,14 +519,12 @@ describe('database schema', () => {
   });
 
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    // Rollbacks run newest first: 0004, 0003 and 0002 changed tables that 0001 created.
-    for (const file of [ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
-      await t.client.exec(rollbackSql(file));
-    }
+    // Rollbacks run newest first: 0005, 0004, 0003 and 0002 changed tables that 0001 created.
+    await rollBackThrough(t, ROLLBACK_0001);
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
-    expect(after.rows.map((r) => r.table_name)).toEqual(ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003].includes(n)));
+    expect(after.rows.map((r) => r.table_name)).toEqual(ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003, ...TABLES_0005].includes(n)));
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     const restored = await t.client.query<{table_name: string}>(
@@ -410,8 +544,7 @@ describe('database schema', () => {
       ).rows.map((r) => r.column_name);
     const before = await columns();
 
-    await t.client.exec(rollbackSql(ROLLBACK_0004));
-    await t.client.exec(rollbackSql(ROLLBACK_0003));
+    await rollBackThrough(t, ROLLBACK_0003);
     const at0002 = await columns();
     await t.client.exec(rollbackSql(ROLLBACK_0002));
     expect(await columns()).toEqual(at0002.filter((name) => !COLUMNS_0002.includes(name)));
@@ -420,6 +553,14 @@ describe('database schema', () => {
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     expect(await columns()).toEqual(before);
+  });
+
+  it('every rollback names the hash of the migration file it undoes, so migrating again re-applies it', () => {
+    for (const file of [ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
+      const migration = readFileSync(path.join(MIGRATIONS_FOLDER, file.replace('.down.sql', '.sql')));
+      const down = readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8');
+      expect(down, file).toContain(createHash('sha256').update(migration).digest('hex'));
+    }
   });
 
   it('unit tests run on in-process PGlite with the real migrations, no Docker needed', async () => {

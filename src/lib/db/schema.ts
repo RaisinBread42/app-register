@@ -23,6 +23,10 @@ import {
   DEPENDENCY_CHECK_ERRORS,
   DEPENDENCY_SOURCE,
   DEPENDENCY_SOURCES,
+  END_OF_SUPPORT_SOURCE,
+  END_OF_SUPPORT_SOURCES,
+  INCIDENT_IMPACTS,
+  INCIDENT_SCOPES,
   NOTICE_ALERT_STATUS,
   NOTICE_ALERT_STATUSES,
   OWNERSHIP_CHANGE_REASONS,
@@ -33,6 +37,9 @@ import {
   RESOURCE_KINDS,
   type AdvisorySeverity,
   type AdvisorySource,
+  type EndOfSupportSource,
+  type IncidentImpact,
+  type IncidentScope,
   type ResourceKind,
 } from '../constants';
 
@@ -403,7 +410,11 @@ export const dependencyAdvisoryAliases = pgTable(
   ],
 );
 
-/** Where an app runs: one row per provider service, e.g. Azure SQL Server in uksouth. */
+/**
+ * Where an app runs: one row per provider service, e.g. Azure SQL Server in uksouth.
+ * The columns from `endOfSupportSource` down are written by the hosting check
+ * (`services/hosting-monitor.ts`); the incidents it finds are rows in `hosting_incidents`.
+ */
 export const appHosting = pgTable(
   'app_hosting',
   {
@@ -414,11 +425,22 @@ export const appHosting = pgTable(
     service: text('service').notNull(),
     region: text('region'),
     version: text('version'),
+    /** Language runtime the service runs, e.g. Node.js 22. */
+    runtime: text('runtime'),
+    runtimeVersion: text('runtime_version'),
     endOfSupportOn: date('end_of_support_on', {mode: 'string'}),
+    /** Who set the date: a person (`manual`, never overwritten) or a check. */
+    endOfSupportSource: text('end_of_support_source').$type<EndOfSupportSource>(),
+    /** The version matched more than one release, so the date is the earliest among them. Only ever true for a looked-up date. */
+    isVersionInexact: boolean('is_version_inexact').notNull().default(false),
+    healthCheckedAt: timestamp('health_checked_at', {withTimezone: true}),
+    /** Which sources could not be read on the last check; null when all answered. */
+    healthError: text('health_error'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    unique('app_hosting_id_workspace_unique').on(t.id, t.workspaceId),
     foreignKey({
       name: 'app_hosting_app_fk',
       columns: [t.appId, t.workspaceId],
@@ -428,6 +450,49 @@ export const appHosting = pgTable(
     unique('app_hosting_app_service_unique')
       .on(t.appId, t.provider, t.service, t.region)
       .nullsNotDistinct(),
+    check('app_hosting_end_of_support_source_allowed', oneOf(t.endOfSupportSource, END_OF_SUPPORT_SOURCES)),
+    check(
+      'app_hosting_end_of_support_has_source',
+      sql`(${t.endOfSupportOn} is null) = (${t.endOfSupportSource} is null)`,
+    ),
+    check(
+      'app_hosting_version_inexact_only_looked_up',
+      sql`not ${t.isVersionInexact} or coalesce(${t.endOfSupportSource}, '') = ${sql.raw(`'${END_OF_SUPPORT_SOURCE.endOfLifeDate}'`)}`,
+    ),
+  ],
+);
+
+/**
+ * One provider incident or maintenance notice that reaches a hosting row, as the
+ * last hosting check found it. `position` keeps the order the check put them in
+ * (heaviest first). A check replaces all of a row's incidents at once.
+ */
+export const hostingIncidents = pgTable(
+  'hosting_incidents',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    hostingId: uuid('hosting_id').notNull(),
+    title: text('title').notNull(),
+    impact: text('impact').$type<IncidentImpact>().notNull(),
+    scope: text('scope').$type<IncidentScope>().notNull(),
+    /** The provider's own status page for the incident; null when the feed gave no usable link. */
+    url: text('url'),
+    startedAt: timestamp('started_at', {withTimezone: true}),
+    position: integer('position').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'hosting_incidents_hosting_fk',
+      columns: [t.hostingId, t.workspaceId],
+      foreignColumns: [appHosting.id, appHosting.workspaceId],
+    }).onDelete('cascade'),
+    // Also serves "a hosting row's incidents", in order.
+    unique('hosting_incidents_hosting_position_unique').on(t.hostingId, t.position),
+    check('hosting_incidents_title_not_blank', sql`btrim(${t.title}) <> ''`),
+    check('hosting_incidents_impact_allowed', oneOf(t.impact, INCIDENT_IMPACTS)),
+    check('hosting_incidents_scope_allowed', oneOf(t.scope, INCIDENT_SCOPES)),
   ],
 );
 

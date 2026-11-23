@@ -48,13 +48,13 @@ export const HEALTH_FILTER_OPTIONS = [
 export const COMING_SOON = "Coming soon";
 export const MONITORING_COMING_SOON = 'Source monitoring is coming soon';
 export const LIVE_DATA_NOTE =
-  "Health scores come from dependency checks; hosting, licence and pricing checks are coming soon.";
+  "Health scores come from dependency and hosting checks; licence and pricing checks are coming soon.";
 
-/** Shown wherever a score is, while dependencies are the only monitored dimension. */
-export const HEALTH_BASIS_NOTE = "Based on dependencies; hosting checks coming soon.";
+/** Shown wherever a score is, while dependencies and hosting are the monitored dimensions. */
+export const HEALTH_BASIS_NOTE = "Based on dependencies and hosting; licence and pricing checks coming soon.";
 export const NO_SCORE_TITLE = "No health score yet";
 export const NO_SCORE_HINT =
-  "Import a package.json or package-lock.json on an application's Dependencies tab to score it. A score appears once its dependencies have been checked.";
+  "Import a package.json or package-lock.json on an application's Dependencies tab, or add where it runs on its Hosting tab, to score it. A score appears once they have been checked.";
 export const NOTHING_TO_CHECK = "Nothing recorded or checked yet";
 
 /** Badge colours of the prototype's score and check pills. */
@@ -100,6 +100,8 @@ export const CHECK_ERROR_LABEL: Record<DependencyCheckError, string> = {
     "Version is a range; import package-lock.json for exact versions",
 };
 /** Why a dependency has no status when no check has failed: none has finished yet. */
+/** Beside a looked-up end-of-support date whose version matched several releases. */
+export const VERSION_NOT_EXACT = 'Version is not exact; using the earliest matching release';
 export const NOT_CHECKED_YET = "Not checked yet";
 
 export const NOT_SET = "—";
@@ -123,3 +125,6 @@ export function formatCost(
   });
   return billingCycle ? `${amount} · ${billingCycle}` : amount;
 }
+
+/** Why a hosting row has no status when no check has failed. */
+export const NOT_MONITORED = "Not monitored";

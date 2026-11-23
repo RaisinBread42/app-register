@@ -68,24 +68,32 @@ const SEVERITY_BY_LABEL: Record<string, AdvisorySeverity> = {
 /** One package's place in a batch: `index` is its position in the caller's list. */
 type AdvisoryQuery = {index: number; package: PackageVersion; pageToken?: string};
 type AdvisoryIdPage = {ids: string[]; nextPageToken?: string};
+/** A response and the signal that ends its call, so the body is read under the same time limit. */
+type Answer = {response: Response; stop: AbortSignal};
 
 export function createPackageSources(send: Fetch = fetch): PackageSources {
-  async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  /** One call. The timeout (and the caller's `signal`) covers the whole answer, body included: see `json`. */
+  async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<Answer> {
     const timeout = AbortSignal.timeout(MONITORING_TIMEOUT_MS);
-    return send(url, {
+    const stop = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const response = await send(url, {
       ...init,
       headers: {...init.headers, [API_HEADER.userAgent]: MONITORING_USER_AGENT},
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      signal: stop,
       cache: 'no-store',
     });
+    return {response, stop};
   }
 
-  /** The answer as JSON; throws on an error status, a body over the size cap, or text that is not JSON. */
-  async function json(response: Response): Promise<unknown> {
+  /**
+   * The answer as JSON; throws on an error status, a body over the size cap, text
+   * that is not JSON, or a body still arriving when the call's time is up.
+   */
+  async function json({response, stop}: Answer): Promise<unknown> {
     if (!response.ok) {
       throw new Error(`Monitoring source answered ${response.status}`);
     }
-    const text = await readTextUpTo(response, MONITORING_MAX_RESPONSE_BYTES);
+    const text = await readTextUpTo(response, MONITORING_MAX_RESPONSE_BYTES, stop);
     if (text === null) {
       throw new Error('Monitoring source answered more than the size cap');
     }
@@ -105,7 +113,7 @@ export function createPackageSources(send: Fetch = fetch): PackageSources {
   }
 
   async function advisoryIdPage(queries: AdvisoryQuery[], signal?: AbortSignal): Promise<AdvisoryIdPage[]> {
-    const response = await request(
+    const sent = await request(
       `${OSV_API_URL}/querybatch`,
       {
         method: HTTP_METHOD.post,
@@ -120,7 +128,7 @@ export function createPackageSources(send: Fetch = fetch): PackageSources {
       },
       signal,
     );
-    const answer = await json(response);
+    const answer = await json(sent);
     const results = isPlainObject(answer) ? answer.results : undefined;
     if (!Array.isArray(results) || results.length !== queries.length) {
       throw malformed();
@@ -154,11 +162,11 @@ export function createPackageSources(send: Fetch = fetch): PackageSources {
     async latestVersion(name, signal) {
       // A scoped name keeps its "@" and has its "/" encoded: @types%2Fnode.
       const url = `${NPM_REGISTRY_URL}/${encodeURIComponent(name).replace('%40', '@')}/latest`;
-      const response = await request(url, {}, signal);
-      if (response.status === HTTP_STATUS.notFound) {
+      const sent = await request(url, {}, signal);
+      if (sent.response.status === HTTP_STATUS.notFound) {
         return null;
       }
-      const answer = await json(response);
+      const answer = await json(sent);
       const version = isPlainObject(answer) ? answer.version : undefined;
       if (typeof version !== 'string' || version === '' || version.length > DEPENDENCY_VERSION_MAX_LENGTH) {
         throw malformed();

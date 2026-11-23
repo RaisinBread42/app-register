@@ -129,7 +129,12 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
                 header: 'Dependencies',
                 renderCell: (app: App) => <DimensionPill dimension={app.health.dimensions.dependencies} />,
               },
-              {key: 'hosting', width: column(100), header: 'Hosting', renderCell: () => <PendingPill />},
+              {
+                key: 'hosting',
+                width: column(100),
+                header: 'Hosting',
+                renderCell: (app: App) => <DimensionPill dimension={app.health.dimensions.hosting} />,
+              },
               {key: 'licence', width: column(100), header: 'Licence', renderCell: () => <PendingPill />},
               {key: 'pricing', width: column(100), header: 'Pricing', renderCell: () => <PendingPill />},
               {
