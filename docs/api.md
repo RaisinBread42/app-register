@@ -85,10 +85,15 @@ A pipeline can post its lockfile on every build:
 curl -fsS -X POST "$APP_REGISTER_URL/api/apps/$APP_ID/dependencies/import" -H "Authorization: Bearer $APP_REGISTER_API_KEY" -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" --data-binary @package-lock.json
 ```
 
-- Only direct dependencies are taken: `dependencies` and `devDependencies` (dev ones are flagged `isDev`). Transitive packages are left out.
-- A lockfile gives the exact installed version (`packages["node_modules/<name>"].version`). A `package.json` gives its range with the operators stripped (`^16.4.6` → `16.4.6`); a tag such as `latest` is kept as written.
+- A file is a package file only if it has `lockfileVersion` and `packages`, or at least one of `dependencies`, `devDependencies` and `optionalDependencies` (an empty object counts). Any other JSON answers `400` and changes nothing, so a stray file can never empty an app's dependencies.
+- Only direct dependencies are taken: `dependencies`, `optionalDependencies` (both runtime) and `devDependencies` (flagged `isDev`). A name in several lists is recorded once, as a runtime dependency if any list makes it one. Transitive packages are left out.
+- A lockfile gives the exact installed version (`packages["node_modules/<name>"].version`). A `package.json` gives its range with the operators stripped (`^16.4.6` → `16.4.6`); a tag such as `latest` is kept as written, and an empty range means any version (`*`).
+- **A version that is not exact cannot be checked for advisories.** `^16` (stored as `16`), `~3.9`, `4.x`, `*` and tags are ranges: the dependency gets `checkError: "invalid_version"`, status `attention` and costs 1 point, with the note "Version is a range; import package-lock.json for exact versions". It is never `ok`. Its latest version is still looked up, and a major-only or major.minor version is still compared with it (`16` against `19.0.0` is a major version behind).
+- An npm alias is recorded under the real package name: the lockfile entry's `name`, or the name in `npm:<name>@<version>` in a `package.json`.
+- Names are trimmed. Two entries of one list with the same name after trimming (ignoring case) answer `400` naming the package. A name longer than 214 characters (npm's limit) or a version longer than 256 answers `400`; the same limits apply when a dependency is added or edited by hand.
+- Imports of one app run one at a time (each locks the app's row), so two pipelines posting at once both succeed.
 - Matching is by name, ignoring case. New names are added with `source: "import"`. Known names get the file's version. A name the file no longer lists is removed only if an earlier import created it; dependencies added by hand (`source: "manual"`) are never removed.
-- Malformed JSON, a JSON file that is not a package file, an npm 6 lockfile, or a file over 5 MB answers `400` and changes nothing.
+- Malformed JSON, a JSON file that is not a package file, an npm 6 lockfile, or a file over 5 MB answers `400` and changes nothing. The API key is checked first (`401`), and the size cap is enforced while the body is read, with or without a `Content-Length`.
 
 ## Dependency monitoring
 
@@ -97,10 +102,15 @@ Two free sources, no account or key:
 | Source | Request | Used for |
 | --- | --- | --- |
 | npm registry | `GET https://registry.npmjs.org/<name>/latest` (a scoped name as `@scope%2Fname`) | `latestVersion`; a `404` marks the dependency `checkError: "not_found"` |
-| OSV.dev | `POST https://api.osv.dev/v1/querybatch` with `{package: {name, ecosystem: "npm"}, version}` per dependency, then `GET https://api.osv.dev/v1/vulns/<id>` | `advisories`: id, aliases, severity (GitHub's rating in `database_specific.severity`), summary, link |
+| OSV.dev | `POST https://api.osv.dev/v1/querybatch` with `{package: {name, ecosystem: "npm"}, version}` per dependency (following `next_page_token`, at most 10 pages), then `GET https://api.osv.dev/v1/vulns/<id>` | `advisories`: id, aliases, severity (GitHub's rating in `database_specific.severity`), summary, link |
 
 - A check runs after an import, after a dependency is added or edited by hand, and on the two refresh endpoints. It runs after the write has committed, never inside its transaction; if a source is down the write still succeeds.
-- Each dependency stores `latestVersion`, `advisories`, `checkedAt` and `checkError`. One package failing never fails the refresh: `not_found` (not on the public registry: private, misspelt, or not an npm package), `unavailable` (a source did not answer; the previous result is kept), `invalid_version` (the tracked version is a range or tag, so advisories cannot be matched).
+- The check that follows a write holds up its response for at most 15 seconds. What it has not reached by then stays unchecked (status `na`) until the next refresh. It does not run again when a stored response is replayed for an `Idempotency-Key`. The refresh endpoints themselves have no overall limit.
+- Each dependency stores `latestVersion`, `advisories`, `checkedAt` and `checkError`. One package failing never fails the refresh: `not_found` (not on the public registry: private, misspelt, or not an npm package), `unavailable` (a source gave no usable answer; the previous result is kept), `invalid_version` (the tracked version is a range or tag, so advisories cannot be checked).
+- `checkedAt` is set only when the registry and OSV have both answered for the dependency's current name and version. It is `null` for a dependency not checked yet, one whose first check failed, one the registry does not know, and one whose version is a range. A later failed check keeps the earlier `checkedAt` and results, and adds `checkError: "unavailable"`.
+- Changing a dependency's name or version (by `PATCH` or by an import) clears its advisories, `checkedAt` and `checkError`; a rename also clears `latestVersion`, unless the same request sends a new one. A check that was in flight for the old name or version is discarded.
+- Nothing a source says is trusted. An answer over 1 MB, or not in the documented shape, counts as no answer (`unavailable`) and never replaces an earlier result. Each advisory is stored as text only: an id (at most 100 characters), up to 20 aliases, a severity from the known set (`unknown` otherwise), a summary cut at 300 characters, and a link that is always built from the id and points at osv.dev. Stored advisories are read the same way, so a bad row is skipped rather than failing the page.
+- The workspace refresh skips an app that is archived while it runs and carries on with the rest.
 - Only package names and versions are sent, with `User-Agent: app-register`, at most 6 requests at a time with an 8 second timeout. A name that is not a valid npm package name is never sent. Names of private packages do reach the npm registry (as they would from `npm install`).
 - Every dependency is treated as an npm package. A hand-added name that happens to match an unrelated public package would show that package's versions and advisories.
 
@@ -108,10 +118,10 @@ Two free sources, no account or key:
 
 Every app carries `health: { score, status, dimensions }`.
 
-- The score starts at 100 and loses points per deduction, never going below 0: 10 per critical advisory, 5 per high, 2 per medium or unrated, 0 per low; 3 per runtime dependency a major version behind the latest, 1 per runtime dependency a minor version behind. Dev dependencies lose points for advisories only.
-- `status`: below 80 is `critical`, below 95 is `attention`, otherwise `ok`. An app with no dependencies recorded has `score: null` and status `na`.
+- The score starts at 100 and loses points per deduction, never going below 0: 10 per critical advisory, 5 per high, 2 per medium or unrated, 0 per low; 3 per runtime dependency a major version behind the latest, 1 per runtime dependency a minor version behind; 1 per dependency whose version is a range (its advisories cannot be checked). Dev dependencies lose no points for being behind.
+- `status`: below 80 is `critical`, below 95 is `attention`, otherwise `ok`. An app with no dependencies recorded, or whose dependencies all have status `na` (none checked yet), has `score: null` and status `na`.
 - `dimensions` has one entry per dimension: `dependencies` is `{ status, deductions[] }`; `hosting`, `licence` and `pricing` are `null` until they are monitored. Each deduction is `{ dimension, label, detail, points }`.
-- Each dependency also has its own `status`: `critical` with a critical or high advisory, `attention` with anything else that costs points, `na` until it has been checked.
+- Each dependency also has its own `status`: `critical` with a critical or high advisory; `attention` with anything else that costs points (a version that is a range always does); `ok` only when the registry and OSV have both answered for its current name and version; otherwise `na`, with the reason in `checkError` (`null` there means it has not been checked yet). The Dependencies tab shows that reason beside the status.
 - An advisory id recorded by hand (`vulnerabilities`) counts once: not again when monitoring finds the same advisory under that id or an alias, and as unrated when monitoring does not know it.
 
 ## Example
