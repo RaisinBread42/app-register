@@ -47,7 +47,7 @@ UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, e
 - Seed and demo data must be fictional — never real company, client, or employer data.
 - No magic strings for statuses, kinds, routes, or alert offsets: put them in `src/lib/constants.ts`.
 - Every table except `workspaces` carries `workspace_id`; children reference parents by `(id, workspace_id)` so a row can never point into another workspace. One default workspace until sign-in exists.
-- Relational data only: no `json`/`jsonb` columns, no array columns and no serialised JSON in a text column; a list becomes a child table (see `dependency_advisories`), and a test in `src/lib/db/schema.test.ts` fails on any JSON or array column.
+- Relational data only: no `json`/`jsonb` columns, no array columns and no serialised JSON in a text column; a list becomes a child table (see `dependency_advisories` and `hosting_incidents`), and a test in `src/lib/db/schema.test.ts` fails on any JSON or array column.
 - Allowed values are `text` plus a `CHECK` built from the arrays in `src/lib/constants.ts` (no Postgres `ENUM`).
 - Ids come from `newId()` (`src/lib/db/ids.ts`), never a DB default. `updated_at` is set by Drizzle `$onUpdate`, so all writes go through services.
 - Apps are soft-deleted (`archived_at`); active-app queries share one filter in `src/lib/services/apps.ts`.
