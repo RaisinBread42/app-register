@@ -75,12 +75,15 @@ export async function createApiKey(
     keyPrefix: key.slice(0, VISIBLE_KEY_LENGTH),
     expiresAt,
   };
-  await db.insert(apiKeys).values(row);
-  if (scopes.length > 0) {
-    await db.insert(apiKeyScopes).values(
-      scopes.map((scope) => ({apiKeyId: row.id, workspaceId, scope})),
-    );
-  }
+  // One transaction: a failed scope insert must not leave an unrestricted key.
+  await db.transaction(async (tx) => {
+    await tx.insert(apiKeys).values(row);
+    if (scopes.length > 0) {
+      await tx.insert(apiKeyScopes).values(
+        scopes.map((scope) => ({apiKeyId: row.id, workspaceId, scope})),
+      );
+    }
+  });
   return {
     id: row.id,
     name: row.name,
