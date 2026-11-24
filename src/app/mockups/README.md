@@ -1,6 +1,6 @@
-# App Register mockups (v2)
+# App Register mockups
 
-Throwaway Astryx screens on branch `mockups/03-app-list` for Shannon. **Not** product implementation.
+Throwaway Astryx screens on branch `mockups/05-leaver-checklist` (built on the approved [03] Obsidian mockups). **Not** product implementation.
 
 ## Theme
 
@@ -15,26 +15,21 @@ Obsidian Software brand via custom Astryx theme `obsidian` (primary `#612CCC`, d
 | `/mockups/edit?id=` | App detail: score breakdown + Overview / Deps / Hosting / Notices / Sources |
 | `/mockups/notices` | Cross-app notices feed with filters |
 | `/mockups/sources` | Watched sources + Add source |
-| `/mockups/settings` | Placeholder (Leavers / Quarterly review hidden) |
+| `/mockups/leaver` | **[05]** Pick who is leaving |
+| `/mockups/leaver/checklist` | **[05]** Apps they own or back up + reassign (both roles filled) |
+| `/mockups/leaver/done` | **[05]** Empty “all reassigned” state |
+| `/mockups/settings` | Placeholder |
 | `/mockups/create` | Add app (still available) |
 
 ## Capture
 
 ```bash
 # with `npm run dev` on :3000 and next.config `devIndicators: false`
-node --experimental-strip-types=false scripts/capture-mockups.mjs
-# or: npx playwright test / run via node after `npm i -D playwright`
+node scripts/capture-mockups.mjs
 ```
 
-PNGs land in `/opt/cursor/artifacts/v2-01-…`.
+PNGs for [05] land in `docs/mockups/05-leaver-checklist/` (committed) and are also copied to `/opt/cursor/artifacts/`.
 
-## Scoring (demo)
+## Seed
 
-Start at 100. Floor at 0.
-
-- Dependencies: −10 critical CVE, −5 high, −2 medium; −3 major behind, −1 minor behind
-- Licence: −15 notice ≤30d, −8 ≤60d, −4 ≤90d, −20 overdue
-- Pricing: −5 announced increase
-- Hosting: −12 EOS ≤90d, −25 past EOS, −8 regional outage, −3 pending platform update
-
-Sort apps by score ascending (worst first).
+Fictional tenant **Meridian Labs** only. Leaver demo person: Priya Chen (owner of Sentinel Access + Nimbus Mail; backup on Atlas Board).

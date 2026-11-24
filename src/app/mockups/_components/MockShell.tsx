@@ -17,6 +17,7 @@ export type MockNav =
   | 'apps'
   | 'notices'
   | 'sources'
+  | 'leaver'
   | 'settings'
   | 'detail';
 
@@ -72,6 +73,12 @@ export function MockShell({children, active}: MockShellProps) {
               href="/mockups/sources"
               isSelected={active === 'sources'}
               icon="externalLink"
+            />
+            <SideNavItem
+              label="Leavers"
+              href="/mockups/leaver"
+              isSelected={active === 'leaver'}
+              icon="check"
             />
           </SideNavSection>
           <SideNavSection title="Admin">

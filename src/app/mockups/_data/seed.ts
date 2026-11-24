@@ -80,6 +80,120 @@ export const MOCK_ORG = {
   itTeam: 'IT team of 3',
 };
 
+/** People who can own or back up apps. Demo only — Meridian Labs. */
+export type MockPerson = {
+  id: string;
+  name: string;
+  email: string;
+  team: string;
+  status: 'active' | 'leaving';
+};
+
+export const MOCK_PEOPLE: MockPerson[] = [
+  {
+    id: 'p1',
+    name: 'Priya Chen',
+    email: 'priya.chen@meridian.demo',
+    team: 'IT',
+    status: 'leaving',
+  },
+  {
+    id: 'p2',
+    name: 'Marcus Okonkwo',
+    email: 'marcus.o@meridian.demo',
+    team: 'IT',
+    status: 'active',
+  },
+  {
+    id: 'p3',
+    name: 'Elena Vogt',
+    email: 'elena.v@meridian.demo',
+    team: 'Engineering',
+    status: 'active',
+  },
+  {
+    id: 'p4',
+    name: 'Jordan Hale',
+    email: 'jordan.h@meridian.demo',
+    team: 'Sales ops',
+    status: 'active',
+  },
+  {
+    id: 'p5',
+    name: 'Jamal Reyes',
+    email: 'jamal.r@meridian.demo',
+    team: 'IT',
+    status: 'active',
+  },
+];
+
+export type OwnershipRole = 'owner' | 'backup';
+
+export type MockLeaverApp = {
+  id: string;
+  appId: string;
+  appName: string;
+  kindLabel: string;
+  role: OwnershipRole;
+  roleLabel: string;
+  otherRole: OwnershipRole;
+  otherRoleLabel: string;
+  otherPersonName: string;
+  /** Suggested reassignment targets (both roles must stay filled). */
+  suggestedOwnerId: string;
+  suggestedBackupId: string;
+};
+
+/** Apps where `personName` is owner or backup. */
+export function appsForPerson(personName: string): MockLeaverApp[] {
+  const rows: MockLeaverApp[] = [];
+  for (const app of MOCK_APPS) {
+    if (app.owner === personName) {
+      rows.push({
+        id: `${app.id}-owner`,
+        appId: app.id,
+        appName: app.name,
+        kindLabel: app.kindLabel,
+        role: 'owner',
+        roleLabel: 'Owner',
+        otherRole: 'backup',
+        otherRoleLabel: 'Backup',
+        otherPersonName: app.backupOwner,
+        suggestedOwnerId: personIdByName(app.backupOwner) ?? 'p2',
+        suggestedBackupId: 'p5',
+      });
+    }
+    if (app.backupOwner === personName) {
+      rows.push({
+        id: `${app.id}-backup`,
+        appId: app.id,
+        appName: app.name,
+        kindLabel: app.kindLabel,
+        role: 'backup',
+        roleLabel: 'Backup',
+        otherRole: 'owner',
+        otherRoleLabel: 'Owner',
+        otherPersonName: app.owner,
+        suggestedOwnerId: personIdByName(app.owner) ?? 'p2',
+        suggestedBackupId: 'p5',
+      });
+    }
+  }
+  return rows;
+}
+
+export function personIdByName(name: string): string | undefined {
+  return MOCK_PEOPLE.find((p) => p.name === name)?.id;
+}
+
+export function personOptions(excludeId?: string) {
+  return MOCK_PEOPLE.filter((p) => p.id !== excludeId).map((p) => ({
+    value: p.id,
+    label: p.name,
+    description: `${p.team} · ${p.email}`,
+  }));
+}
+
 /**
  * Scoring (shown in UI + report):
  * Start at 100. Deductions stack per category, floor at 0.

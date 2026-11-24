@@ -1,44 +1,29 @@
 import {chromium} from 'playwright';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, copyFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
 
+const repoShots = join(
+  process.cwd(),
+  'docs/mockups/05-leaver-checklist',
+);
+mkdirSync(repoShots, {recursive: true});
 mkdirSync('/opt/cursor/artifacts', {recursive: true});
 
 const shots = [
   {
-    path: '/opt/cursor/artifacts/v2-01-overview.png',
-    url: 'http://localhost:3000/mockups/overview',
+    file: '01-pick-person.png',
+    url: 'http://localhost:3000/mockups/leaver',
+    description: 'Pick who is leaving',
   },
   {
-    path: '/opt/cursor/artifacts/v2-02-apps-list.png',
-    url: 'http://localhost:3000/mockups/list',
+    file: '02-checklist-reassign.png',
+    url: 'http://localhost:3000/mockups/leaver/checklist',
+    description: 'Owned/backup apps with reassign controls',
   },
   {
-    path: '/opt/cursor/artifacts/v2-03-app-detail.png',
-    url: 'http://localhost:3000/mockups/edit?id=a5',
-  },
-  {
-    path: '/opt/cursor/artifacts/v2-04-notices.png',
-    url: 'http://localhost:3000/mockups/notices',
-  },
-  {
-    path: '/opt/cursor/artifacts/v2-05-sources.png',
-    url: 'http://localhost:3000/mockups/sources',
-  },
-  {
-    path: '/opt/cursor/artifacts/v2-06-app-deps.png',
-    url: 'http://localhost:3000/mockups/edit?id=a4',
-    after: async (page) => {
-      await page.getByRole('tab', {name: 'Dependencies'}).click();
-      await page.waitForTimeout(400);
-    },
-  },
-  {
-    path: '/opt/cursor/artifacts/v2-07-app-hosting.png',
-    url: 'http://localhost:3000/mockups/edit?id=a5',
-    after: async (page) => {
-      await page.getByRole('tab', {name: 'Hosting'}).click();
-      await page.waitForTimeout(400);
-    },
+    file: '03-all-reassigned.png',
+    url: 'http://localhost:3000/mockups/leaver/done',
+    description: 'Empty all-reassigned state',
   },
 ];
 
@@ -49,9 +34,9 @@ const page = await browser.newPage({
 });
 
 for (const shot of shots) {
-  console.log('capturing', shot.url);
+  const dest = join(repoShots, shot.file);
+  console.log('capturing', shot.url, '→', dest);
   await page.goto(shot.url, {waitUntil: 'networkidle', timeout: 60000});
-  // Belt-and-braces: hide Next.js / turbopack floating widgets if any slip through
   await page.addStyleTag({
     content: `
       [data-nextjs-toast],
@@ -65,9 +50,10 @@ for (const shot of shots) {
     `,
   });
   await page.waitForTimeout(900);
-  if (shot.after) await shot.after(page);
-  await page.screenshot({path: shot.path, fullPage: false});
-  console.log('wrote', shot.path);
+  mkdirSync(dirname(dest), {recursive: true});
+  await page.screenshot({path: dest, fullPage: false});
+  copyFileSync(dest, join('/opt/cursor/artifacts', `05-leaver-${shot.file}`));
+  console.log('wrote', dest, `(${shot.description})`);
 }
 
 await browser.close();
