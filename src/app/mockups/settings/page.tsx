@@ -13,7 +13,7 @@ export default function MockSettingsPage() {
         <Heading level={1}>Settings</Heading>
         <Text type="body" color="secondary" display="block">
           Tenant preferences for {MOCK_ORG.name}. Placeholder for mockups —
-          Leavers and Quarterly review stay hidden until Shannon asks for them.
+          Leavers live under Workspace → Leavers; Quarterly review stays later.
         </Text>
         <Badge label="Demo only" variant="info" />
       </VStack>
