@@ -204,7 +204,9 @@ export default function MockLeaverChecklistPage() {
                     label="Reassign"
                     variant="primary"
                     size="sm"
-                    isDisabled={!state?.ownerId || !state?.backupId || samePerson}
+                    isDisabled={
+                      !state?.ownerId || !state?.backupId || Boolean(samePerson)
+                    }
                     onClick={() => reassign(row)}
                   />
                 );

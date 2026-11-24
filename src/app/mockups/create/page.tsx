@@ -80,15 +80,15 @@ export default function MockCreatePage() {
         <HStack gap={3} wrap="wrap">
           <TextInput
             label="Notice deadline"
-            type="date"
             value={notice}
             onChange={setNotice}
+            placeholder="YYYY-MM-DD"
           />
           <TextInput
             label="Renewal date"
-            type="date"
             value={renewal}
             onChange={setRenewal}
+            placeholder="YYYY-MM-DD"
           />
           <TextInput
             label="Annual cost"
