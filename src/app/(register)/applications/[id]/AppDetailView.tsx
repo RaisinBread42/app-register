@@ -114,7 +114,8 @@ export function AppDetailView({app, notices, activity, initialTab, keys, catalog
         archive.run(
           () => archiveAppAction(keys.archive, app.id),
           () => {
-            showToast({body: `${app.name} archived`, endContent: <Button label="Undo" size="sm" variant="secondary" onClick={() => void undoArchive()} />});
+            // Undo stays until dismissed (WCAG 2.2.1): focus moves to the list, so a timed toast could vanish first.
+            showToast({body: `${app.name} archived`, isAutoHide: false, endContent: <Button label="Undo" size="sm" variant="secondary" onClick={() => void undoArchive()} />});
             router.push(ROUTES.applications);
           },
         );

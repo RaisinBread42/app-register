@@ -204,8 +204,9 @@ test('ADV23-E11 AC5 (held?): an empty inventory explains the next step, never lo
     expect(archived.ok(), await archived.text()).toBe(true);
   }
   await page.goto('/applications');
-  await expect(page.getByText('No applications yet')).toBeVisible();
-  // One primary action: the empty state's (the header leaves it out so there are not two identical buttons).
+  // Every app is archived: the list says so and points to the Archived list ([24]), with one Add button.
+  await expect(page.getByText('No active applications')).toBeVisible();
+  await expect(page.getByText(/are archived\. Unarchive one from the Archived list/)).toBeVisible();
   await expect(page.getByRole('button', {name: '+ Add application'})).toHaveCount(1);
   const body = await page.locator('body').innerText();
   console.log('ADV23-E11 empty page text:', body.replace(/\s+/g, ' ').slice(0, 400));

@@ -1,5 +1,6 @@
 import {BOUGHT_APP_KINDS, SETUP_ITEM, type SetupItemKey} from '@/lib/constants';
 import type {AppDetail} from './api-client';
+import {checkTimes} from './register-view';
 
 /**
  * The setup checklist on an app's page (spec Journey B, [24]): what to add so App
@@ -11,13 +12,15 @@ import type {AppDetail} from './api-client';
 
 export type SetupItem = {key: SetupItemKey; isDone: boolean};
 
-export function setupChecklist(app: Pick<AppDetail, 'kind' | 'vendor' | 'renewalDate' | 'noticeDeadline' | 'hosting' | 'dependencies' | 'repositoryUrl' | 'health'>): SetupItem[] {
+export function setupChecklist(app: Pick<AppDetail, 'kind' | 'vendor' | 'renewalDate' | 'noticeDeadline' | 'hosting' | 'dependencies' | 'repositoryUrl'>): SetupItem[] {
   const isBought = BOUGHT_APP_KINDS.includes(app.kind);
+  // A source answered for it (a complete dependency check, or a clean hosting check); a date typed by hand is not a check.
+  const times = checkTimes(app);
   return [
     ...(isBought ? [{key: SETUP_ITEM.supplier, isDone: Boolean(app.vendor && (app.renewalDate || app.noticeDeadline))}] : []),
     {key: SETUP_ITEM.hosting, isDone: app.hosting.length > 0},
     ...(isBought ? [] : [{key: SETUP_ITEM.code, isDone: app.dependencies.length > 0 || Boolean(app.repositoryUrl)}]),
-    {key: SETUP_ITEM.firstCheck, isDone: app.health.score !== null},
+    {key: SETUP_ITEM.firstCheck, isDone: times.dependencies !== null || times.hosting !== null},
   ];
 }
 

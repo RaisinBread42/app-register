@@ -55,10 +55,16 @@ export async function archiveAppAction(idempotencyKey: string, id: string): Prom
   return result;
 }
 
+const ARCHIVED_AGAIN = 'It was archived again after this Undo was offered. Unarchive it from Applications › Archived.';
+
+/** Says done only when the app is active: a repeated Undo replays an earlier answer while the app may be archived again. */
 export async function unarchiveAppAction(idempotencyKey: string, id: string): Promise<ActionResult> {
-  const result = await runAction(() => apiClient().unarchiveApp(idempotencyKey, id));
+  let isStillArchived = false;
+  const result = await runAction(async () => {
+    isStillArchived = (await apiClient().unarchiveApp(idempotencyKey, id)).archivedAt !== null;
+  });
   refreshApps();
-  return result;
+  return result.ok && isStillArchived ? {ok: false, error: ARCHIVED_AGAIN} : result;
 }
 
 export async function saveDependencyAction(

@@ -2,6 +2,7 @@
 -- Roll back newest first: run this before 0009's rollback.
 -- Not destructive: the audit history is append-only, so 'app.unarchived' events stay. The narrower
 -- check comes back NOT VALID: it applies to new rows only and existing rows are left as they are.
+-- Code from before 0010 has no wording for those events, so roll the code back only together with this.
 BEGIN;
 
 ALTER TABLE "audit_events" DROP CONSTRAINT IF EXISTS "audit_events_action_allowed";

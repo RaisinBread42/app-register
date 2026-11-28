@@ -85,6 +85,7 @@ test('D: closing the drawer with Escape returns focus to the row that opened it 
   await expect(rows(page).nth(1)).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('dialog,[role="dialog"]')))).toBe(true);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const focused = await page.evaluate(() => `${document.activeElement?.tagName} ${document.activeElement?.textContent?.slice(0, 40)}`);

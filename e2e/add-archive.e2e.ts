@@ -45,6 +45,9 @@ test('adding by keyboard lands on the new app with its setup checklist and no sc
   await expect(page.getByText(`${name} is active again`).first()).toBeVisible();
   await expect(page.getByRole('link', {name}).first()).toBeVisible();
 
+  // The archive toast keeps its Undo until dismissed (WCAG 2.2.1); close it before going on.
+  await page.getByRole('region', {name: 'Notifications'}).getByRole('button', {name: /dismiss|close/i}).first().click();
+
   // Archive again, then bring it back from the Archived list.
   await page.getByRole('link', {name}).first().click();
   await page.getByRole('button', {name: 'Archive'}).click();

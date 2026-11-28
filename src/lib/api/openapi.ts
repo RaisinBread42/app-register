@@ -4,10 +4,12 @@ import {
   API_KEY_NAME_MAX_LENGTH,
   API_KEY_SCOPES,
   API_KEY_STATUSES,
+  API_QUERY,
   BYTES_PER_MB,
   APP_CRITICALITIES,
   APP_ENVIRONMENTS,
   APP_KINDS,
+  APP_STATE,
   APP_STATES,
   ACTION_NOTE_MAX_LENGTH,
   AUDIT_ACTION,
@@ -574,7 +576,7 @@ export const openApiSpec = {
       get: {
         summary: 'List active apps, or archived ones with state=archived',
         parameters: [
-          {name: 'state', in: 'query', description: 'archived lists archived apps by name; the other filters then do not apply', schema: {type: 'string', enum: [...APP_STATES], default: 'active'}},
+          {name: API_QUERY.state, in: 'query', description: 'archived lists archived apps by name; the other filters then do not apply', schema: {type: 'string', enum: [...APP_STATES], default: APP_STATE.active}},
           {name: 'kind', in: 'query', schema: {type: 'string', enum: [...APP_KINDS]}},
           {name: 'sort', in: 'query', schema: {type: 'string', enum: [...APP_SORTS], default: 'name'}},
           {

@@ -1,4 +1,4 @@
-import {and, asc, between, eq, inArray, isNotNull, sql} from 'drizzle-orm';
+import {and, asc, between, eq, gte, inArray, isNotNull, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
 import {
   APP_CRITICALITIES,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appDependencies, appEnvironments, appHosting, apps, people} from '@/lib/db/schema';
+import {appDependencies, appEnvironments, appHosting, appNoticeMatches, apps, people} from '@/lib/db/schema';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
@@ -362,22 +362,30 @@ export async function unarchiveApp(
   actor: Actor = SYSTEM_ACTOR,
   today = todayIso(),
 ): Promise<void> {
-  await getApp(db, workspaceId, id);
-  await withNameCheck(() =>
-    db.transaction(async (tx) => {
-      const [restored] = await tx
-        .update(apps)
-        .set({archivedAt: null})
-        .where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, id), isNotNull(apps.archivedAt)))
-        .returning({noticeDeadline: apps.noticeDeadline});
-      if (!restored) {
-        return;
-      }
-      if (restored.noticeDeadline) {
-        await scheduleAlerts(tx, workspaceId, id, restored.noticeDeadline, today);
-      }
-      await recordAppEvent(tx, workspaceId, id, {action: AUDIT_ACTION.appUnarchived, actor, fromValue: null, toValue: null, note: null});
-    }),
+  const {archivedAt} = await getApp(db, workspaceId, id);
+  await withNameCheck(
+    () =>
+      db.transaction(async (tx) => {
+        const [restored] = await tx
+          .update(apps)
+          .set({archivedAt: null})
+          .where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, id), isNotNull(apps.archivedAt)))
+          .returning({noticeDeadline: apps.noticeDeadline});
+        if (!restored || !archivedAt) {
+          return;
+        }
+        // Notices the archive closed come back as they were (a handled one stays handled, with its
+        // evidence); the check below then closes any the source no longer reports.
+        await tx
+          .update(appNoticeMatches)
+          .set({resolvedAt: null})
+          .where(and(eq(appNoticeMatches.workspaceId, workspaceId), eq(appNoticeMatches.appId, id), gte(appNoticeMatches.resolvedAt, new Date(archivedAt))));
+        if (restored.noticeDeadline) {
+          await scheduleAlerts(tx, workspaceId, id, restored.noticeDeadline, today);
+        }
+        await recordAppEvent(tx, workspaceId, id, {action: AUDIT_ACTION.appUnarchived, actor, fromValue: null, toValue: null, note: null});
+      }),
+    NAME_TAKEN_ON_UNARCHIVE,
   );
   await syncAppNoticesSafely(db, workspaceId, id);
 }
@@ -533,12 +541,15 @@ function toAppView(
 }
 
 /** Active app names are unique per workspace (case-insensitive). */
-async function withNameCheck(write: () => Promise<void>): Promise<void> {
+const NAME_TAKEN = 'Application name: an active application already has this name. Choose another name, or rename or archive the other one first.';
+const NAME_TAKEN_ON_UNARCHIVE = 'Application name: an active application already has this name. Rename that one first, then unarchive this one.';
+
+async function withNameCheck(write: () => Promise<void>, message = NAME_TAKEN): Promise<void> {
   try {
     await write();
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new ValidationError('An active app with this name already exists');
+      throw new ValidationError(message);
     }
     throw error;
   }

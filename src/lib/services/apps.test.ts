@@ -185,7 +185,7 @@ describe('app domain model', () => {
     const reused = await createApp(t.db, t.workspaceId, saas('fabrikam drive'), TODAY);
     expect((await listActiveApps(t.db, t.workspaceId)).map((a) => a.id)).toEqual([reused.id]);
     await expect(createApp(t.db, t.workspaceId, saas('FABRIKAM DRIVE'))).rejects.toThrow(
-      /already exists/,
+      /already has this name/,
     );
   });
 
@@ -216,7 +216,7 @@ describe('app domain model', () => {
     await archiveApp(t.db, t.workspaceId, old.id);
     await createApp(t.db, t.workspaceId, saas('fabrikam drive'), TODAY);
 
-    await expect(unarchiveApp(t.db, t.workspaceId, old.id)).rejects.toThrow(/already exists/);
+    await expect(unarchiveApp(t.db, t.workspaceId, old.id)).rejects.toThrow(/already has this name. Rename that one first/);
     expect((await getApp(t.db, t.workspaceId, old.id)).archivedAt).not.toBeNull();
     expect((await listAuditEvents(t.db, t.workspaceId, {appId: old.id})).map((event) => event.action)).toEqual([AUDIT_ACTION.appArchived]);
   });

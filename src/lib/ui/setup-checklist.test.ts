@@ -22,8 +22,14 @@ describe('setup checklist', () => {
     expect(done(app({kind: APP_KIND.citizenBuilt, repositoryUrl: 'https://git.example.test/x'}))[SETUP_ITEM.code]).toBe(true);
   });
 
-  it('the checklist goes away once everything is in, including the first check (a score exists)', () => {
-    const complete = app({kind: APP_KIND.inHouse, hosting: [{}] as AppDetail['hosting'], repositoryUrl: 'https://git.example.test/x', health: {score: 92} as AppDetail['health']});
+  it('the checklist goes away once everything is in, including a real first check by a source (a typed date is not one)', () => {
+    const typedOnly = app({kind: APP_KIND.inHouse, hosting: [{healthCheckedAt: null, healthError: null}] as AppDetail['hosting'], health: {score: 88} as AppDetail['health']});
+    expect(done(typedOnly)[SETUP_ITEM.firstCheck]).toBe(false);
+    const complete = app({
+      kind: APP_KIND.inHouse,
+      hosting: [{healthCheckedAt: '2026-11-28T05:00:00Z', healthError: null}] as AppDetail['hosting'],
+      repositoryUrl: 'https://git.example.test/x',
+    });
     expect(isSetupIncomplete(setupChecklist(complete))).toBe(false);
     expect(isSetupIncomplete(setupChecklist(app({})))).toBe(true);
   });

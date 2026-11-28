@@ -10,7 +10,7 @@ test('adding an application asks for name, type, criticality and owner; backup o
   await dialog.getByRole('button', {name: /^Owner/}).click();
   await page.getByRole('option', {name: /Avery Quinn/}).click();
   await dialog.getByRole('button', {name: 'Add application'}).click();
-  await expect(dialog.getByText('Choose how critical this application is.')).toBeVisible();
+  await expect(dialog.getByText(/^Criticality: choose/).first()).toBeVisible();
 
   await dialog.getByRole('combobox', {name: /^Criticality/}).click();
   await page.getByRole('option', {name: 'High'}).click();

@@ -315,36 +315,50 @@ function ArchivedTable({apps, total, keys}: {apps: App[]; total: number; keys: R
   const router = useRouter();
   const showToast = useToast();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const regionRef = useRef<HTMLDivElement>(null);
   const restore = async (app: App) => {
     setPendingId(app.id);
     const result = await unarchiveAppAction(keys[app.id], app.id);
     setPendingId(null);
     showToast(result.ok ? {body: `${app.name} is active again`} : {body: `Could not unarchive: ${result.error}`, type: 'error'});
+    // The row (and its button) leaves the list: keep keyboard focus on the list, not the page.
+    regionRef.current?.focus();
     router.refresh();
   };
   return (
-    <Table
-      aria-label="Archived applications"
-      data={apps}
-      idKey="id"
-      hasHover
-      emptyState={
-        <EmptyState
-          title={total === 0 ? 'No archived applications' : 'No archived applications match the search'}
-          description={total === 0 ? 'Archived applications show here, each with Unarchive.' : 'Change or clear the search.'}
-          isCompact
-        />
-      }
-      columns={[
-        {key: 'name', header: 'Application', width: proportional(2, {minWidth: 170}), renderCell: (app: App) => <AppCell app={app} />},
-        {key: 'archived', header: 'Archived on', width: column(1), renderCell: (app: App) => (app.archivedAt ? formatDate(app.archivedAt) : '')},
-        {
-          key: 'action',
-          header: 'Action',
-          width: column(1),
-          renderCell: (app: App) => <Button label="Unarchive" size="sm" variant="secondary" isLoading={pendingId === app.id} onClick={() => void restore(app)} />,
-        },
-      ]}
-    />
+    <VStack ref={regionRef} tabIndex={-1} gap={0}>
+      <Table
+        aria-label="Archived applications"
+        data={apps}
+        idKey="id"
+        hasHover
+        emptyState={
+          <EmptyState
+            title={total === 0 ? 'No archived applications' : 'Nothing archived matches the search'}
+            description={total === 0 ? 'Archived applications show here, each with Unarchive.' : 'Change or clear the search.'}
+            isCompact
+          />
+        }
+        columns={[
+          {
+            key: 'name',
+            header: 'Application',
+            width: proportional(2, {minWidth: 150}),
+            renderCell: (app: App) => (
+              <VStack gap={1}>
+                <AppCell app={app} />
+                <Text type="supporting" color="secondary">{`Archived ${app.archivedAt ? formatDate(app.archivedAt) : ''}`}</Text>
+              </VStack>
+            ),
+          },
+          {
+            key: 'action',
+            header: 'Action',
+            width: proportional(1, {minWidth: 100}),
+            renderCell: (app: App) => <Button label="Unarchive" size="sm" variant="secondary" isLoading={pendingId === app.id} onClick={() => void restore(app)} />,
+          },
+        ]}
+      />
+    </VStack>
   );
 }
