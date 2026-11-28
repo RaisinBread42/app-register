@@ -1,4 +1,5 @@
 import {
+  ADVISORY_SEVERITY,
   APP_CRITICALITIES,
   APP_CRITICALITY,
   APP_ENVIRONMENT,
@@ -174,6 +175,15 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
 export const healthVerdict = (score: number) =>
   score >= HEALTH_ATTENTION_BELOW ? HEALTHY : NEEDS_ATTENTION;
 
+
+/** An advisory's severity in words, so a badge never says it by colour alone (spec §11). */
+export const ADVISORY_SEVERITY_LABEL: Record<AdvisorySeverity, string> = {
+  [ADVISORY_SEVERITY.critical]: "Critical",
+  [ADVISORY_SEVERITY.high]: "High",
+  [ADVISORY_SEVERITY.medium]: "Medium",
+  [ADVISORY_SEVERITY.low]: "Low",
+  [ADVISORY_SEVERITY.unknown]: "Unrated",
+};
 
 export const SEVERITY_VARIANT: Record<AdvisorySeverity, StatusVariant> = {
   critical: "red",

@@ -95,11 +95,15 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
     <Drawer isOpen onOpenChange={(isOpen) => !isOpen && (reset(), onClose())} label={notice.title} width={520} padding={6} purpose="form">
       <VStack gap={5}>
         <VStack gap={2}>
-          <HStack gap={2} wrap="wrap" vAlign="center">
-            <Badge label={NOTICE_SEVERITY_LABEL[notice.severity]} variant={NOTICE_SEVERITY_VARIANT[notice.severity]} />
-            <Text type="supporting" color="secondary">
-              {`${NOTICE_CATEGORY_LABEL[notice.category]} · ${MATCH_STATUS_LABEL[match.status]}`}
-            </Text>
+          <HStack gap={2} wrap="wrap" vAlign="center" hAlign="between">
+            <HStack gap={2} wrap="wrap" vAlign="center">
+              <Badge label={NOTICE_SEVERITY_LABEL[notice.severity]} variant={NOTICE_SEVERITY_VARIANT[notice.severity]} />
+              <Text type="supporting" color="secondary">
+                {`${NOTICE_CATEGORY_LABEL[notice.category]} · ${MATCH_STATUS_LABEL[match.status]}`}
+              </Text>
+            </HStack>
+            {/* The same close control every dialog has ([30]); Escape closes it too. */}
+            <Button label="Close" variant="ghost" size="sm" onClick={() => (reset(), onClose())} />
           </HStack>
           <Heading level={2} ref={titleRef} tabIndex={-1}>
             {notice.title}
@@ -163,7 +167,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
             <TextArea label="Reason" value={note} onChange={(value) => setNote(value ?? '')} isRequired />
             <HStack gap={2}>
               <Button label="Snooze" variant="primary" isLoading={action.isPending} onClick={() => setStatus(MATCH_STATUS.snoozed, {note, snoozedUntil: until})} />
-              <Button label="Cancel" onClick={reset} />
+              <Button label="Cancel" variant="ghost" onClick={reset} />
             </HStack>
           </VStack>
         )}
@@ -172,7 +176,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
             <TextArea label="Evidence" description="What was done, and where to see it (a change, ticket or decision)." value={note} onChange={(value) => setNote(value ?? '')} isRequired />
             <HStack gap={2}>
               <Button label="Mark handled" variant="primary" isLoading={action.isPending} onClick={() => setStatus(MATCH_STATUS.handled, {note})} />
-              <Button label="Cancel" onClick={reset} />
+              <Button label="Cancel" variant="ghost" onClick={reset} />
             </HStack>
           </VStack>
         )}
@@ -181,7 +185,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
             <Selector label="Owner" options={people} value={assignee} onChange={setAssignee} hasSearch hasClear placeholder="No owner" />
             <HStack gap={2}>
               <Button label="Assign owner" variant="primary" isLoading={action.isPending} onClick={assign} />
-              <Button label="Cancel" onClick={reset} />
+              <Button label="Cancel" variant="ghost" onClick={reset} />
             </HStack>
           </VStack>
         )}

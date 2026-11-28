@@ -304,7 +304,12 @@ function HealthBreakdown({health, limit}: {health: Health; limit?: number}) {
         </BreakdownRow>
       )}
       <BreakdownRow title="Current health score">
-        <ScorePill health={health} />
+        <HStack gap={2} vAlign="center">
+          <Text size="sm" color="secondary">
+            {healthVerdict(health.score)}
+          </Text>
+          <ScorePill health={health} />
+        </HStack>
       </BreakdownRow>
       <FootNote>{scoreBasis(health)}</FootNote>
     </VStack>

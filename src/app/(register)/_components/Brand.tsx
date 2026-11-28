@@ -20,7 +20,7 @@ export function BrandMark() {
         color: 'var(--color-on-dark)',
         background:
           'linear-gradient(135deg, color-mix(in srgb, var(--color-accent), var(--color-on-dark) 25%), var(--color-accent) 60%, color-mix(in srgb, var(--color-accent), var(--color-on-light) 45%))',
-        boxShadow: '0 5px 15px color-mix(in srgb, var(--color-accent) 33%, transparent)',
+        boxShadow: 'var(--shadow-med)',
       }}>
       <Icon icon={DiamondIcon} size="md" />
     </HStack>
