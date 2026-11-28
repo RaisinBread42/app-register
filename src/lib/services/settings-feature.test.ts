@@ -128,7 +128,7 @@ describe('Settings: monitoring sources and scoped API keys', () => {
 
     // Settings shows a Copy control next to the one-time key.
     const view = readFileSync(
-      path.join(process.cwd(), 'src/app/(register)/settings/SettingsView.tsx'),
+      path.join(process.cwd(), 'src/app/(register)/settings/ApiKeysSection.tsx'),
       'utf8',
     );
     expect(view).toMatch(/Copy key|copyKey/);
@@ -171,7 +171,7 @@ describe('Settings: monitoring sources and scoped API keys', () => {
     expect(revoked.body.apiKey.revokedAt).toBeTruthy();
 
     const view = readFileSync(
-      path.join(process.cwd(), 'src/app/(register)/settings/SettingsView.tsx'),
+      path.join(process.cwd(), 'src/app/(register)/settings/ApiKeysSection.tsx'),
       'utf8',
     );
     expect(view).toContain('AlertDialog');

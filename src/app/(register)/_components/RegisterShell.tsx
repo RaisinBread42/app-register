@@ -5,7 +5,7 @@ import {usePathname} from 'next/navigation';
 import {AppShell} from '@astryxdesign/core/AppShell';
 import {SideNav, SideNavHeading, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 import {PRODUCT_NAME, ROUTES} from '@/lib/constants';
-import {AppsIcon, OverviewIcon, PeopleIcon, SettingsIcon, SourcesIcon} from '@/lib/ui/icons';
+import {AppsIcon, NoticesIcon, OverviewIcon, SettingsIcon} from '@/lib/ui/icons';
 import {BrandMark, SidebarRule, WorkspaceCard} from './Brand';
 
 type SvgIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -13,7 +13,10 @@ type SvgIcon = ComponentType<SVGProps<SVGSVGElement>>;
 const isUnder = (pathname: string, route: string) =>
   route === ROUTES.home ? pathname === route : pathname === route || pathname.startsWith(`${route}/`);
 
-/** The frame of every register page: the prototype's dark sidebar; each page draws its own topbar. */
+/**
+ * The frame of every register page: the prototype's dark sidebar; each page draws its own topbar.
+ * Primary destinations follow spec §4 and ADR 0003: Overview, Applications, Notices; Settings below.
+ */
 export function RegisterShell({children}: {children: React.ReactNode}) {
   const pathname = usePathname();
   const item = (label: string, route: string, icon: SvgIcon) => (
@@ -31,12 +34,11 @@ export function RegisterShell({children}: {children: React.ReactNode}) {
           <SideNavSection title="Workspace" isHeaderHidden>
             {item('Overview', ROUTES.home, OverviewIcon)}
             {item('Applications', ROUTES.applications, AppsIcon)}
-            {item('Sources', ROUTES.sources, SourcesIcon)}
+            {item('Notices', ROUTES.notices, NoticesIcon)}
           </SideNavSection>
           <SidebarRule />
           <SideNavSection title="Admin" isHeaderHidden>
             {item('Settings', ROUTES.settings, SettingsIcon)}
-            {item('People', ROUTES.people, PeopleIcon)}
           </SideNavSection>
         </SideNav>
       }>

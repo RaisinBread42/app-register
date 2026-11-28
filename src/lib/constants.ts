@@ -5,19 +5,26 @@ export const PRODUCT_NAME = 'App Register';
 export const PRODUCT_TAGLINE =
   'Know what your applications depend on — and what needs attention.';
 
+/** Primary navigation (spec §4, ADR 0003): Overview, Applications, Notices; Settings at the bottom. */
 export const ROUTES = {
   home: '/',
   applications: '/applications',
-  sources: '/sources',
+  notices: '/notices',
   settings: '/settings',
-  people: '/people',
 } as const;
 
-/** Paths from the first UI; each page there redirects to its new home. */
-export const LEGACY_ROUTES = {
-  apps: '/apps',
-  notices: '/notices',
+/** Sections of Settings, chosen with `?section=`. Sources and People live here (ADR 0003). */
+export const SETTINGS_SECTION = {
+  sources: 'sources',
+  people: 'people',
+  apiKeys: 'api-keys',
 } as const;
+export const SETTINGS_SECTIONS = Object.values(SETTINGS_SECTION);
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+export function settingsRoute(section: SettingsSection): string {
+  return `${ROUTES.settings}?${new URLSearchParams({[UI_QUERY.section]: section})}`;
+}
 
 /** `/applications/:id` and `/applications/:id/edit`; the id is encoded so it can never leave its path segment. */
 export function appRoute(id: string): string {
@@ -37,6 +44,12 @@ export const UI_QUERY = {
   search: 'q',
   /** `?add=1` opens the add-application dialog on the applications list. */
   add: 'add',
+  /** Applications list filters and sort, kept in the URL so Back and shared links restore them. */
+  kind: 'kind',
+  health: 'health',
+  sort: 'sort',
+  /** Which Settings section is open. */
+  section: 'section',
 } as const;
 export const UI_QUERY_ON = '1';
 

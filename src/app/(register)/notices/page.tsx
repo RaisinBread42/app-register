@@ -1,7 +1,6 @@
-import {redirect} from 'next/navigation';
-import {ROUTES} from '@/lib/constants';
+import {NoticesView} from './NoticesView';
 
-/** Notices are email-only now; the old page sends people to the overview. */
-export default function LegacyNoticesPage() {
-  redirect(ROUTES.home);
+/** The notice inbox (spec §4). Its list arrives with the notices model ([25]) and inbox ([27]). */
+export default function NoticesPage() {
+  return <NoticesView />;
 }

@@ -1,18 +1,7 @@
-import {apiClient} from '@/lib/ui/api-client';
-import {keysFor} from '../_components/idempotency-keys';
-import {PeopleView} from './PeopleView';
+import {redirect} from 'next/navigation';
+import {SETTINGS_SECTION, settingsRoute} from '@/lib/constants';
 
-export default async function PeoplePage() {
-  const people = await apiClient().listPeople();
-  return (
-    <PeopleView
-      people={people}
-      keys={{
-        add: crypto.randomUUID(),
-        reactivate: crypto.randomUUID(),
-        edit: keysFor(people),
-        markLeft: keysFor(people),
-      }}
-    />
-  );
+/** People became Settings › People (ADR 0003); old links land there. */
+export default function LegacyPeoplePage() {
+  redirect(settingsRoute(SETTINGS_SECTION.people));
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
+import {useSearchParams} from 'next/navigation';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {Card} from '@astryxdesign/core/Card';
@@ -17,6 +18,7 @@ import {
   APP_LIST_SORTS,
   FILTER_ALL,
   HEALTH_ATTENTION_BELOW,
+  ROUTES,
   HEALTH_MAX_SCORE,
   type AppListSort,
 } from '@/lib/constants';
@@ -32,7 +34,9 @@ import {
   NOT_SET,
 } from '@/lib/ui/copy';
 import {AppsIcon, CalendarIcon, ShieldIcon, WarningIcon} from '@/lib/ui/icons';
-import {applyAppListView, appsWithRenewal, formatDate, healthStats} from '@/lib/ui/register-view';
+import {appListQuery, appListViewFrom} from '@/lib/ui/list-filters';
+import {rememberListQuery} from '@/lib/ui/list-memory';
+import {applyAppListView, appsWithRenewal, formatDate, healthStats, type AppListView} from '@/lib/ui/register-view';
 import {AppCell, PendingPill} from '../_components/AppIdentity';
 import {FootNote, MetricCard} from '../_components/Cards';
 import {DimensionPill, ScorePill} from '../_components/Health';
@@ -47,15 +51,38 @@ const column = (share: number) => proportional(share, {minWidth: 80});
 const TYPE_FILTERS = [{value: FILTER_ALL, label: 'All types'}, ...KIND_OPTIONS];
 const SORT_OPTIONS = APP_LIST_SORTS.map((sort) => ({value: sort, label: APP_LIST_SORT_LABEL[sort]}));
 
-type Props = {apps: App[]; people: PersonOption[]; addKey: string; initialQuery: string; isAddOpen: boolean};
+type Props = {apps: App[]; people: PersonOption[]; addKey: string; initialView: AppListView; isAddOpen: boolean};
 
-export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}: Props) {
-  const [query, setQuery] = useState(initialQuery);
-  const [kind, setKind] = useState<string>(FILTER_ALL);
-  const [health, setHealth] = useState<string>(FILTER_ALL);
-  const [sort, setSort] = useState<AppListSort>(APP_LIST_SORT.health);
+export function ApplicationsView({apps, people, addKey, initialView, isAddOpen}: Props) {
+  const searchParams = useSearchParams();
+  const [view, setView] = useState<AppListView>(initialView);
   const [isAdding, setIsAdding] = useState(isAddOpen);
-  const shown = applyAppListView(apps, {query, kind, health, sort});
+  /** The query string this view last wrote, so its own URL updates are not read back as outside changes. */
+  const written = useRef(appListQuery(initialView));
+  const {query, kind, health, sort} = view;
+  const shown = applyAppListView(apps, view);
+
+  // The URL is the source of truth: when it changes from outside (topbar search, the side nav,
+  // Back and Forward), the list follows it.
+  const urlQuery = searchParams.toString();
+  useEffect(() => {
+    const fromUrl = appListViewFrom(Object.fromEntries(new URLSearchParams(urlQuery)));
+    const asQuery = appListQuery(fromUrl);
+    rememberListQuery(asQuery);
+    if (asQuery !== written.current) {
+      written.current = asQuery;
+      setView(fromUrl);
+    }
+  }, [urlQuery]);
+
+  /** Every change goes into the URL (no server round trip), so Back from an app and shared links restore the same list. */
+  const update = (change: Partial<AppListView>) => {
+    const next = {...view, ...change};
+    setView(next);
+    written.current = appListQuery(next);
+    rememberListQuery(written.current);
+    window.history.replaceState(null, '', `${ROUTES.applications}${written.current}`);
+  };
   const stats = healthStats(apps);
 
   return (
@@ -91,16 +118,16 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
               isLabelHidden
               placeholder="Search applications…"
               value={query}
-              onChange={setQuery}
+              onChange={(value) => update({query: value ?? ''})}
               width={338}
             />
-            <Selector label="Type" isLabelHidden options={TYPE_FILTERS} value={kind} onChange={(value) => setKind(value ?? FILTER_ALL)} width={180} />
+            <Selector label="Type" isLabelHidden options={TYPE_FILTERS} value={kind} onChange={(value) => update({kind: value ?? FILTER_ALL})} width={180} />
             <Selector
               label="Health"
               isLabelHidden
               options={HEALTH_FILTER_OPTIONS}
               value={health}
-              onChange={(value) => setHealth(value ?? FILTER_ALL)}
+              onChange={(value) => update({health: value ?? FILTER_ALL})}
               width={142}
             />
             <HStack gap={0} style={{flex: 1}} />
@@ -109,7 +136,7 @@ export function ApplicationsView({apps, people, addKey, initialQuery, isAddOpen}
               isLabelHidden
               options={SORT_OPTIONS}
               value={sort}
-              onChange={(value) => setSort((value as AppListSort | null) ?? APP_LIST_SORT.health)}
+              onChange={(value) => update({sort: (value as AppListSort | null) ?? APP_LIST_SORT.health})}
               width={158}
             />
           </HStack>

@@ -5,9 +5,11 @@ import {captureAtAllWidths, expectNoAxeViolations, expectNoHorizontalScroll} fro
 const SCREENS = [
   {name: 'overview', path: '/', heading: 'Overview'},
   {name: 'applications', path: '/applications', heading: 'Applications'},
-  {name: 'sources', path: '/sources', heading: 'Sources'},
-  {name: 'settings', path: '/settings', heading: 'Settings'},
-  {name: 'people', path: '/people', heading: 'People'},
+  {name: 'notices', path: '/notices', heading: 'Notices'},
+  {name: 'settings-sources', path: '/settings?section=sources', heading: 'Settings'},
+  {name: 'settings-people', path: '/settings?section=people', heading: 'Settings'},
+  {name: 'settings-api-keys', path: '/settings?section=api-keys', heading: 'Settings'},
+  {name: 'not-found', path: '/no-such-page', heading: 'Page not found'},
 ] as const;
 
 for (const screen of SCREENS) {

@@ -137,7 +137,7 @@ export async function savePersonAction(
       ? apiClient().updatePerson(idempotencyKey, personId, values)
       : apiClient().createPerson(idempotencyKey, values),
   );
-  revalidatePath(ROUTES.people);
+  revalidatePath(ROUTES.settings);
   return result;
 }
 
@@ -145,7 +145,7 @@ export async function markPersonLeftAction(idempotencyKey: string, personId: str
   const result = await runAction(() =>
     apiClient().updatePerson(idempotencyKey, personId, {status: PERSON_STATUS.left, leftOn}),
   );
-  revalidatePath(ROUTES.people);
+  revalidatePath(ROUTES.settings);
   return result;
 }
 
@@ -153,7 +153,7 @@ export async function markPersonActiveAction(idempotencyKey: string, personId: s
   const result = await runAction(() =>
     apiClient().updatePerson(idempotencyKey, personId, {status: PERSON_STATUS.active}),
   );
-  revalidatePath(ROUTES.people);
+  revalidatePath(ROUTES.settings);
   return result;
 }
 
