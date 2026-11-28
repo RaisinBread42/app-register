@@ -1,4 +1,8 @@
 import {
+  APP_CRITICALITIES,
+  APP_CRITICALITY,
+  APP_ENVIRONMENT,
+  APP_ENVIRONMENTS,
   APP_HEALTH_FILTER,
   APP_KINDS,
   APP_LIST_SORT,
@@ -8,6 +12,8 @@ import {
   HEALTH_ATTENTION_BELOW,
   HEALTH_STATUS,
   type AdvisorySeverity,
+  type AppCriticality,
+  type AppEnvironment,
   type AppKind,
   type AppListSort,
   type DependencyCheckError,
@@ -28,6 +34,33 @@ export const KIND_OPTIONS = APP_KINDS.map((kind) => ({
   value: kind,
   label: KIND_LABEL[kind],
 }));
+
+export const CRITICALITY_LABEL: Record<AppCriticality, string> = {
+  [APP_CRITICALITY.low]: "Low",
+  [APP_CRITICALITY.medium]: "Medium",
+  [APP_CRITICALITY.high]: "High",
+  [APP_CRITICALITY.critical]: "Critical",
+};
+
+export const CRITICALITY_OPTIONS = APP_CRITICALITIES.map((criticality) => ({
+  value: criticality,
+  label: CRITICALITY_LABEL[criticality],
+}));
+
+export const ENVIRONMENT_LABEL: Record<AppEnvironment, string> = {
+  [APP_ENVIRONMENT.production]: "Production",
+  [APP_ENVIRONMENT.staging]: "Staging",
+  [APP_ENVIRONMENT.development]: "Development",
+  [APP_ENVIRONMENT.other]: "Other",
+};
+
+export const ENVIRONMENT_OPTIONS = APP_ENVIRONMENTS.map((environment) => ({
+  value: environment,
+  label: ENVIRONMENT_LABEL[environment],
+}));
+
+export const NO_BACKUP_OWNER = "No backup owner";
+export const CRITICALITY_NOT_SET = "Not set";
 
 export const APP_LIST_SORT_LABEL: Record<AppListSort, string> = {
   [APP_LIST_SORT.health]: "Health (lowest)",

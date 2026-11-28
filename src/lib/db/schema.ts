@@ -20,6 +20,8 @@ import {
   ADVISORY_SEVERITIES,
   ADVISORY_SOURCES,
   API_KEY_SCOPES,
+  APP_CRITICALITIES,
+  APP_ENVIRONMENTS,
   APP_KINDS,
   DEPENDENCY_CHECK_ERRORS,
   DEPENDENCY_SOURCE,
@@ -107,7 +109,8 @@ export const apps = pgTable(
     vendor: text('vendor'),
     description: text('description'),
     ownerId: uuid('owner_id').notNull(),
-    backupOwnerId: uuid('backup_owner_id').notNull(),
+    /** Optional since spec v1.0 (decision D6): a missing backup owner is a setup item, not an error. */
+    backupOwnerId: uuid('backup_owner_id'),
     renewalDate: date('renewal_date', {mode: 'string'}),
     noticeDeadline: date('notice_deadline', {mode: 'string'}),
     billingCycle: text('billing_cycle'),
@@ -115,6 +118,10 @@ export const apps = pgTable(
     runtimeLocation: text('runtime_location'),
     dataAndKeys: text('data_and_keys'),
     whatBreaksIfStopped: text('what_breaks_if_stopped'),
+    /** low … critical; null until someone sets it. */
+    criticality: text('criticality'),
+    /** Where the code lives (https only). */
+    repositoryUrl: text('repository_url'),
     archivedAt: timestamp('archived_at', {withTimezone: true}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -132,6 +139,7 @@ export const apps = pgTable(
       foreignColumns: [people.id, people.workspaceId],
     }).onDelete('restrict'),
     check('apps_kind_allowed', oneOf(t.kind, APP_KINDS)),
+    check('apps_criticality_allowed', oneOf(t.criticality, APP_CRITICALITIES)),
     check('apps_owner_not_backup', sql`${t.ownerId} <> ${t.backupOwnerId}`),
     check(
       'apps_notice_before_renewal',
@@ -146,6 +154,26 @@ export const apps = pgTable(
       .where(sql`${t.archivedAt} is null`),
     index('apps_owner_idx').on(t.ownerId),
     index('apps_backup_owner_idx').on(t.backupOwnerId),
+  ],
+);
+
+/** The environments an app runs in: one row per environment (no array column). */
+export const appEnvironments = pgTable(
+  'app_environments',
+  {
+    workspaceId: workspaceId(),
+    appId: uuid('app_id').notNull(),
+    environment: text('environment').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({name: 'app_environments_pk', columns: [t.appId, t.environment]}),
+    foreignKey({
+      name: 'app_environments_app_fk',
+      columns: [t.appId, t.workspaceId],
+      foreignColumns: [apps.id, apps.workspaceId],
+    }).onDelete('cascade'),
+    check('app_environments_environment_allowed', oneOf(t.environment, APP_ENVIRONMENTS)),
   ],
 );
 

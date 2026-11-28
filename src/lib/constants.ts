@@ -222,8 +222,29 @@ export const APP_KINDS = Object.values(APP_KIND);
 
 export type AppKind = (typeof APP_KINDS)[number];
 
-/** Kinds that must record where they run, the data and keys they touch, and what breaks if they stop. */
-export const RUNTIME_DETAIL_KINDS: readonly AppKind[] = [APP_KIND.inHouse, APP_KIND.citizenBuilt];
+/** Business criticality of an app (spec §3 P0, Journey B). Null means not set yet. */
+export const APP_CRITICALITY = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+} as const;
+export const APP_CRITICALITIES = Object.values(APP_CRITICALITY);
+export type AppCriticality = (typeof APP_CRITICALITIES)[number];
+
+/** Environments an app runs in; production exposure feeds health scoring later ([32]). */
+export const APP_ENVIRONMENT = {
+  production: 'production',
+  staging: 'staging',
+  development: 'development',
+  other: 'other',
+} as const;
+export const APP_ENVIRONMENTS = Object.values(APP_ENVIRONMENT);
+export type AppEnvironment = (typeof APP_ENVIRONMENTS)[number];
+
+/** Longest repository URL accepted. */
+export const REPOSITORY_URL_MAX_LENGTH = 500;
+
 
 /** The one workspace every request uses until sign-in exists. */
 export const DEFAULT_WORKSPACE_SLUG = 'default';

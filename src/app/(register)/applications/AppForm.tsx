@@ -3,6 +3,7 @@
 import {useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {Button} from '@astryxdesign/core/Button';
+import {CheckboxList, CheckboxListItem} from '@astryxdesign/core/CheckboxList';
 import {DateInput} from '@astryxdesign/core/DateInput';
 import {FormLayout} from '@astryxdesign/core/FormLayout';
 import {Heading} from '@astryxdesign/core/Heading';
@@ -13,7 +14,7 @@ import {TextArea} from '@astryxdesign/core/TextArea';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import {NOTICE_ALERT_OFFSET_DAYS, appRoute} from '@/lib/constants';
-import {KIND_OPTIONS} from '@/lib/ui/copy';
+import {CRITICALITY_OPTIONS, ENVIRONMENT_OPTIONS, KIND_OPTIONS} from '@/lib/ui/copy';
 import type {AppFormValues} from '@/lib/ui/forms';
 import {updateAppAction} from '../actions';
 import {FormError} from '../_components/FormError';
@@ -57,15 +58,37 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
           isRequired
         />
         <Selector
-          label="Backup owner"
-          description="Must be a different person from the owner."
-          options={people}
-          value={values.backupOwnerId || undefined}
-          onChange={text('backupOwnerId')}
-          hasSearch
-          isRequired
+          label="Criticality"
+          description="How much the business depends on it. Weighs its findings later."
+          options={CRITICALITY_OPTIONS}
+          value={values.criticality || null}
+          onChange={(value) => set('criticality')(value ?? '')}
+          hasClear
+          placeholder="Not set"
         />
-        <TextInput label="Vendor" value={values.vendor} onChange={text('vendor')} />
+        <Selector
+          label="Backup owner"
+          description="Optional. A different person from the owner, who covers when they are away."
+          options={people}
+          value={values.backupOwnerId || null}
+          onChange={(value) => set('backupOwnerId')(value ?? '')}
+          hasSearch
+          hasClear
+          placeholder="No backup owner"
+        />
+        <CheckboxList label="Environments" description="Where it runs." value={values.environments} onChange={set('environments')}>
+          {ENVIRONMENT_OPTIONS.map((option) => (
+            <CheckboxListItem key={option.value} value={option.value} label={option.label} />
+          ))}
+        </CheckboxList>
+        <TextInput label="Supplier" value={values.vendor} onChange={text('vendor')} />
+        <TextInput
+          label="Repository"
+          description="Where the code lives, as an https:// address."
+          value={values.repositoryUrl}
+          onChange={text('repositoryUrl')}
+          placeholder="https://github.com/your-org/your-app"
+        />
         <TextInput label="Category" value={values.category} onChange={text('category')} placeholder="e.g. Finance, HR" />
         <TextArea label="Description" value={values.description} onChange={text('description')} />
 
@@ -98,19 +121,19 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
         <Heading level={2}>Runtime</Heading>
         <TextInput
           label="Where it runs"
-          description="Required for in-house and citizen-built apps."
+          description="Optional. Most useful for in-house and citizen-built apps."
           value={values.runtimeLocation}
           onChange={text('runtimeLocation')}
         />
         <TextArea
           label="Data and keys it touches"
-          description="Required for in-house and citizen-built apps."
+          description="Optional. Most useful for in-house and citizen-built apps."
           value={values.dataAndKeys}
           onChange={text('dataAndKeys')}
         />
         <TextArea
           label="What breaks if it stops"
-          description="Required for in-house and citizen-built apps."
+          description="Optional. Most useful for in-house and citizen-built apps."
           value={values.whatBreaksIfStopped}
           onChange={text('whatBreaksIfStopped')}
         />

@@ -11,6 +11,9 @@ export type AppFormValues = {
   kind: string;
   ownerId: string;
   backupOwnerId: string;
+  criticality: string;
+  environments: string[];
+  repositoryUrl: string;
   category: string;
   vendor: string;
   description: string;
@@ -33,6 +36,9 @@ export function emptyAppForm(kind: string): AppFormValues {
     kind,
     ownerId: '',
     backupOwnerId: '',
+    criticality: '',
+    environments: [],
+    repositoryUrl: '',
     category: '',
     vendor: '',
     description: '',
@@ -51,7 +57,10 @@ export function appToForm(app: App): AppFormValues {
     name: app.name,
     kind: app.kind,
     ownerId: app.owner.id,
-    backupOwnerId: app.backupOwner.id,
+    backupOwnerId: app.backupOwner?.id ?? '',
+    criticality: app.criticality ?? '',
+    environments: app.environments,
+    repositoryUrl: app.repositoryUrl ?? '',
     category: app.category ?? '',
     vendor: app.vendor ?? '',
     description: app.description ?? '',
@@ -70,7 +79,10 @@ export function formToAppInput(values: AppFormValues): AppInput {
     name: values.name,
     kind: values.kind,
     ownerId: values.ownerId,
-    backupOwnerId: values.backupOwnerId,
+    backupOwnerId: orNull(values.backupOwnerId),
+    criticality: orNull(values.criticality),
+    environments: values.environments,
+    repositoryUrl: orNull(values.repositoryUrl),
     category: orNull(values.category),
     vendor: orNull(values.vendor),
     description: orNull(values.description),

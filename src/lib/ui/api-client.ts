@@ -13,6 +13,8 @@ import {
   type AdvisorySeverity,
   type ApiKeyScope,
   type ApiKeyStatus,
+  type AppCriticality,
+  type AppEnvironment,
   type AppKind,
   type AppSort,
   type DependencyCheckError,
@@ -50,6 +52,8 @@ type AppFields = {
   runtimeLocation: string | null;
   dataAndKeys: string | null;
   whatBreaksIfStopped: string | null;
+  criticality: AppCriticality | null;
+  repositoryUrl: string | null;
 };
 
 export type Deduction = {dimension: HealthDimension; label: string; detail: string; points: number};
@@ -64,7 +68,8 @@ export type Health = {
 export type App = AppFields & {
   id: string;
   owner: PersonRef;
-  backupOwner: PersonRef;
+  backupOwner: PersonRef | null;
+  environments: AppEnvironment[];
   health: Health;
   archivedAt: string | null;
   createdAt: string;
@@ -165,7 +170,13 @@ export type Person = {
 
 // Request shapes (AppInput, PersonPatch, …).
 
-export type AppInput = Omit<AppFields, 'kind'> & {kind: string; ownerId: string; backupOwnerId: string};
+export type AppInput = Omit<AppFields, 'kind' | 'criticality'> & {
+  kind: string;
+  criticality: string | null;
+  ownerId: string;
+  backupOwnerId: string | null;
+  environments: string[];
+};
 export type DependencyInput = DependencyFields;
 /** `endOfSupportOn` left out keeps the date as it is; null hands a date set by hand back to the hosting check. */
 export type HostingInput = Omit<HostingFields, 'endOfSupportOn'> & {endOfSupportOn?: string | null};

@@ -88,6 +88,10 @@ How it works: the key is claimed inside the same database transaction as the wri
 - Creating an app with a notice deadline schedules one alert per offset in `NOTICE_ALERT_OFFSET_DAYS` whose due date is today or later (UTC).
 - Changing the deadline deletes the app's `scheduled` alerts and schedules new ones. `sent` and `acknowledged` alerts stay as history. Moving the deadline back to one that already has a sent alert for an offset does not schedule that offset again.
 - Two edits to the same app at once are serialized (row lock), so neither is lost.
+- An app needs a name, a kind and an owner. Everything else is optional (spec v1.0 Journey B), including `backupOwnerId` (send `null` to clear it) and the three in-house fields.
+- `criticality` is `low`, `medium`, `high`, `critical` or `null` (not set). The UI asks for it when adding an app; the API accepts an app without it so older clients keep working.
+- `environments` lists where the app runs: any of `production`, `staging`, `development`, `other`, each once. On PATCH, leave it out to keep the list as it is; send `[]` to clear it.
+- `repositoryUrl` must be an `https://` address (at most 500 characters).
 - Owners must be active people when newly assigned. An app whose owner has left can still be edited.
 - Dependencies are recorded by hand or imported; hosting is recorded by hand. Both are monitored (below).
 
@@ -217,5 +221,5 @@ curl -X POST http://localhost:3000/api/apps \
   -H "Authorization: Bearer $APP_REGISTER_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Contoso CRM","kind":"saas","ownerId":"…","backupOwnerId":"…","noticeDeadline":"2027-09-30"}'
+  -d '{"name":"Contoso CRM","kind":"saas","criticality":"high","ownerId":"…","backupOwnerId":"…","noticeDeadline":"2027-09-30"}'
 ```
