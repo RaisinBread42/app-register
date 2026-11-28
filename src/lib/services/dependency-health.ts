@@ -22,7 +22,7 @@ import {activeAppsIn, assertActiveApp} from './app-scope';
 import {replaceAdvisories, type KnownAdvisories} from './dependency-advisories';
 import {NotFoundError} from './errors';
 import type {Deduction} from './health';
-import {syncAppNotices} from './notices';
+import {syncAppNoticesSafely} from './notices';
 import {createPackageSources, isNpmPackageName, mapWithLimit, type PackageSources} from './package-sources';
 import {isExactVersion, versionLag} from './package-versions';
 
@@ -189,7 +189,7 @@ export async function refreshDependencyHealth(
   for (const result of results) {
     await db.transaction((tx) => storeResult(tx, workspaceId, result, now));
   }
-  await syncAppNotices(db, workspaceId, appId, now);
+  await syncAppNoticesSafely(db, workspaceId, appId, now);
   return summarize(results);
 }
 

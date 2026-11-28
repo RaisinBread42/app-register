@@ -93,6 +93,12 @@ const SEVERITY_RANK: Record<NoticeSeverity, number> = {
 };
 
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+/** Collapses every kind of whitespace, so a title is never blank or multi-line. */
+const clean = (text: string) => text.replace(/\s+/g, ' ').trim();
+/** A title from outside text, or the fallback when that text is blank. */
+const titleOf = (text: string, fallback: string) => cut(clean(text) || clean(fallback), NOTICE_TITLE_MAX_LENGTH);
+/** What on the app matched: the service, plus its region so two rows on one service stay apart. */
+const componentOf = (row: HostingRecord) => `${row.provider} ${row.service}${row.region ? ` (${row.region})` : ''}`;
 const key = (...parts: (string | null | undefined)[]) => parts.map((part) => (part ?? '').trim().toLowerCase()).join(':');
 
 /**
@@ -119,8 +125,8 @@ function dependencyNotices(app: {name: string}, dependency: DependencyRecord): D
     dedupeKey: key(NOTICE_SOURCE.osv, advisory.id),
     category: NOTICE_CATEGORY.security,
     severity: advisory.severity,
-    title: cut(advisory.summary || advisory.id, NOTICE_TITLE_MAX_LENGTH),
-    summary: cut(`${advisory.id}${advisory.aliases.length ? ` (also ${advisory.aliases.join(', ')})` : ''}: ${advisory.summary}`, NOTICE_SUMMARY_MAX_LENGTH),
+    title: titleOf(advisory.summary, advisory.id),
+    summary: cut(clean(`${advisory.id}${advisory.aliases.length ? ` (also ${advisory.aliases.join(', ')})` : ''}: ${advisory.summary}`), NOTICE_SUMMARY_MAX_LENGTH),
     source: NOTICE_SOURCE.osv,
     sourceName: SOURCE_NAME.osv,
     sourceUrl: advisoryUrl(advisory.id),
@@ -143,7 +149,7 @@ function dependencyNotices(app: {name: string}, dependency: DependencyRecord): D
       dedupeKey: key(NOTICE_SOURCE.manual, id),
       category: NOTICE_CATEGORY.security,
       severity: NOTICE_SEVERITY.unknown,
-      title: cut(`${id} recorded on ${component}`, NOTICE_TITLE_MAX_LENGTH),
+      title: titleOf(`${id} recorded on ${component}`, id),
       summary: `A person recorded advisory ${id} against ${component} ${version}. No source has rated it.`,
       source: NOTICE_SOURCE.manual,
       sourceName: SOURCE_NAME.manual,
@@ -184,13 +190,14 @@ function endOfSupportNotices(app: {name: string}, row: HostingRecord, today: str
   const isPast = date < today;
   const byPerson = row.endOfSupportSource === END_OF_SUPPORT_SOURCE.manual;
   const {subject, version} = hostingSubject(row);
-  const where = `${row.provider} ${row.service}`;
+  const where = componentOf(row);
   return [
     {
-      dedupeKey: key('eos', row.provider, row.service, row.runtime, version, date),
+      // Who gave the date is part of the key: a date a person set and one endoflife.date gave are different claims (spec §9).
+      dedupeKey: key('eos', byPerson ? NOTICE_SOURCE.manual : NOTICE_SOURCE.endOfLifeDate, row.provider, row.service, row.runtime, version, date),
       category: NOTICE_CATEGORY.lifecycle,
       severity: isPast ? NOTICE_SEVERITY.high : NOTICE_SEVERITY.medium,
-      title: cut(isPast ? `${subject} is past end of support (${date})` : `${subject} reaches end of support on ${date}`, NOTICE_TITLE_MAX_LENGTH),
+      title: titleOf(isPast ? `${subject} is past end of support (${date})` : `${subject} reaches end of support on ${date}`, subject),
       summary: isPast
         ? `${subject} stopped getting security fixes on ${date}. Move to a supported version.`
         : `${subject} stops getting security fixes on ${date}. Plan the upgrade before then.`,
@@ -215,15 +222,17 @@ function endOfSupportNotices(app: {name: string}, row: HostingRecord, today: str
 }
 
 function incidentNotices(app: {name: string}, row: HostingRecord): DerivedNotice[] {
-  const where = `${row.provider} ${row.service}`;
+  const where = componentOf(row);
   return row.incidents.map((incident) => {
     const namesService = incident.scope === INCIDENT_SCOPE.service;
+    const title = titleOf(incident.title, `${row.provider} incident`);
     return {
-      dedupeKey: key('status', row.provider, incident.url ?? incident.title, incident.startedAt),
+      // Some feeds link every event to one general page, so the title is part of the key too.
+      dedupeKey: key('status', row.provider, incident.url, title, incident.startedAt),
       category: NOTICE_CATEGORY.outage,
       severity: INCIDENT_SEVERITY[incident.impact],
-      title: cut(incident.title, NOTICE_TITLE_MAX_LENGTH),
-      summary: `${row.provider} reports: ${incident.title}`,
+      title,
+      summary: cut(`${row.provider} reports: ${title}`, NOTICE_SUMMARY_MAX_LENGTH),
       source: NOTICE_SOURCE.statusFeed,
       sourceName: `${row.provider} status`,
       sourceUrl: incident.url,
@@ -247,8 +256,13 @@ function incidentNotices(app: {name: string}, row: HostingRecord): DerivedNotice
 /**
  * Brings one app's notices in line with what is stored about it: new notices and
  * matches are added, existing ones updated (last seen, severity, wording), and matches
- * the app no longer has are marked resolved. A notice with no open match left is
- * marked resolved upstream. Nothing is deleted.
+ * the app no longer has are marked resolved. An archived app has nothing left, so all
+ * its matches resolve. A notice with no open match left is marked resolved upstream
+ * (no app is affected any more). Nothing is deleted.
+ *
+ * Syncs in one workspace run one at a time (a transaction-level advisory lock): notices
+ * are shared between apps, so two at once could deadlock or both miss the last open match.
+ * Runs in its own (sub)transaction, so a failure rolls back only the sync.
  */
 export async function syncAppNotices(
   db: AppDatabase,
@@ -257,15 +271,23 @@ export async function syncAppNotices(
   now = new Date(),
   today = todayIso(),
 ): Promise<void> {
-  const [app] = await db.select({name: apps.name}).from(apps).where(and(activeAppsIn(workspaceId), eq(apps.id, appId)));
-  if (!app) {
-    return;
-  }
-  const dependencies = await loadDependencies(db, and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId)));
-  const hosting = await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId)));
-  const derived = noticesForApp(app, dependencies, hosting, today);
-
   await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`notices:${workspaceId}`}))`);
+    const [app] = await tx
+      .select({name: apps.name, archivedAt: apps.archivedAt})
+      .from(apps)
+      .where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, appId)));
+    if (!app) {
+      return;
+    }
+    const derived = app.archivedAt
+      ? []
+      : noticesForApp(
+          app,
+          await loadDependencies(tx, and(eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId))),
+          await loadHosting(tx, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId))),
+          today,
+        );
     const seenMatchIds: string[] = [];
     for (const {match, ...facts} of derived) {
       const noticeId = await upsertNotice(tx, workspaceId, facts, now);
@@ -287,13 +309,37 @@ export async function syncAppNotices(
   });
 }
 
-/** Syncs every active app in the workspace (the daily job and start-up backfill). */
+/**
+ * The sync as a follow-up to a write or a check: a failure is logged (by name only) and
+ * never fails the write or the check that triggered it; the next sync tries again.
+ */
+export async function syncAppNoticesSafely(db: AppDatabase, workspaceId: string, appId: string, now = new Date()): Promise<void> {
+  try {
+    await syncAppNotices(db, workspaceId, appId, now);
+  } catch (error) {
+    console.error('Notice sync failed', {name: (error as Error | undefined)?.name});
+  }
+}
+
+/** Syncs every active app in the workspace (the daily job), one app at a time; one bad app never stops the rest. */
 export async function syncWorkspaceNotices(db: AppDatabase, workspaceId: string, now = new Date(), today = todayIso()): Promise<number> {
   const rows = await db.select({id: apps.id}).from(apps).where(activeAppsIn(workspaceId));
+  let synced = 0;
   for (const row of rows) {
-    await syncAppNotices(db, workspaceId, row.id, now, today);
+    try {
+      await syncAppNotices(db, workspaceId, row.id, now, today);
+      synced += 1;
+    } catch (error) {
+      console.error('Notice sync failed for an app', {name: (error as Error | undefined)?.name});
+    }
   }
-  return rows.length;
+  return synced;
+}
+
+/** True when the workspace has no notices yet: the start-up backfill only runs then, so a restart never bumps last-seen times. */
+export async function hasNoNotices(db: AppDatabase, workspaceId: string): Promise<boolean> {
+  const [row] = await db.select({id: notices.id}).from(notices).where(eq(notices.workspaceId, workspaceId)).limit(1);
+  return !row;
 }
 
 async function upsertNotice(tx: AppDatabase, workspaceId: string, facts: NoticeFacts, now: Date): Promise<string> {
@@ -404,7 +450,9 @@ export async function listNotices(db: AppDatabase, workspaceId: string, query: N
     appId: query.appId ?? undefined,
   });
   return views.filter((view) => {
-    const isOpen = view.resolvedUpstreamAt === null && view.matches.some((match) => match.resolvedAt === null);
+    // Filtered by app, a notice is open or resolved for that app alone.
+    const relevant = query.appId ? view.matches.filter((match) => match.app.id === query.appId) : view.matches;
+    const isOpen = view.resolvedUpstreamAt === null && relevant.some((match) => match.resolvedAt === null);
     return state === NOTICE_STATE.all || (state === NOTICE_STATE.open) === isOpen;
   });
 }

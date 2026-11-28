@@ -50,6 +50,11 @@ jobs:
           test "$(psql "$DATABASE_URL" -Atc 'select count(*) from drizzle.__drizzle_migrations')" = \
                "$(node -p 'require("./drizzle/meta/_journal.json").entries.length')"
 
+      - name: Notice syncs under real concurrency (PGlite is single-connection)
+        env:
+          TEST_POSTGRES_URL: postgres://app_register:app_register_ci@localhost:5432/app_register
+        run: npx vitest run src/lib/services/notices-concurrency.adversarial.test.ts
+
       - name: Flag magic strings
         if: github.event_name == 'pull_request'
         run: |

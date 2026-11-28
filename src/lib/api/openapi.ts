@@ -483,8 +483,8 @@ const schemas = {
     publishedAt: nullable('string', {format: 'date-time'}),
     dueOn: nullable('string', {format: 'date'}),
     firstSeenAt: timestamp,
-    lastSeenAt: timestamp,
-    resolvedUpstreamAt: nullable('string', {format: 'date-time'}),
+    lastSeenAt: {...timestamp, description: 'The last time the stored check results still showed it'},
+    resolvedUpstreamAt: {...nullable('string', {format: 'date-time'}), description: 'Set when no app is affected any more: the source stopped reporting it, or the apps no longer have what matched'},
     matches: {type: 'array', items: ref('NoticeMatch')},
   }),
 };
@@ -811,14 +811,14 @@ export const openApiSpec = {
           {name: 'category', in: 'query', schema: {type: 'string', enum: [...NOTICE_CATEGORIES]}},
           {name: 'state', in: 'query', schema: {type: 'string', enum: [...NOTICE_STATES]}},
         ],
-        responses: {200: json(strict({notices: {type: 'array', items: ref('Notice')}}), 'Notices'), 400: errors[400], 401: errors[401], 403: errors[403]},
+        responses: {200: json(strict({notices: {type: 'array', items: ref('Notice')}}), 'Notices'), 400: errors[400], 401: errors[401], 403: errors[403], 500: errors[500]},
       },
     },
     '/api/notices/{id}': {
       get: {
         summary: 'One notice with its source and the active apps it matches',
         parameters: [pathId('id', 'Notice id')],
-        responses: {200: json(strict({notice: ref('Notice')}), 'Notice'), 401: errors[401], 403: errors[403], 404: errors[404]},
+        responses: {200: json(strict({notice: ref('Notice')}), 'Notice'), 401: errors[401], 403: errors[403], 404: errors[404], 500: errors[500]},
       },
     },
     '/api/settings/monitoring-sources': {

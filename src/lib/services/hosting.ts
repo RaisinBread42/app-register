@@ -14,7 +14,7 @@ import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
 import {hostingStatus, isMonitored} from './hosting-health';
 import {loadHosting, normaliseCheckError, replaceIncidents, type HostingRecord} from './hosting-incidents';
 import {atMost, optionalDate, optionalText, requiredText} from './validation';
-import {syncAppNotices} from './notices';
+import {syncAppNoticesSafely} from './notices';
 
 export type HostingInput = {
   provider: string;
@@ -130,7 +130,7 @@ export async function updateHosting(
     }),
   );
   // A date set by hand, or incidents cleared by the edit, change the app's notices now.
-  await syncAppNotices(db, workspaceId, appId);
+  await syncAppNoticesSafely(db, workspaceId, appId);
   return getHosting(db, workspaceId, current.id);
 }
 
@@ -143,7 +143,7 @@ export async function removeHosting(
   await assertActiveApp(db, workspaceId, appId);
   const current = await findHosting(db, workspaceId, appId, id);
   await db.delete(appHosting).where(eq(appHosting.id, current.id));
-  await syncAppNotices(db, workspaceId, appId);
+  await syncAppNoticesSafely(db, workspaceId, appId);
 }
 
 async function findHosting(

@@ -18,7 +18,7 @@ import {addDependency, removeDependency} from './dependencies';
 import {replaceAdvisories} from './dependency-advisories';
 import {addHosting, removeHosting} from './hosting';
 import {replaceIncidents} from './hosting-incidents';
-import {getNotice, listNotices, syncAppNotices} from './notices';
+import {getNotice, hasNoNotices, listNotices, syncAppNotices} from './notices';
 import {createPerson} from './people';
 
 const TODAY = '2026-11-28';
@@ -185,5 +185,13 @@ describe('notices', () => {
     expect(await listNotices(t.db, t.workspaceId)).toHaveLength(1);
     await removeHosting(t.db, t.workspaceId, app.id, hosting.id);
     expect(await listNotices(t.db, t.workspaceId)).toEqual([]);
+  });
+
+  it('the start-up backfill only runs for a workspace with no notices, so a restart never bumps last-seen times', async () => {
+    expect(await hasNoNotices(t.db, t.workspaceId)).toBe(true);
+    const app = await newApp('Portal');
+    await withAdvisory(app.id, 'left-pad', 'GHSA-aaaa-bbbb-cccc');
+    await syncAppNotices(t.db, t.workspaceId, app.id, NOW, TODAY);
+    expect(await hasNoNotices(t.db, t.workspaceId)).toBe(false);
   });
 });

@@ -12,7 +12,7 @@ import {activeAppsIn, assertActiveApp} from './app-scope';
 import {listHosting, type HostingView} from './hosting';
 import {isOutage} from './hosting-health';
 import {loadHosting, normaliseIncidents, replaceIncidents, type HostingIncident, type HostingRecord} from './hosting-incidents';
-import {syncAppNotices} from './notices';
+import {syncAppNoticesSafely} from './notices';
 import {mapWithLimit} from './package-sources';
 
 /**
@@ -55,7 +55,7 @@ export async function refreshHostingHealth(
   }
   const rows = await loadHosting(db, and(...filters));
   await checkRows(db, workspaceId, rows, options);
-  await syncAppNotices(db, workspaceId, appId, options.now);
+  await syncAppNoticesSafely(db, workspaceId, appId, options.now);
   return listHosting(db, workspaceId, appId);
 }
 
@@ -81,7 +81,7 @@ export async function refreshWorkspaceHostingHealth(
   const {stored, failedSources} = await checkRows(db, workspaceId, rows, options);
   const appIds = [...new Set(stored.map((row) => row.appId))];
   for (const appId of appIds) {
-    await syncAppNotices(db, workspaceId, appId, options.now);
+    await syncAppNoticesSafely(db, workspaceId, appId, options.now);
   }
   return {apps: appIds.length, hosting: stored.length, failedSources};
 }
