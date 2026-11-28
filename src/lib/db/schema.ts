@@ -640,7 +640,7 @@ export const appNoticeMatches = pgTable(
 
 /**
  * Append-only history of what people and jobs did (spec §3 P0): who, what, when, before,
- * after and the note. A hand-written trigger in drizzle/0009 refuses UPDATE. No foreign keys
+ * after and the note. Hand-written triggers in drizzle/0009 refuse UPDATE, TRUNCATE and direct DELETE. No foreign keys
  * to the subjects, so history outlives what it describes; `app_id` and `notice_id` let a
  * page list an app's or a notice's activity.
  */
@@ -649,8 +649,12 @@ export const auditEvents = pgTable(
   {
     id: id(),
     workspaceId: workspaceId(),
+    /** Assigned by the database at insert: the order things happened in, with no clock ties (history, undo, paging). */
+    seq: bigint('seq', {mode: 'number'}).generatedAlwaysAsIdentity(),
     occurredAt: timestamp('occurred_at', {withTimezone: true}).notNull(),
     actor: text('actor').notNull(),
+    /** The API key that acted (names are not unique); null for System. */
+    actorKeyId: uuid('actor_key_id'),
     action: text('action').notNull(),
     subjectKind: text('subject_kind').notNull(),
     subjectId: uuid('subject_id').notNull(),
@@ -666,9 +670,10 @@ export const auditEvents = pgTable(
   (t) => [
     check('audit_events_action_allowed', oneOf(t.action, AUDIT_ACTIONS)),
     check('audit_events_subject_kind_allowed', oneOf(t.subjectKind, AUDIT_SUBJECTS)),
-    index('audit_events_workspace_occurred_idx').on(t.workspaceId, t.occurredAt),
-    index('audit_events_subject_idx').on(t.subjectId, t.occurredAt),
-    index('audit_events_app_idx').on(t.appId, t.occurredAt),
+    unique('audit_events_seq_unique').on(t.seq),
+    index('audit_events_workspace_seq_idx').on(t.workspaceId, t.seq),
+    index('audit_events_subject_idx').on(t.subjectId, t.seq),
+    index('audit_events_app_idx').on(t.appId, t.seq),
   ],
 );
 

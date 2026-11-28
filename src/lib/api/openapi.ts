@@ -490,7 +490,8 @@ const schemas = {
   AuditEvent: strict({
     id,
     occurredAt: timestamp,
-    actor: {...text, description: 'Who did it: an API key by name until people sign in, or System for scheduled jobs'},
+    actor: {...text, description: 'Who did it: an API key by name until people sign in, or System for jobs and checks'},
+    actorKeyId: {...nullable('string', {format: 'uuid'}), description: 'The API key that acted (key names are not unique); null for System'},
     action: {type: 'string', enum: [...AUDIT_ACTIONS]},
     subjectKind: {type: 'string', enum: [...AUDIT_SUBJECTS]},
     subjectId: id,
@@ -885,7 +886,7 @@ export const openApiSpec = {
           {name: 'noticeId', in: 'query', schema: id},
           {name: 'matchId', in: 'query', schema: id},
           {name: 'limit', in: 'query', schema: {type: 'integer', minimum: 1, maximum: AUDIT_PAGE_MAX}},
-          {name: 'before', in: 'query', schema: timestamp, description: 'Page back: only events before this time'},
+          {name: 'before', in: 'query', schema: id, description: 'Page back: only events before this event (pass the last id of the previous page)'},
         ],
         responses: {200: json(strict({events: {type: 'array', items: ref('AuditEvent')}}), 'Events'), 400: errors[400], 401: errors[401], 403: errors[403]},
       },

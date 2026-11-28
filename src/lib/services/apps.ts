@@ -6,6 +6,7 @@ import {
   APP_KINDS,
   APP_SORT,
   APP_SORTS,
+  AUDIT_ACTION,
   HTTPS_PROTOCOL,
   NOTICE_WINDOW_MAX_DAYS,
   REPOSITORY_URL_MAX_LENGTH,
@@ -30,6 +31,8 @@ import {
   scheduleAlerts,
   type NoticeAlertView,
 } from './notice-alerts';
+import {SYSTEM_ACTOR, type Actor} from './actor';
+import {recordAppEvent} from './notice-actions';
 import {syncAppNoticesSafely} from './notices';
 import {assertActivePeople} from './people';
 import {optionalDate, optionalText} from './validation';
@@ -311,14 +314,19 @@ export async function archiveApp(
   db: AppDatabase,
   workspaceId: string,
   id: string,
+  actor: Actor = SYSTEM_ACTOR,
 ): Promise<void> {
   await getApp(db, workspaceId, id);
   await db.transaction(async (tx) => {
-    await tx
+    const archived = await tx
       .update(apps)
       .set({archivedAt: new Date()})
-      .where(and(activeAppsIn(workspaceId), eq(apps.id, id)));
+      .where(and(activeAppsIn(workspaceId), eq(apps.id, id)))
+      .returning({id: apps.id});
     await removeScheduledAlerts(tx, workspaceId, id);
+    if (archived.length > 0) {
+      await recordAppEvent(tx, workspaceId, id, {action: AUDIT_ACTION.appArchived, actor, fromValue: null, toValue: null, note: null});
+    }
   });
   // An archived app is no longer affected by anything: its notice matches resolve.
   await syncAppNoticesSafely(db, workspaceId, id);

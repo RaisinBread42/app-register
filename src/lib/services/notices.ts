@@ -1,4 +1,4 @@
-import {and, asc, desc, eq, inArray, isNull, notInArray, sql} from 'drizzle-orm';
+import {and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
 import {
   END_OF_SUPPORT_SOURCE,
@@ -6,6 +6,7 @@ import {
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   MATCH_CONFIDENCE,
+  MATCH_STATUS,
   NOTICE_CATEGORIES,
   NOTICE_CATEGORY,
   NOTICE_ORIGIN,
@@ -34,7 +35,7 @@ import {activeAppsIn} from './app-scope';
 import {loadDependencies, type DependencyRecord} from './dependency-advisories';
 import {NotFoundError, ValidationError} from './errors';
 import {loadHosting, type HostingRecord} from './hosting-incidents';
-import {effectiveStatus} from './notice-actions';
+import {effectiveStatus, reopenBySource} from './notice-actions';
 
 /**
  * Notices (spec §3 P0): durable, explainable records of what changed or is due,
@@ -291,10 +292,27 @@ export async function syncAppNotices(
           await loadHosting(tx, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId))),
           today,
         );
+    // Handled matches the source had stopped reporting: if they come back, they reopen.
+    const handledAndResolved = await tx
+      .select()
+      .from(appNoticeMatches)
+      .where(
+        and(
+          eq(appNoticeMatches.workspaceId, workspaceId),
+          eq(appNoticeMatches.appId, appId),
+          eq(appNoticeMatches.status, MATCH_STATUS.handled),
+          isNotNull(appNoticeMatches.resolvedAt),
+        ),
+      );
     const seenMatchIds: string[] = [];
     for (const {match, ...facts} of derived) {
       const noticeId = await upsertNotice(tx, workspaceId, facts, now);
-      seenMatchIds.push(await upsertMatch(tx, workspaceId, noticeId, appId, match, now));
+      const matchId = await upsertMatch(tx, workspaceId, noticeId, appId, match, now);
+      seenMatchIds.push(matchId);
+      const returning = handledAndResolved.find((row) => row.id === matchId);
+      if (returning) {
+        await reopenBySource(tx, workspaceId, returning, now);
+      }
     }
     const resolved = await tx
       .update(appNoticeMatches)

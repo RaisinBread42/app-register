@@ -320,10 +320,12 @@ export const OPEN_MATCH_STATUSES: readonly MatchStatus[] = [MATCH_STATUS.new, MA
 export const AUDIT_ACTION = {
   noticeStatusChanged: 'notice.status_changed',
   noticeAssigned: 'notice.assigned',
-  noticeUndone: 'notice.undone',
+  noticeStatusUndone: 'notice.status_undone',
+  noticeAssignmentUndone: 'notice.assignment_undone',
   noticeSnoozeEnded: 'notice.snooze_ended',
+  /** The source reported a handled notice again for the app, so it is open again. */
+  noticeReopened: 'notice.reopened',
   appArchived: 'app.archived',
-  appUnarchived: 'app.unarchived',
 } as const;
 export const AUDIT_ACTIONS = Object.values(AUDIT_ACTION);
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -335,8 +337,10 @@ export const AUDIT_SUBJECT = {
 export const AUDIT_SUBJECTS = Object.values(AUDIT_SUBJECT);
 export type AuditSubject = (typeof AUDIT_SUBJECTS)[number];
 
-/** Who did it, when no person signed in did: a scheduled job. Until sign-in ([37]) people act through an API key. */
-export const ACTOR_SYSTEM = 'System';
+/** Who did it, when no person or key did: a scheduled job or a check. Until sign-in ([37]) people act through an API key. */
+export const ACTOR_SYSTEM_NAME = 'System';
+/** The session setting a retention job sets to delete expired audit events ([41]); nothing else may delete them. */
+export const AUDIT_RETENTION_SETTING = 'app.audit_retention';
 export const ACTION_NOTE_MAX_LENGTH = 1000;
 /** Largest page of audit events one request returns. */
 export const AUDIT_PAGE_MAX = 200;

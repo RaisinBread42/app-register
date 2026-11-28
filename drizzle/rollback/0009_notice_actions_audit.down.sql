@@ -4,8 +4,9 @@
 BEGIN;
 
 DROP TRIGGER IF EXISTS "audit_events_append_only" ON "audit_events";
-DROP FUNCTION IF EXISTS "audit_events_refuse_update"();
+DROP TRIGGER IF EXISTS "audit_events_no_truncate" ON "audit_events";
 DROP TABLE IF EXISTS "audit_events";
+DROP FUNCTION IF EXISTS "audit_events_refuse_change"();
 ALTER TABLE "app_notice_matches" DROP CONSTRAINT IF EXISTS "app_notice_matches_assignee_fk";
 ALTER TABLE "app_notice_matches" DROP CONSTRAINT IF EXISTS "app_notice_matches_status_allowed";
 ALTER TABLE "app_notice_matches" DROP CONSTRAINT IF EXISTS "app_notice_matches_snooze_has_date";
@@ -21,6 +22,6 @@ ALTER TABLE "idempotency_keys" ADD CONSTRAINT "idempotency_keys_resource_kind_al
 -- Forget the migration (hash = sha256 of 0009_notice_actions_audit.sql)
 -- so `npm run db:migrate` can apply it again.
 DELETE FROM "drizzle"."__drizzle_migrations"
-WHERE "hash" = 'dc6aee8ce83c9a1338d6c363bbd2f21f864aafb93eb71ec3cf256e1da84b8f95';
+WHERE "hash" = '3fffd05f58c0c47e96d477eca3d3f37da5f982351a2b3265c8288eb20b9092e7';
 
 COMMIT;
