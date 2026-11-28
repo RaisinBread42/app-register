@@ -1,9 +1,20 @@
 import {and, asc, between, eq, inArray, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
-import {APP_KINDS, APP_SORT, APP_SORTS, NOTICE_WINDOW_MAX_DAYS, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
+import {
+  APP_CRITICALITIES,
+  APP_ENVIRONMENTS,
+  APP_KINDS,
+  APP_SORT,
+  APP_SORTS,
+  NOTICE_WINDOW_MAX_DAYS,
+  REPOSITORY_URL_MAX_LENGTH,
+  type AppCriticality,
+  type AppEnvironment,
+  type AppKind,
+} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appDependencies, appHosting, apps, people} from '@/lib/db/schema';
+import {appDependencies, appEnvironments, appHosting, apps, people} from '@/lib/db/schema';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {activeAppsIn} from './app-scope';
 import {listDependencies, type DependencyView} from './dependencies';
@@ -28,7 +39,12 @@ export type CreateAppInput = {
   name: string;
   kind: string;
   ownerId: string;
-  backupOwnerId: string;
+  /** Optional (decision D6); null clears it. */
+  backupOwnerId?: string | null;
+  criticality?: string | null;
+  repositoryUrl?: string | null;
+  /** The environments it runs in. On an edit, leave it out to keep them. */
+  environments?: string[];
   category?: string | null;
   vendor?: string | null;
   description?: string | null;
@@ -55,7 +71,8 @@ export type AppListQuery = {
 export type AppView = Omit<ValidAppInput, 'ownerId' | 'backupOwnerId'> & {
   id: string;
   owner: {id: string; name: string};
-  backupOwner: {id: string; name: string};
+  backupOwner: {id: string; name: string} | null;
+  environments: AppEnvironment[];
   health: AppHealth;
   archivedAt: Date | null;
   createdAt: Date;
@@ -78,12 +95,14 @@ export async function createApp(
   today = todayIso(),
 ): Promise<AppDetailView> {
   const values = validateCreateAppInput(input);
-  await assertActivePeople(db, workspaceId, [values.ownerId, values.backupOwnerId]);
+  const environments = validateEnvironments(input.environments ?? []);
+  await assertActivePeople(db, workspaceId, assignedPeople(values));
   const id = newId();
 
   await withNameCheck(() =>
     db.transaction(async (tx) => {
       await tx.insert(apps).values({id, workspaceId, ...values});
+      await replaceEnvironments(tx, workspaceId, id, environments);
       if (values.noticeDeadline) {
         await scheduleAlerts(tx, workspaceId, id, values.noticeDeadline, today);
       }
@@ -132,9 +151,49 @@ export async function listActiveApps(
   const appIds = rows.map((row) => row.app.id);
   const dependencies = await dependenciesByApp(db, workspaceId, appIds);
   const hosting = await hostingByApp(db, workspaceId, appIds);
+  const environments = await environmentsByApp(db, workspaceId, appIds);
   return rows.map((row) =>
-    toAppView(row, {dependencies: dependencies.get(row.app.id) ?? [], hosting: hosting.get(row.app.id) ?? [], today}),
+    toAppView(
+      row,
+      {dependencies: dependencies.get(row.app.id) ?? [], hosting: hosting.get(row.app.id) ?? [], today},
+      environments.get(row.app.id) ?? [],
+    ),
   );
+}
+
+/** The environments of several apps in one query, in the order APP_ENVIRONMENTS lists them. */
+async function environmentsByApp(
+  db: AppDatabase,
+  workspaceId: string,
+  appIds: string[],
+): Promise<Map<string, AppEnvironment[]>> {
+  const rows = appIds.length
+    ? await db
+        .select({appId: appEnvironments.appId, environment: appEnvironments.environment})
+        .from(appEnvironments)
+        .where(and(eq(appEnvironments.workspaceId, workspaceId), inArray(appEnvironments.appId, appIds)))
+    : [];
+  const byApp = new Map<string, AppEnvironment[]>();
+  for (const row of rows) {
+    byApp.set(row.appId, [...(byApp.get(row.appId) ?? []), row.environment as AppEnvironment]);
+  }
+  for (const [appId, list] of byApp) {
+    byApp.set(appId, APP_ENVIRONMENTS.filter((environment) => list.includes(environment)));
+  }
+  return byApp;
+}
+
+/** Makes an app's environments exactly `environments`. Call it inside the app's write transaction. */
+async function replaceEnvironments(
+  tx: AppDatabase,
+  workspaceId: string,
+  appId: string,
+  environments: AppEnvironment[],
+): Promise<void> {
+  await tx.delete(appEnvironments).where(and(eq(appEnvironments.workspaceId, workspaceId), eq(appEnvironments.appId, appId)));
+  if (environments.length > 0) {
+    await tx.insert(appEnvironments).values(environments.map((environment) => ({workspaceId, appId, environment})));
+  }
 }
 
 /** The dependencies of several apps in one query, for their health scores. */
@@ -184,8 +243,9 @@ export async function getApp(
   }
   const dependencies = await listDependencies(db, workspaceId, id);
   const hosting = await listHosting(db, workspaceId, id);
+  const environments = await environmentsByApp(db, workspaceId, [id]);
   return {
-    ...toAppView(row, {dependencies, hosting, today}),
+    ...toAppView(row, {dependencies, hosting, today}, environments.get(id) ?? []),
     alerts: await listAlertsForApp(db, workspaceId, id),
     dependencies,
     hosting,
@@ -221,13 +281,16 @@ export async function updateApp(
       const values = validateCreateAppInput({...current, ...patch});
       // Only newly assigned people must be active; an edit to an app whose owner has
       // left still works (reassignment belongs to the leaver flow).
-      const newlyAssigned = [values.ownerId, values.backupOwnerId].filter(
+      const newlyAssigned = assignedPeople(values).filter(
         (personId) => personId !== current.ownerId && personId !== current.backupOwnerId,
       );
       if (newlyAssigned.length > 0) {
         await assertActivePeople(tx, workspaceId, newlyAssigned);
       }
       await tx.update(apps).set(values).where(eq(apps.id, id));
+      if (patch.environments !== undefined) {
+        await replaceEnvironments(tx, workspaceId, id, validateEnvironments(patch.environments));
+      }
       if (values.noticeDeadline !== current.noticeDeadline) {
         await removeScheduledAlerts(tx, workspaceId, id);
         if (values.noticeDeadline) {
@@ -268,10 +331,10 @@ export function validateCreateAppInput(input: CreateAppInput) {
 
   const ownerId = optionalText(input.ownerId, 'owner');
   const backupOwnerId = optionalText(input.backupOwnerId, 'backup owner');
-  if (!ownerId || !backupOwnerId) {
-    throw new ValidationError('Owner and backup owner are required');
+  if (!ownerId) {
+    throw new ValidationError('Owner is required');
   }
-  if (!isUuid(ownerId) || !isUuid(backupOwnerId)) {
+  if (!isUuid(ownerId) || (backupOwnerId !== null && !isUuid(backupOwnerId))) {
     throw new ValidationError('Owner and backup owner must be person ids');
   }
   if (ownerId === backupOwnerId) {
@@ -284,16 +347,10 @@ export function validateCreateAppInput(input: CreateAppInput) {
     throw new ValidationError('Notice deadline must be on or before the renewal date');
   }
 
+  // Optional for every kind since spec v1.0 (Journey B, decision D6): add them now or later.
   const runtimeLocation = optionalText(input.runtimeLocation, 'runtime location');
   const dataAndKeys = optionalText(input.dataAndKeys, 'data and keys');
   const whatBreaksIfStopped = optionalText(input.whatBreaksIfStopped, 'what breaks if stopped');
-  if (RUNTIME_DETAIL_KINDS.includes(kind)) {
-    if (!runtimeLocation || !dataAndKeys || !whatBreaksIfStopped) {
-      throw new ValidationError(
-        'In-house apps require where it runs, data and keys touched, and what breaks if it stops',
-      );
-    }
-  }
 
   return {
     name,
@@ -310,7 +367,50 @@ export function validateCreateAppInput(input: CreateAppInput) {
     runtimeLocation,
     dataAndKeys,
     whatBreaksIfStopped,
+    criticality: optionalCriticality(input.criticality),
+    repositoryUrl: optionalRepositoryUrl(input.repositoryUrl),
   };
+}
+
+/** Allowed environments, each once, in the order APP_ENVIRONMENTS lists them. */
+export function validateEnvironments(value: unknown): AppEnvironment[] {
+  if (!Array.isArray(value) || value.some((item) => !(APP_ENVIRONMENTS as readonly unknown[]).includes(item))) {
+    throw new ValidationError(`environments must be a list of: ${APP_ENVIRONMENTS.join(', ')}`);
+  }
+  return APP_ENVIRONMENTS.filter((environment) => value.includes(environment));
+}
+
+function optionalCriticality(value: unknown): AppCriticality | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  if (!(APP_CRITICALITIES as readonly unknown[]).includes(value)) {
+    throw new ValidationError(`criticality must be one of: ${APP_CRITICALITIES.join(', ')}`);
+  }
+  return value as AppCriticality;
+}
+
+/** An https URL only: it is shown as a link, so no other scheme gets through. */
+function optionalRepositoryUrl(value: unknown): string | null {
+  const text = optionalText(value, 'repository URL');
+  if (text === null) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new ValidationError('Repository URL must be a full https:// address');
+  }
+  if (url.protocol !== 'https:' || text.length > REPOSITORY_URL_MAX_LENGTH) {
+    throw new ValidationError(`Repository URL must be an https:// address of at most ${REPOSITORY_URL_MAX_LENGTH} characters`);
+  }
+  return url.href;
+}
+
+/** The people an app names: its owner, and its backup owner when it has one. */
+function assignedPeople(values: {ownerId: string; backupOwnerId: string | null}): string[] {
+  return values.backupOwnerId ? [values.ownerId, values.backupOwnerId] : [values.ownerId];
 }
 
 function selectAppViews(db: AppDatabase) {
@@ -322,7 +422,7 @@ function selectAppViews(db: AppDatabase) {
     })
     .from(apps)
     .innerJoin(owner, eq(owner.id, apps.ownerId))
-    .innerJoin(backupOwner, eq(backupOwner.id, apps.backupOwnerId))
+    .leftJoin(backupOwner, eq(backupOwner.id, apps.backupOwnerId))
     .$dynamic();
 }
 
@@ -330,9 +430,10 @@ function toAppView(
   row: {
     app: typeof apps.$inferSelect;
     owner: {id: string; name: string};
-    backupOwner: {id: string; name: string};
+    backupOwner: {id: string; name: string} | null;
   },
   facts: HealthFacts,
+  environments: AppEnvironment[],
 ): AppView {
   const {app} = row;
   return {
@@ -351,6 +452,9 @@ function toAppView(
     runtimeLocation: app.runtimeLocation,
     dataAndKeys: app.dataAndKeys,
     whatBreaksIfStopped: app.whatBreaksIfStopped,
+    criticality: app.criticality as AppCriticality | null,
+    repositoryUrl: app.repositoryUrl,
+    environments,
     health: appHealth(facts),
     archivedAt: app.archivedAt,
     createdAt: app.createdAt,

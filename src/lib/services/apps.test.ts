@@ -1,6 +1,6 @@
 import {and, eq} from 'drizzle-orm';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {APP_CRITICALITY, APP_ENVIRONMENT, APP_KIND, NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
 import {noticeAlerts, people} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {archiveApp, createApp, getApp, listActiveApps, updateApp} from './apps';
@@ -61,18 +61,52 @@ describe('app domain model', () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it('requires in-house risk fields for in-house and citizen-built apps', async () => {
-    const helper = {...saas('Sales Pipeline Helper'), kind: 'citizen_built'};
-    await expect(createApp(t.db, t.workspaceId, helper)).rejects.toThrow(/In-house apps require/);
+  it('in-house fields are optional for every kind: add them now or later (Journey B, decision D6)', async () => {
+    const helper = await createApp(t.db, t.workspaceId, {...saas('Sales Pipeline Helper'), kind: APP_KIND.citizenBuilt});
+    expect(helper.runtimeLocation).toBeNull();
 
-    const app = await createApp(t.db, t.workspaceId, {
-      ...helper,
+    const updated = await updateApp(t.db, t.workspaceId, helper.id, {
       runtimeLocation: 'Vercel under team account',
       dataAndKeys: 'Supabase service role key; CRM export CSV',
       whatBreaksIfStopped: 'Weekly sales forecast email stops updating',
     });
-    expect(app.runtimeLocation).toContain('Vercel');
-    expect(app.whatBreaksIfStopped).toMatch(/forecast/i);
+    expect(updated.runtimeLocation).toContain('Vercel');
+    expect(updated.whatBreaksIfStopped).toMatch(/forecast/i);
+  });
+
+  it('the backup owner is optional, can be cleared with null, and still cannot be the owner', async () => {
+    const solo = await createApp(t.db, t.workspaceId, {...saas('Solo Run'), backupOwnerId: undefined});
+    expect(solo.backupOwner).toBeNull();
+    const withBackup = await createApp(t.db, t.workspaceId, saas('Paired Run'));
+    expect((await updateApp(t.db, t.workspaceId, withBackup.id, {backupOwnerId: null})).backupOwner).toBeNull();
+    await expect(updateApp(t.db, t.workspaceId, solo.id, {backupOwnerId: ownerId})).rejects.toThrow(/must be different people/);
+  });
+
+  it('criticality is stored, shown as null until set, and must be low, medium, high or critical', async () => {
+    const unset = await createApp(t.db, t.workspaceId, saas('Unrated Tool'));
+    expect(unset.criticality).toBeNull();
+    const rated = await createApp(t.db, t.workspaceId, {...saas('Rated Tool'), criticality: APP_CRITICALITY.critical});
+    expect(rated.criticality).toBe(APP_CRITICALITY.critical);
+    await expect(createApp(t.db, t.workspaceId, {...saas('Badly Rated'), criticality: 'urgent'})).rejects.toThrow(/criticality must be one of/);
+  });
+
+  it('environments are rows, each once and in a fixed order; an edit that leaves them out keeps them', async () => {
+    const app = await createApp(t.db, t.workspaceId, {
+      ...saas('Env Tool'),
+      environments: [APP_ENVIRONMENT.staging, APP_ENVIRONMENT.production, APP_ENVIRONMENT.staging],
+    });
+    expect(app.environments).toEqual([APP_ENVIRONMENT.production, APP_ENVIRONMENT.staging]);
+    expect((await updateApp(t.db, t.workspaceId, app.id, {name: 'Env Tool 2'})).environments).toEqual(app.environments);
+    expect((await updateApp(t.db, t.workspaceId, app.id, {environments: []})).environments).toEqual([]);
+    await expect(createApp(t.db, t.workspaceId, {...saas('Bad Env'), environments: ['moon']})).rejects.toThrow(/environments must be/);
+  });
+
+  it('a repository URL must be https; other schemes are refused so the link is always safe to show', async () => {
+    const app = await createApp(t.db, t.workspaceId, {...saas('Repo Tool'), repositoryUrl: 'https://git.example.test/team/repo-tool'});
+    expect(app.repositoryUrl).toBe('https://git.example.test/team/repo-tool');
+    for (const repositoryUrl of ['javascript:alert(1)', 'http://git.example.test/x', 'not a url']) {
+      await expect(createApp(t.db, t.workspaceId, {...saas(`Repo ${repositoryUrl.length}`), repositoryUrl})).rejects.toThrow(/https/);
+    }
   });
 
   it('requires owner and backup owner to be different people', async () => {
@@ -178,7 +212,7 @@ describe('app domain model', () => {
     await expect(
       updateApp(t.db, t.workspaceId, app.id, {backupOwnerId: ownerId}, TODAY),
     ).rejects.toThrow(/must be different people/);
-    expect((await getApp(t.db, t.workspaceId, app.id)).backupOwner.id).toBe(backupId);
+    expect((await getApp(t.db, t.workspaceId, app.id)).backupOwner?.id).toBe(backupId);
   });
 
   it('an offset due exactly today is scheduled and offsets already past are skipped', async () => {

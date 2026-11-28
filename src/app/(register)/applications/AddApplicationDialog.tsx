@@ -9,12 +9,13 @@ import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Selector} from '@astryxdesign/core/Selector';
 import {Text} from '@astryxdesign/core/Text';
-import {TextArea} from '@astryxdesign/core/TextArea';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_KINDS, ROUTES, RUNTIME_DETAIL_KINDS, type AppKind} from '@/lib/constants';
-import {KIND_OPTIONS} from '@/lib/ui/copy';
+import {APP_KINDS, ROUTES} from '@/lib/constants';
+import {CRITICALITY_OPTIONS, KIND_OPTIONS} from '@/lib/ui/copy';
+
+const CRITICALITY_REQUIRED = 'Choose how critical this application is.';
 import {emptyAppForm, type AppFormValues} from '@/lib/ui/forms';
 import {createAppAction} from '../actions';
 import {FormError} from '../_components/FormError';
@@ -37,14 +38,21 @@ export function AddApplicationDialog({isOpen, onClose, idempotencyKey, people}: 
   const {run, isPending, error, clearError} = useAction();
   const text = (key: keyof AppFormValues) => (value: string | null | undefined) =>
     setValues((current) => ({...current, [key]: value ?? ''}));
-  const needsRuntime = RUNTIME_DETAIL_KINDS.includes(values.kind as AppKind);
+  const [missing, setMissing] = useState<string | null>(null);
 
   function close() {
     clearError();
+    setMissing(null);
     onClose();
   }
 
   function add() {
+    // The API accepts an app without criticality (older clients); the form asks for it up front (Journey B).
+    if (!values.criticality) {
+      setMissing(CRITICALITY_REQUIRED);
+      return;
+    }
+    setMissing(null);
     run(
       () => createAppAction(idempotencyKey, values),
       () => {
@@ -64,30 +72,33 @@ export function AddApplicationDialog({isOpen, onClose, idempotencyKey, people}: 
           <Heading level={2} style={{fontSize: 'var(--font-size-2xl)'}}>
             Add application
           </Heading>
-          <Text color="secondary">Add an application to the register. Dates and costs can be added with Edit application.</Text>
+          <Text color="secondary">Name, type, criticality and owner are enough to start. Everything else can be added later.</Text>
         </VStack>
         <FormLayout defaultOptionality="required">
           <TextInput label="Application name" value={values.name} onChange={text('name')} placeholder="e.g. Customer Portal" hasAutoFocus />
           <Selector label="Application type" options={KIND_OPTIONS} value={values.kind} onChange={text('kind')} />
+          <Selector
+            label="Criticality"
+            description="How much the business depends on it."
+            options={CRITICALITY_OPTIONS}
+            value={values.criticality || undefined}
+            onChange={text('criticality')}
+            placeholder="Choose a level"
+          />
           <Selector label="Owner" options={people} value={values.ownerId || undefined} onChange={text('ownerId')} hasSearch placeholder="Choose a person" />
           <Selector
             label="Backup owner"
             options={people}
-            value={values.backupOwnerId || undefined}
+            value={values.backupOwnerId || null}
             onChange={text('backupOwnerId')}
             hasSearch
-            placeholder="Choose a person"
+            hasClear
+            placeholder="No backup owner"
+            isOptional
           />
           <TextInput label="Category" value={values.category} onChange={text('category')} placeholder="e.g. Operations" isOptional />
-          {needsRuntime && (
-            <>
-              <TextInput label="Where it runs" value={values.runtimeLocation} onChange={text('runtimeLocation')} />
-              <TextArea label="Data and keys it touches" value={values.dataAndKeys} onChange={text('dataAndKeys')} />
-              <TextArea label="What breaks if it stops" value={values.whatBreaksIfStopped} onChange={text('whatBreaksIfStopped')} />
-            </>
-          )}
         </FormLayout>
-        <FormError error={error} />
+        <FormError error={missing ?? error} />
         <HStack gap={2} hAlign="end">
           <Button label="Cancel" onClick={close} />
           <Button label="Add application" variant="primary" isLoading={isPending} onClick={add} />

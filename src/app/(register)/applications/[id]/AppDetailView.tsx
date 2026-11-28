@@ -20,9 +20,13 @@ import {VStack} from '@astryxdesign/core/VStack';
 import {APP_TAB, HEALTH_MAX_SCORE, ROUTES, appTabRoute, editAppRoute, type AppTab} from '@/lib/constants';
 import type {AppDetail, Deduction, Health, HostingCatalog} from '@/lib/ui/api-client';
 import {
+  CRITICALITY_LABEL,
+  CRITICALITY_NOT_SET,
+  ENVIRONMENT_LABEL,
   HEALTH_BASIS_NOTE,
   HEALTH_STATUS_VARIANT,
   KIND_LABEL,
+  NO_BACKUP_OWNER,
   NO_SCORE_HINT,
   NO_SCORE_TITLE,
   NOT_SET,
@@ -304,10 +308,25 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
           <PanelCard title="Key details" subtitle="Application record">
             <KeyValueRows
               rows={[
-                {label: 'Vendor', value: orDash(app.vendor)},
+                {label: 'Supplier', value: orDash(app.vendor)},
                 {label: 'Type', value: KIND_LABEL[app.kind]},
+                {label: 'Criticality', value: app.criticality ? CRITICALITY_LABEL[app.criticality] : CRITICALITY_NOT_SET},
                 {label: 'Owner', value: app.owner.name},
-                {label: 'Backup owner', value: app.backupOwner.name},
+                {label: 'Backup owner', value: app.backupOwner?.name ?? NO_BACKUP_OWNER},
+                {
+                  label: 'Environments',
+                  value: app.environments.length ? app.environments.map((environment) => ENVIRONMENT_LABEL[environment]).join(', ') : NOT_SET,
+                },
+                {
+                  label: 'Repository',
+                  value: app.repositoryUrl ? (
+                    <Link href={app.repositoryUrl} target="_blank" rel="noopener noreferrer">
+                      {app.repositoryUrl}
+                    </Link>
+                  ) : (
+                    NOT_SET
+                  ),
+                },
                 {label: 'Category', value: orDash(app.category)},
                 {label: 'Hosting', value: hosting},
                 {label: 'Renewal', value: dateOrDash(app.renewalDate)},

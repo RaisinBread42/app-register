@@ -50,6 +50,13 @@
       "when": 1795439451455,
       "tag": "0006_tearful_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795852865347,
+      "tag": "0007_app_criticality_environments",
+      "breakpoints": true
     }
   ]
 }

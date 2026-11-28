@@ -26,7 +26,7 @@ export default async function EditAppPage({params}: {params: Promise<{id: string
         <AppForm
           idempotencyKey={crypto.randomUUID()}
           initial={appToForm(app)}
-          people={ownerOptions(people, [app.owner, app.backupOwner])}
+          people={ownerOptions(people, app.backupOwner ? [app.owner, app.backupOwner] : [app.owner])}
           appId={app.id}
         />
       </Card>

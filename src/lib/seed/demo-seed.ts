@@ -2,11 +2,15 @@ import {and, eq, inArray, isNull, notInArray, or, sql} from 'drizzle-orm';
 import {
   ADVISORY_SEVERITY,
   ADVISORY_SOURCE,
+  APP_CRITICALITY,
+  APP_ENVIRONMENT,
   APP_KIND,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   PERSON_STATUS,
   type AdvisorySeverity,
+  type AppCriticality,
+  type AppEnvironment,
   type AppKind,
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
@@ -43,6 +47,8 @@ type SeedHosting = {
 type SeedApp = {
   name: string;
   kind: AppKind;
+  criticality: AppCriticality | null;
+  environments: AppEnvironment[];
   category: string;
   vendor: string | null;
   owner: string;
@@ -75,19 +81,19 @@ const NODE_18_END_OF_SUPPORT = '2025-04-30';
 
 export const DEMO_APPS: SeedApp[] = [
   {
-    name: 'Ledgerline', kind: APP_KIND.saas, category: FINANCE, vendor: 'Ledgerline Ltd', owner: PERSON.avery, backup: PERSON.jordan,
+    name: 'Ledgerline', criticality: APP_CRITICALITY.high, environments: [], kind: APP_KIND.saas, category: FINANCE, vendor: 'Ledgerline Ltd', owner: PERSON.avery, backup: PERSON.jordan,
     renewalInDays: 55, noticeInDays: 25, runtime: null, dependencies: [], hosting: [],
   },
   {
-    name: 'Brightdesk', kind: APP_KIND.saas, category: 'Support', vendor: 'Brightdesk Inc', owner: PERSON.jordan, backup: PERSON.sam,
+    name: 'Brightdesk', criticality: APP_CRITICALITY.medium, environments: [], kind: APP_KIND.saas, category: 'Support', vendor: 'Brightdesk Inc', owner: PERSON.jordan, backup: PERSON.sam,
     renewalInDays: 120, noticeInDays: 55, runtime: null, dependencies: [], hosting: [],
   },
   {
-    name: 'Inkpad CRM', kind: APP_KIND.saas, category: 'Sales', vendor: 'Inkpad Software', owner: PERSON.casey, backup: PERSON.avery,
+    name: 'Inkpad CRM', criticality: APP_CRITICALITY.medium, environments: [], kind: APP_KIND.saas, category: 'Sales', vendor: 'Inkpad Software', owner: PERSON.casey, backup: PERSON.avery,
     renewalInDays: 115, noticeInDays: 85, runtime: null, dependencies: [], hosting: [],
   },
   {
-    name: 'Northwind Portal', kind: APP_KIND.inHouse, category: 'Customer portal', vendor: null, owner: PERSON.sam, backup: PERSON.riley,
+    name: 'Northwind Portal', criticality: APP_CRITICALITY.critical, environments: [APP_ENVIRONMENT.production, APP_ENVIRONMENT.staging], kind: APP_KIND.inHouse, category: 'Customer portal', vendor: null, owner: PERSON.sam, backup: PERSON.riley,
     renewalInDays: null, noticeInDays: null,
     runtime: {location: 'Azure App Service, UK South', dataAndKeys: 'Customer accounts; payment provider API key', whatBreaks: 'Customers cannot log in or pay invoices'},
     dependencies: [
@@ -102,7 +108,7 @@ export const DEMO_APPS: SeedApp[] = [
     }],
   },
   {
-    name: 'Fleet Tracker', kind: APP_KIND.citizenBuilt, category: 'Operations', vendor: null, owner: PERSON.riley, backup: PERSON.casey,
+    name: 'Fleet Tracker', criticality: APP_CRITICALITY.low, environments: [APP_ENVIRONMENT.production], kind: APP_KIND.citizenBuilt, category: 'Operations', vendor: null, owner: PERSON.riley, backup: PERSON.casey,
     renewalInDays: null, noticeInDays: null,
     runtime: {location: 'Shared spreadsheet plus a scheduled script on the office server', dataAndKeys: 'Vehicle bookings; mapping API key', whatBreaks: 'Drivers lose the weekly rota'},
     dependencies: [
@@ -113,18 +119,18 @@ export const DEMO_APPS: SeedApp[] = [
     hosting: [],
   },
   {
-    name: 'Staff Directory', kind: APP_KIND.inHouse, category: 'People', vendor: null, owner: PERSON.avery, backup: PERSON.sam,
+    name: 'Staff Directory', criticality: APP_CRITICALITY.low, environments: [APP_ENVIRONMENT.production], kind: APP_KIND.inHouse, category: 'People', vendor: null, owner: PERSON.avery, backup: PERSON.sam,
     renewalInDays: null, noticeInDays: null,
     runtime: {location: VERCEL, dataAndKeys: 'Staff names and desk numbers', whatBreaks: 'Reception cannot find people'},
     dependencies: [{name: 'next', currentVersion: NEXT_VERSION, latestVersion: NEXT_VERSION, advisories: []}],
     hosting: [{provider: VERCEL, service: 'Hosting', region: null, runtime: null, runtimeVersion: null, endOfSupportOn: null, incident: null}],
   },
   {
-    name: 'Payroll Bridge', kind: APP_KIND.vendorService, category: FINANCE, vendor: 'Bridgeworks Payroll', owner: PERSON.casey, backup: PERSON.jordan,
+    name: 'Payroll Bridge', criticality: APP_CRITICALITY.high, environments: [], kind: APP_KIND.vendorService, category: FINANCE, vendor: 'Bridgeworks Payroll', owner: PERSON.casey, backup: PERSON.jordan,
     renewalInDays: 200, noticeInDays: 140, runtime: null, dependencies: [], hosting: [],
   },
   {
-    name: 'Room Booker', kind: APP_KIND.saas, category: 'Facilities', vendor: 'Roomly', owner: PERSON.sam, backup: PERSON.avery,
+    name: 'Room Booker', criticality: null, environments: [], kind: APP_KIND.saas, category: 'Facilities', vendor: 'Roomly', owner: PERSON.sam, backup: PERSON.avery,
     renewalInDays: null, noticeInDays: null, runtime: null, dependencies: [], hosting: [],
   },
 ];
@@ -233,6 +239,8 @@ async function createDemoApp(
     {
       name: app.name,
       kind: app.kind,
+      criticality: app.criticality,
+      environments: app.environments,
       category: app.category,
       vendor: app.vendor,
       ownerId: personId(ids, app.owner),

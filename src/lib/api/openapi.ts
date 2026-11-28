@@ -5,6 +5,8 @@ import {
   API_KEY_SCOPES,
   API_KEY_STATUSES,
   BYTES_PER_MB,
+  APP_CRITICALITIES,
+  APP_ENVIRONMENTS,
   APP_KINDS,
   APP_SORTS,
   DEPENDENCY_CHECK_ERRORS,
@@ -34,6 +36,7 @@ import {
   NOTICE_ALERT_STATUSES,
   NOTICE_WINDOW_MAX_DAYS,
   PERSON_STATUSES,
+  REPOSITORY_URL_MAX_LENGTH,
 } from '@/lib/constants';
 
 /**
@@ -112,7 +115,11 @@ const appFields = {
   runtimeLocation: nullable('string'),
   dataAndKeys: nullable('string'),
   whatBreaksIfStopped: nullable('string'),
+  criticality: {type: ['string', 'null'], enum: [...APP_CRITICALITIES, null], description: 'Business criticality; null until set'},
+  repositoryUrl: nullable('string', {format: 'uri', maxLength: REPOSITORY_URL_MAX_LENGTH, description: 'https:// only'}),
 };
+
+const environments: Schema = {type: 'array', items: {type: 'string', enum: [...APP_ENVIRONMENTS]}, uniqueItems: true};
 
 const personRef = strict({id, name: text});
 
@@ -120,7 +127,8 @@ const appProperties = {
   id,
   ...appFields,
   owner: personRef,
-  backupOwner: personRef,
+  backupOwner: {oneOf: [personRef, {type: 'null'}], description: 'Optional; null when the app has none'},
+  environments,
   health: ref('Health'),
   archivedAt: nullable('string', {format: 'date-time'}),
   createdAt: timestamp,
@@ -130,7 +138,8 @@ const appProperties = {
 const appInputFields = {
   ...appFields,
   ownerId: {...id, description: 'Must be an active person when newly assigned'},
-  backupOwnerId: {...id, description: 'Must differ from ownerId'},
+  backupOwnerId: {type: ['string', 'null'], format: 'uuid', description: 'Optional. Must differ from ownerId; null clears it'},
+  environments: {...environments, description: 'Where it runs. On PATCH, leave it out to keep the current list'},
 };
 
 const dependencyFields = {
@@ -265,7 +274,7 @@ const schemas = {
     dependencies: {type: 'array', items: ref('Dependency')},
     hosting: {type: 'array', items: ref('Hosting')},
   }),
-  AppInput: input(appInputFields, ['name', 'kind', 'ownerId', 'backupOwnerId']),
+  AppInput: input(appInputFields, ['name', 'kind', 'ownerId']),
   AppPatch: input(appInputFields),
   Person: strict({
     id,
