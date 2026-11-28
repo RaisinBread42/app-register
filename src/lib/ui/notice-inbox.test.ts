@@ -1,7 +1,19 @@
 import {describe, expect, it} from 'vitest';
 import {MATCH_CONFIDENCE, MATCH_STATUS, NOTICE_CATEGORY, NOTICE_ORIGIN, NOTICE_SEVERITY, NOTICE_SOURCE, type MatchStatus, type NoticeSeverity} from '@/lib/constants';
 import type {Notice, NoticeMatch} from './api-client';
-import {DEFAULT_INBOX_VIEW, INBOX_GROUP, INBOX_STATUS, inboxQuery, inboxRows, inboxViewFrom, nextStep, openCount, tomorrow} from './notice-inbox';
+import {
+  DEFAULT_INBOX_VIEW,
+  INBOX_GROUP,
+  INBOX_STATUS,
+  hasNarrowingFilters,
+  inboxGroups,
+  inboxQuery,
+  inboxRows,
+  inboxViewFrom,
+  nextStep,
+  openCount,
+  tomorrow,
+} from './notice-inbox';
 
 function match(app: string, status: MatchStatus = MATCH_STATUS.new, resolvedAt: string | null = null): NoticeMatch {
   return {
@@ -77,7 +89,15 @@ describe('notice inbox', () => {
   it('the nav count is the open rows, and every kind of notice gets a plain next step naming the app', () => {
     expect(openCount(NOTICES)).toBe(2);
     const [row] = inboxRows(NOTICES, DEFAULT_INBOX_VIEW);
-    expect(nextStep(row.notice, row.match)).toMatch(/Upgrade left-pad on Alpha/);
+    expect(nextStep(row.notice, row.match, '2026-11-28')).toMatch(/Upgrade left-pad on Alpha/);
     expect(tomorrow('2026-12-31')).toBe('2027-01-01');
+  });
+
+  it('grouping by application puts a heading per app over its rows; an empty list under a narrowing filter is "no match", not "nothing open"', () => {
+    const rows = inboxRows(NOTICES, {...DEFAULT_INBOX_VIEW, status: INBOX_STATUS.all, group: INBOX_GROUP.app});
+    expect(inboxGroups(rows, INBOX_GROUP.app).map((group) => [group.label, group.rows.length])).toEqual([['Alpha', 2], ['Beta', 1], ['Zeta', 1]]);
+    expect(inboxGroups(rows, INBOX_GROUP.severity)).toHaveLength(1);
+    expect(hasNarrowingFilters({...DEFAULT_INBOX_VIEW, category: NOTICE_CATEGORY.deadline})).toBe(true);
+    expect(hasNarrowingFilters({...DEFAULT_INBOX_VIEW, status: INBOX_STATUS.handled})).toBe(false);
   });
 });

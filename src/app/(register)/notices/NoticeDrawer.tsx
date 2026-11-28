@@ -11,9 +11,8 @@ import {Link} from '@astryxdesign/core/Link';
 import {Selector} from '@astryxdesign/core/Selector';
 import {Text} from '@astryxdesign/core/Text';
 import {TextArea} from '@astryxdesign/core/TextArea';
-import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {MATCH_STATUS, NOTICE_ORIGIN, appRoute, type MatchStatus} from '@/lib/constants';
+import {AUDIT_ACTION, MATCH_STATUS, NOTICE_ORIGIN, appRoute, type MatchStatus} from '@/lib/constants';
 import {
   MATCH_CONFIDENCE_LABEL,
   MATCH_STATUS_LABEL,
@@ -24,19 +23,17 @@ import {
 } from '@/lib/ui/copy';
 import {nextStep, tomorrow, type InboxRow} from '@/lib/ui/notice-inbox';
 import {formatDate, formatDateTime} from '@/lib/ui/register-view';
-import {assignMatchAction, changeMatchStatusAction, undoMatchAction} from '../actions';
+import {assignMatchAction, changeMatchStatusAction} from '../actions';
 import type {PersonOption} from '../applications/AppForm';
 import {FormError} from '../_components/FormError';
 import {isoDate} from '../_components/iso-date';
 import {useAction} from '../_components/use-action';
-
-/** One Idempotency-Key per match per action, rendered with the page. */
-export type MatchKeys = {status: Record<string, string>; assign: Record<string, string>; undo: Record<string, string>};
+import {useConfirmWithUndo, type MatchKeys} from './use-confirm-with-undo';
 
 type Mode = 'snooze' | 'handle' | 'assign' | null;
 
 const ORIGIN_LABEL = {[NOTICE_ORIGIN.external]: 'Outside source', [NOTICE_ORIGIN.person]: 'Entered by a person'} as const;
-const DONE_MESSAGE: Record<MatchStatus, string> = {
+export const DONE_MESSAGE: Record<MatchStatus, string> = {
   [MATCH_STATUS.new]: 'Reopened',
   [MATCH_STATUS.reviewing]: 'Marked as reviewing',
   [MATCH_STATUS.snoozed]: 'Snoozed',
@@ -48,7 +45,8 @@ type Props = {row: InboxRow | null; people: PersonOption[]; keys: MatchKeys; tod
 /**
  * The notice drawer, in the order spec §6 sets: what happened → which app → why we
  * think so → what to do → source. Actions sit beside it; each confirms with a toast
- * that offers Undo.
+ * that offers Undo. The page mounts one per notice (keyed by match), so nothing typed
+ * for one notice carries over to the next.
  */
 export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
   const [mode, setMode] = useState<Mode>(null);
@@ -56,7 +54,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
   const [until, setUntil] = useState('');
   const [assignee, setAssignee] = useState<string | null>(null);
   const action = useAction();
-  const showToast = useToast();
+  const confirm = useConfirmWithUndo(keys);
 
   if (!row) {
     return null;
@@ -68,15 +66,12 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
     setUntil('');
     action.clearError();
   };
-  const undoButton = (
-    <Button label="Undo" size="sm" variant="secondary" onClick={() => void undoMatchAction(keys.undo[match.id], match.id)} />
-  );
   const setStatus = (status: MatchStatus, extra: {note?: string; snoozedUntil?: string} = {}) =>
     action.run(
       () => changeMatchStatusAction(keys.status[match.id], match.id, {status, ...extra}),
       () => {
         reset();
-        showToast({body: `${DONE_MESSAGE[status]}: ${notice.title}`, endContent: undoButton});
+        confirm(`${DONE_MESSAGE[status]}: ${notice.title}`, match.id, {action: AUDIT_ACTION.noticeStatusChanged, toValue: status});
       },
     );
   const assign = () =>
@@ -84,7 +79,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
       () => assignMatchAction(keys.assign[match.id], match.id, assignee),
       () => {
         reset();
-        showToast({body: assignee ? 'Owner assigned' : 'Owner cleared', endContent: undoButton});
+        confirm(assignee ? 'Owner assigned' : 'Owner cleared', match.id, {action: AUDIT_ACTION.noticeAssigned, toValue: assignee});
       },
     );
 
@@ -119,7 +114,7 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
         </Section>
 
         <Section title="What to do">
-          <Text>{nextStep(notice, match)}</Text>
+          <Text>{nextStep(notice, match, today)}</Text>
         </Section>
 
         <Section title="Source">

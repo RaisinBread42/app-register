@@ -11,7 +11,9 @@ import {
   type NoticeSeverity,
 } from '@/lib/constants';
 import type {Notice, NoticeMatch} from './api-client';
+import {NOTICE_CATEGORY_LABEL} from './copy';
 import type {SearchParams} from './list-filters';
+import {formatDate} from './register-view';
 
 /**
  * The notice inbox's rules, kept out of components so they can be tested: one row
@@ -26,7 +28,8 @@ export const INBOX_STATUS = {open: 'open', snoozed: 'snoozed', handled: 'handled
 export const INBOX_STATUSES = Object.values(INBOX_STATUS);
 export type InboxStatus = (typeof INBOX_STATUSES)[number];
 
-export const INBOX_GROUP = {severity: 'severity', app: 'app'} as const;
+/** `severity` is one list, most severe first; `app` and `category` add a heading per group. */
+export const INBOX_GROUP = {severity: 'severity', app: 'app', category: 'category'} as const;
 export const INBOX_GROUPS = Object.values(INBOX_GROUP);
 export type InboxGroup = (typeof INBOX_GROUPS)[number];
 
@@ -49,7 +52,8 @@ export const DEFAULT_INBOX_VIEW: InboxView = {
   notice: '',
 };
 
-const SEVERITY_RANK: Record<NoticeSeverity, number> = {
+/** Most severe first; shared with the applications catalog's attention order. */
+export const SEVERITY_RANK: Record<NoticeSeverity, number> = {
   [NOTICE_SEVERITY.critical]: 0,
   [NOTICE_SEVERITY.high]: 1,
   [NOTICE_SEVERITY.medium]: 2,
@@ -115,9 +119,14 @@ export function inboxRows(notices: Notice[], view: InboxView): InboxRow[] {
       (view.app === FILTER_ALL || match.app.id === view.app),
   );
   return shown.sort((a, b) => {
-    const byApp = view.group === INBOX_GROUP.app ? a.match.app.name.localeCompare(b.match.app.name) : 0;
+    const byGroup =
+      view.group === INBOX_GROUP.app
+        ? a.match.app.name.localeCompare(b.match.app.name)
+        : view.group === INBOX_GROUP.category
+          ? NOTICE_CATEGORIES.indexOf(a.notice.category) - NOTICE_CATEGORIES.indexOf(b.notice.category)
+          : 0;
     return (
-      byApp ||
+      byGroup ||
       SEVERITY_RANK[a.notice.severity] - SEVERITY_RANK[b.notice.severity] ||
       (a.notice.dueOn ?? '9999').localeCompare(b.notice.dueOn ?? '9999') ||
       b.notice.lastSeenAt.localeCompare(a.notice.lastSeenAt)
@@ -125,22 +134,55 @@ export function inboxRows(notices: Notice[], view: InboxView): InboxRow[] {
   });
 }
 
+export type InboxGroupRows = {key: string; label: string; rows: InboxRow[]};
+
+/** The rows under one heading per application or kind, in the order `inboxRows` gives; one unnamed group when not grouped. */
+export function inboxGroups(rows: InboxRow[], group: InboxGroup): InboxGroupRows[] {
+  if (group === INBOX_GROUP.severity) {
+    return [{key: group, label: '', rows}];
+  }
+  const groups = new Map<string, InboxGroupRows>();
+  for (const row of rows) {
+    const key = group === INBOX_GROUP.app ? row.match.app.id : row.notice.category;
+    const label = group === INBOX_GROUP.app ? row.match.app.name : NOTICE_CATEGORY_LABEL[row.notice.category];
+    const known = groups.get(key) ?? {key, label, rows: []};
+    known.rows.push(row);
+    groups.set(key, known);
+  }
+  return [...groups.values()];
+}
+
+/** True when a filter other than status narrows the list, so an empty list says "no match", not "nothing open". */
+export function hasNarrowingFilters(view: InboxView): boolean {
+  return view.severity !== FILTER_ALL || view.category !== FILTER_ALL || view.app !== FILTER_ALL;
+}
+
 /** Rows that still need someone: open status on an open notice. Used for the nav count. */
 export function openCount(notices: Notice[]): number {
   return inboxRows(notices, DEFAULT_INBOX_VIEW).length;
 }
 
-/** What to do, in plain words, for one notice on one app (spec §6: what to do comes before the source). */
-export function nextStep(notice: Notice, match: NoticeMatch): string {
+/**
+ * What to do, in plain words, for one notice on one app (spec §6: what to do comes
+ * before the source). A date already past (`today`, UTC YYYY-MM-DD) is said to have passed.
+ */
+export function nextStep(notice: Notice, match: NoticeMatch, today: string): string {
+  const app = match.app.name;
+  const date = notice.dueOn ? formatDate(notice.dueOn) : null;
+  const hasPassed = notice.dueOn !== null && notice.dueOn < today;
   switch (notice.category) {
     case NOTICE_CATEGORY.security:
-      return `Upgrade ${match.component} on ${match.app.name} to a version without ${notice.externalId ?? 'this advisory'}, or record why the risk is accepted.`;
+      return `Upgrade ${match.component} on ${app} to a version without ${notice.externalId ?? 'this advisory'}, or record why the risk is accepted.`;
     case NOTICE_CATEGORY.lifecycle:
-      return `Plan the move of ${match.app.name} to a supported version${notice.dueOn ? ` before ${notice.dueOn}` : ''}, and assign someone to own it.`;
+      return hasPassed
+        ? `Support ended on ${date}: move ${app} to a supported version now, and assign someone to own it.`
+        : `Plan the move of ${app} to a supported version${date ? ` before ${date}` : ''}, and assign someone to own it.`;
     case NOTICE_CATEGORY.outage:
-      return `Check the provider's status page; if ${match.app.name} is affected, tell its users and follow the provider's updates.`;
+      return `Check the provider's status page; if ${app} is affected, tell its users and follow the provider's updates.`;
     case NOTICE_CATEGORY.deadline:
-      return `Decide whether to renew, cancel or renegotiate before the deadline, and record the decision.`;
+      return hasPassed
+        ? `The deadline for ${app} passed on ${date}: check whether it renewed, and record what was decided.`
+        : `Decide whether to renew, cancel or renegotiate ${app}${date ? ` before ${date}` : ' before the deadline'}, and record the decision.`;
     default:
       return `Review what changed and record what you decide for ${match.app.name}.`;
   }

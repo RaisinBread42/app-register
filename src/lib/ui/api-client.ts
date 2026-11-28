@@ -5,6 +5,7 @@ import {
   API_QUERY,
   API_ROUTES,
   API_SUB_ROUTE,
+  AUDIT_ACTION,
   BEARER_PREFIX,
   ENV,
   HTTP_METHOD,
@@ -45,6 +46,9 @@ import {
 // Response shapes (OpenAPI components/schemas).
 
 export type PersonRef = {id: string; name: string};
+
+/** The action an Undo is for (a status change or an assignment) and the value it set. */
+export type UndoTarget = {action: typeof AUDIT_ACTION.noticeStatusChanged | typeof AUDIT_ACTION.noticeAssigned; toValue: string | null};
 
 type AppFields = {
   name: string;
@@ -441,8 +445,8 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     async assignMatch(idempotencyKey: string, matchId: string, assigneeId: string | null): Promise<NoticeMatch> {
       return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.assign}`, idempotencyKey, {assigneeId})).match;
     },
-    async undoMatch(idempotencyKey: string, matchId: string): Promise<NoticeMatch> {
-      return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.undo}`, idempotencyKey)).match;
+    async undoMatch(idempotencyKey: string, matchId: string, target?: UndoTarget): Promise<NoticeMatch> {
+      return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.undo}`, idempotencyKey, target)).match;
     },
     async listAuditEvents(query: {appId?: string; matchId?: string; limit?: number}): Promise<AuditEvent[]> {
       const search = new URLSearchParams(

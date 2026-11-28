@@ -10,6 +10,7 @@ import {
   type DependencyImport,
   type PersonInput,
   type StatusChangeInput,
+  type UndoTarget,
 } from '@/lib/ui/api-client';
 import {
   formToAppInput,
@@ -195,8 +196,8 @@ export async function assignMatchAction(idempotencyKey: string, matchId: string,
   return result;
 }
 
-export async function undoMatchAction(idempotencyKey: string, matchId: string): Promise<ActionResult> {
-  const result = await runAction(() => apiClient().undoMatch(idempotencyKey, matchId));
+export async function undoMatchAction(idempotencyKey: string, matchId: string, target: UndoTarget): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().undoMatch(idempotencyKey, matchId, target));
   refreshNotices();
   return result;
 }

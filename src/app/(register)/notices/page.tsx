@@ -1,6 +1,6 @@
-import {MONITORING_SOURCE_STATUS} from '@/lib/constants';
 import {todayIso} from '@/lib/notice-alerts';
 import {apiClient} from '@/lib/ui/api-client';
+import {hasEverAnswered, staleSources} from '@/lib/ui/freshness';
 import {ownerOptions} from '../applications/people-options';
 import {keysFor} from '../_components/idempotency-keys';
 import {NoticesView} from './NoticesView';
@@ -15,7 +15,8 @@ export default async function NoticesPage() {
       notices={notices}
       people={ownerOptions(people)}
       keys={{status: keysFor(matches), assign: keysFor(matches), undo: keysFor(matches)}}
-      staleSources={sources.filter((source) => source.status === MONITORING_SOURCE_STATUS.unavailable).map((source) => source.name)}
+      staleSources={staleSources(sources, new Date()).map((source) => source.name)}
+      hasAnySourceAnswered={hasEverAnswered(sources)}
       today={todayIso()}
     />
   );

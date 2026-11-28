@@ -30,6 +30,15 @@ import {optionalDate, optionalText} from './validation';
 
 export type StatusChange = {status: string; note?: string | null; snoozedUntil?: string | null};
 export type Assignment = {assigneeId?: string | null; note?: string | null};
+/**
+ * Which action an Undo is for: the action and the value it set. Status and owner are
+ * undone separately, so undoing a review after an assignment keeps the owner. When a
+ * later change of the same kind has happened, Undo refuses, so an older confirmation
+ * never reverses a newer change.
+ */
+export type UndoTarget = {action?: string; toValue?: string | null};
+
+const UNDOABLE_ACTIONS: readonly AuditAction[] = [AUDIT_ACTION.noticeStatusChanged, AUDIT_ACTION.noticeAssigned];
 
 const MATCH_NOT_FOUND = 'Notice match not found';
 /** Events that set a match's status; the latest one says what the status became. */
@@ -39,8 +48,16 @@ const STATUS_EVENTS: readonly AuditAction[] = [
   AUDIT_ACTION.noticeSnoozeEnded,
   AUDIT_ACTION.noticeReopened,
 ];
-/** Events an undo looks at: the latest one is what an undo would reverse. */
-const TIMELINE_EVENTS: readonly AuditAction[] = [...STATUS_EVENTS, AUDIT_ACTION.noticeAssigned, AUDIT_ACTION.noticeAssignmentUndone];
+const ASSIGNMENT_EVENTS: readonly AuditAction[] = [AUDIT_ACTION.noticeAssigned, AUDIT_ACTION.noticeAssignmentUndone];
+/** Events an undo looks at: the latest one is what an undo with no target would reverse. */
+const TIMELINE_EVENTS: readonly AuditAction[] = [...STATUS_EVENTS, ...ASSIGNMENT_EVENTS];
+
+/** The events an undo for this target reads: one kind (status or owner) when it names an action, else both. */
+function undoTimeline(target: UndoTarget): readonly AuditAction[] {
+  if (target.action === AUDIT_ACTION.noticeStatusChanged) return STATUS_EVENTS;
+  if (target.action === AUDIT_ACTION.noticeAssigned) return ASSIGNMENT_EVENTS;
+  return TIMELINE_EVENTS;
+}
 
 type StatusState = {status: MatchStatus; snoozedUntil: string | null; note: string | null};
 const INITIAL_STATE: StatusState = {status: MATCH_STATUS.new, snoozedUntil: null, note: null};
@@ -136,19 +153,26 @@ export async function undoLastAction(
   workspaceId: string,
   matchId: string,
   actor: Actor,
+  target: UndoTarget = {},
   now = new Date(),
   today = todayIso(),
 ): Promise<void> {
+  if (target.action !== undefined && !UNDOABLE_ACTIONS.includes(target.action as AuditAction)) {
+    throw new ValidationError(`action must be one of: ${UNDOABLE_ACTIONS.join(', ')}`);
+  }
   await db.transaction(async (tx) => {
     const current = await lockMatch(tx, workspaceId, matchId, now, today);
     const timeline = await tx
       .select()
       .from(auditEvents)
-      .where(and(eq(auditEvents.workspaceId, workspaceId), eq(auditEvents.subjectId, current.id), inArray(auditEvents.action, [...TIMELINE_EVENTS])))
+      .where(and(eq(auditEvents.workspaceId, workspaceId), eq(auditEvents.subjectId, current.id), inArray(auditEvents.action, [...undoTimeline(target)])))
       .orderBy(desc(auditEvents.seq));
     const last = timeline[0];
-    if (!last || (last.action !== AUDIT_ACTION.noticeStatusChanged && last.action !== AUDIT_ACTION.noticeAssigned)) {
+    if (!last || !UNDOABLE_ACTIONS.includes(last.action as AuditAction)) {
       throw new ValidationError('There is nothing to undo');
+    }
+    if (target.action !== undefined && (last.action !== target.action || ('toValue' in target && last.toValue !== (target.toValue ?? null)))) {
+      throw new ValidationError('A later change was made to this notice, so this Undo no longer applies');
     }
     if (last.action === AUDIT_ACTION.noticeAssigned) {
       if (last.fromValue) {
