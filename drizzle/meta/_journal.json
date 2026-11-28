@@ -43,6 +43,13 @@
       "when": 1795401980030,
       "tag": "0005_hosting_health",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795439451455,
+      "tag": "0006_tearful_old_lace",
+      "breakpoints": true
     }
   ]
 }

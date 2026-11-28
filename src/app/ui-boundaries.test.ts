@@ -47,17 +47,25 @@ describe('UI boundaries', () => {
     }
   });
 
-  it('screens with no API yet (sources, settings) render placeholders without calling the API or any server action', () => {
-    const placeholderScreens = uiFiles.filter(({file}) => /^app\/\(register\)\/(sources|settings)\//.test(file));
+  it('screens with no API yet (sources) render placeholders without calling the API or any server action', () => {
+    const placeholderScreens = uiFiles.filter(({file}) => /^app\/\(register\)\/sources\//.test(file));
     expect(placeholderScreens.map(({file}) => path.basename(file)).sort()).toEqual([
-      'SettingsView.tsx',
       'SourcesView.tsx',
-      'page.tsx',
       'page.tsx',
     ]);
     for (const {file, text} of placeholderScreens) {
       expect(text, file).not.toMatch(/api-client|actions['"]|fetch\(/);
     }
+  });
+
+  it('Settings loads sources and keys through the API client on the server and only calls server actions from the client', () => {
+    const page = uiFiles.find(({file}) => file === path.join('app', '(register)', 'settings', 'page.tsx'));
+    const view = uiFiles.find(({file}) => file === path.join('app', '(register)', 'settings', 'SettingsView.tsx'));
+    expect(page?.text).toMatch(/apiClient/);
+    expect(page?.text).not.toMatch(/^['"]use client['"]/);
+    expect(view?.text).toMatch(/^['"]use client['"]/);
+    expect(view?.text).toMatch(/from ['"]\.\.\/actions['"]/);
+    expect(view?.text).not.toMatch(/^import\s+(?!type\b)[^;]*from\s+['"]@\/lib\/ui\/api-client['"]/m);
   });
 
   it('the notices screens are gone from the UI: no route renders them and the sidebar does not link to them', () => {

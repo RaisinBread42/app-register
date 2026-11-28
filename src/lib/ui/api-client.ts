@@ -11,6 +11,8 @@ import {
   HTTP_STATUS,
   JSON_CONTENT_TYPE,
   type AdvisorySeverity,
+  type ApiKeyScope,
+  type ApiKeyStatus,
   type AppKind,
   type AppSort,
   type DependencyCheckError,
@@ -20,6 +22,7 @@ import {
   type HealthStatus,
   type IncidentImpact,
   type IncidentScope,
+  type MonitoringSourceStatus,
   type NoticeAlertStatus,
   type PersonStatus,
 } from '@/lib/constants';
@@ -172,6 +175,32 @@ export type PersonPatch = Partial<PersonInput> & {status?: PersonStatus; leftOn?
 export type AppListFilter = {kind?: string; sort?: AppSort; noticeDeadlineWithinDays?: number};
 export type AlertListFilter = {status?: string; appId?: string};
 
+export type ApiKey = {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopeLabel: string;
+  scopes: ApiKeyScope[];
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  status: ApiKeyStatus;
+  revokedAt: string | null;
+  /** Only on create; null on an Idempotency-Key replay. */
+  key?: string | null;
+};
+
+export type ApiKeyInput = {name: string; expiresOn?: string | null};
+
+export type MonitoringSource = {
+  id: string;
+  name: string;
+  monitors: string;
+  status: MonitoringSourceStatus;
+  lastRefreshedAt: string | null;
+  url: string;
+};
+
 /** A non-2xx answer from the API; `message` is the API's `{ error }` text. */
 export class ApiError extends Error {
   constructor(
@@ -315,6 +344,18 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     },
     async acknowledgeAlert(idempotencyKey: string, id: string): Promise<NoticeAlert> {
       return (await post<{alert: NoticeAlert}>(`${API_ROUTES.noticeAlerts}/${segment(id)}/${API_SUB_ROUTE.acknowledge}`, idempotencyKey)).alert;
+    },
+    async listApiKeys(): Promise<ApiKey[]> {
+      return (await get<{apiKeys: ApiKey[]}>(API_ROUTES.apiKeys)).apiKeys;
+    },
+    async createApiKey(idempotencyKey: string, input: ApiKeyInput): Promise<ApiKey> {
+      return (await post<{apiKey: ApiKey}>(API_ROUTES.apiKeys, idempotencyKey, input)).apiKey;
+    },
+    async revokeApiKey(idempotencyKey: string, id: string): Promise<ApiKey> {
+      return (await post<{apiKey: ApiKey}>(`${API_ROUTES.apiKeys}/${segment(id)}/${API_SUB_ROUTE.revoke}`, idempotencyKey)).apiKey;
+    },
+    async listMonitoringSources(): Promise<MonitoringSource[]> {
+      return (await get<{sources: MonitoringSource[]}>(API_ROUTES.monitoringSources)).sources;
     },
   };
 }

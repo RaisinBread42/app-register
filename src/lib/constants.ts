@@ -86,6 +86,8 @@ export const API_ROUTES = {
   apps: `${API_PATH_PREFIX}/apps`,
   people: `${API_PATH_PREFIX}/people`,
   noticeAlerts: `${API_PATH_PREFIX}/notice-alerts`,
+  apiKeys: `${API_PATH_PREFIX}/api-keys`,
+  monitoringSources: `${API_PATH_PREFIX}/settings/monitoring-sources`,
 } as const;
 
 /** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
@@ -98,6 +100,8 @@ export const API_SUB_ROUTE = {
   import: 'import',
   /** `POST /api/apps/:id/dependencies/refresh` */
   refresh: 'refresh',
+  /** `POST /api/api-keys/:id/revoke` */
+  revoke: 'revoke',
 } as const;
 
 /** `POST` here re-checks every active app's dependencies. */
@@ -279,6 +283,7 @@ export const HTTP_STATUS = {
   noContent: 204,
   badRequest: 400,
   unauthorized: 401,
+  forbidden: 403,
   notFound: 404,
   unprocessable: 422,
   serverError: 500,
@@ -289,6 +294,61 @@ export const BEARER_PREFIX = 'Bearer ';
 
 /** Every API key starts with this, so a leaked one is easy to spot in code or logs. */
 export const API_KEY_PREFIX = 'ar_';
+
+/**
+ * Fine-grained permissions a Settings-created API key may hold. Stored as rows
+ * in `api_key_scopes`. A key with no scope rows is unrestricted (CLI / UI server).
+ */
+export const API_KEY_SCOPE = {
+  appsRead: 'apps:read',
+  appsWrite: 'apps:write',
+  dependenciesRead: 'dependencies:read',
+  dependenciesWrite: 'dependencies:write',
+  hostingRead: 'hosting:read',
+  hostingWrite: 'hosting:write',
+} as const;
+export const API_KEY_SCOPES = Object.values(API_KEY_SCOPE);
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+/** Scopes Settings attaches to every key it creates (the applications register). */
+export const APPLICATIONS_REGISTER_SCOPES: readonly ApiKeyScope[] = API_KEY_SCOPES;
+
+/** How Settings and the API describe a key's scope list to a person. */
+export const API_KEY_SCOPE_LABEL = {
+  applicationsRegister: 'Applications register',
+  fullAccess: 'Full access',
+} as const;
+
+/** Lifecycle of a listed API key. */
+export const API_KEY_STATUS = {
+  active: 'active',
+  expired: 'expired',
+  revoked: 'revoked',
+} as const;
+export const API_KEY_STATUSES = Object.values(API_KEY_STATUS);
+export type ApiKeyStatus = (typeof API_KEY_STATUSES)[number];
+
+/** Longest name a person may give an API key. */
+export const API_KEY_NAME_MAX_LENGTH = 100;
+
+/**
+ * Monitoring data sources the app actually calls. Status is configured (keyless
+ * and wired), reachable (at least one successful check stored), or unavailable
+ * (checks have only failed).
+ */
+export const MONITORING_SOURCE_ID = {
+  npmRegistry: 'npm_registry',
+  osv: 'osv',
+  endOfLifeDate: 'endoflife_date',
+} as const;
+
+export const MONITORING_SOURCE_STATUS = {
+  configured: 'configured',
+  reachable: 'reachable',
+  unavailable: 'unavailable',
+} as const;
+export const MONITORING_SOURCE_STATUSES = Object.values(MONITORING_SOURCE_STATUS);
+export type MonitoringSourceStatus = (typeof MONITORING_SOURCE_STATUSES)[number];
 
 /** How long a repeat of a request with the same Idempotency-Key is answered without running it again. */
 export const IDEMPOTENCY_KEY_TTL_HOURS = 24;
@@ -306,6 +366,7 @@ export const RESOURCE_KIND = {
   noticeAlert: 'notice_alert',
   /** An import answers with counts, not a row; they are stored beside the key. */
   dependencyImport: 'dependency_import',
+  apiKey: 'api_key',
 } as const;
 export const RESOURCE_KINDS = Object.values(RESOURCE_KIND);
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];
