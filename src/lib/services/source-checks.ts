@@ -1,4 +1,4 @@
-import {and, eq} from 'drizzle-orm';
+import {and, eq, sql} from 'drizzle-orm';
 import {HOSTING_CHECK_ERROR_MAX_LENGTH} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {sourceChecks} from '@/lib/db/schema';
@@ -8,6 +8,8 @@ import {cleanText} from '@/lib/monitoring/feed-values';
  * [31] Each outside source's last check, kept per workspace (spec §8: stale data is
  * visible and never reads as safe): when it was last asked, when it last answered,
  * and why the last attempt failed. A check writes one outcome per source it asked.
+ * A source counts as answering only when every request to it answered: a partial
+ * outage leaves findings stale, so it must show as a failure too.
  */
 
 /** What one run learnt about one source: null error means it answered. */
@@ -15,19 +17,23 @@ export type SourceOutcome = {sourceId: string; error: string | null};
 
 export type SourceCheck = {sourceId: string; lastAttemptAt: Date; lastSuccessAt: Date | null; lastError: string | null};
 
-/** One outcome per source: it answered if any request to it answered, else the first error. */
-function bySource(outcomes: SourceOutcome[]): SourceOutcome[] {
+/** One outcome per source: it failed if any request to it failed (the first error is kept), else it answered. */
+export function bySource(outcomes: SourceOutcome[]): SourceOutcome[] {
   const merged = new Map<string, SourceOutcome>();
   for (const outcome of outcomes) {
     const known = merged.get(outcome.sourceId);
-    if (!known || (known.error !== null && outcome.error === null)) {
+    if (!known || (known.error === null && outcome.error !== null)) {
       merged.set(outcome.sourceId, outcome);
     }
   }
   return [...merged.values()];
 }
 
-/** Records a run: every source asked gets its attempt time, and either its answer time or its error. */
+/**
+ * Records a run: every source asked gets its attempt time, and either its answer time
+ * or its error. A run that started before the one already recorded changes nothing:
+ * the newest attempt always wins, however late a slow run finishes.
+ */
 export async function recordSourceOutcomes(db: AppDatabase, workspaceId: string, outcomes: SourceOutcome[], at: Date): Promise<void> {
   for (const {sourceId, error} of bySource(outcomes)) {
     const lastError = error === null ? null : cleanText(error, HOSTING_CHECK_ERROR_MAX_LENGTH);
@@ -37,6 +43,7 @@ export async function recordSourceOutcomes(db: AppDatabase, workspaceId: string,
       .onConflictDoUpdate({
         target: [sourceChecks.workspaceId, sourceChecks.sourceId],
         set: {lastAttemptAt: at, lastError, ...(error === null ? {lastSuccessAt: at} : {})},
+        setWhere: sql`${sourceChecks.lastAttemptAt} <= ${at.toISOString()}`,
       });
   }
 }

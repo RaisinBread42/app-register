@@ -16,13 +16,14 @@ describe('application detail helpers', () => {
     expect(allDeductions(health).map((deduction) => deduction.points)).toEqual([25, 10, 3]);
   });
 
-  it('last checked is shown per source; a hosting run that failed is not a check, and nothing recorded reads "Not checked yet"', () => {
+  it('last checked is shown per source; a hosting run that failed is not a check (it reads "check failed"), and nothing recorded reads "Not checked yet"', () => {
     const app = {
       dependencies: [{checkedAt: '2026-11-27T05:00:00Z'}, {checkedAt: null}],
       hosting: [{healthCheckedAt: '2026-11-28T05:17:00Z', healthError: 'AWS Health: timed out'}],
     } as unknown as AppDetail;
     expect(checkTimes(app)).toEqual({dependencies: '2026-11-27T05:00:00Z', hosting: null});
-    expect(checkTimesLine(app)).toBe('Dependencies 27 Nov 2026 · Hosting not checked yet');
+    expect(checkTimesLine(app)).toBe('Dependencies 27 Nov 2026 · Hosting check failed');
+    expect(checkTimesLine({...app, hosting: [{healthCheckedAt: null, healthError: null}]} as unknown as AppDetail)).toBe('Dependencies 27 Nov 2026 · Hosting not checked yet');
     expect(checkTimesLine({dependencies: [], hosting: []} as unknown as AppDetail)).toBe('Not checked yet');
   });
 

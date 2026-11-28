@@ -137,6 +137,9 @@ const NEEDS_ATTENTION = "Needs attention";
 /** Nothing can be checked yet: a hosting row with no status (and no failed check), or an app with no health score. */
 export const NOT_MONITORED = "Not monitored";
 
+/** An app with no score because its checks failed before any answered (never "Not monitored"). */
+export const CHECK_FAILED = "Check failed";
+
 export const HEALTH_FILTER_OPTIONS = [
   { value: FILTER_ALL, label: "All health" },
   { value: APP_HEALTH_FILTER.attention, label: NEEDS_ATTENTION },

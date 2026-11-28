@@ -1,5 +1,5 @@
 {
-  "id": "64bfa632-e026-4b8a-ad74-71c09654c374",
+  "id": "61014b3f-dd79-4baf-8c52-688555b9987e",
   "prevId": "758b14cf-e8b2-43e0-8171-d13205b79770",
   "version": "7",
   "dialect": "postgresql",
@@ -521,6 +521,12 @@
         "health_error": {
           "name": "health_error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_good_check_at": {
+          "name": "last_good_check_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

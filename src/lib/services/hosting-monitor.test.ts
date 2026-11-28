@@ -365,8 +365,9 @@ describe('hosting check', () => {
 
     const [failed] = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText: down.fetchText});
     expect(failed).toMatchObject({status: HEALTH_STATUS.na, healthError: 'Vercel status could not be reached (HTTP 503)', incidents: []});
-    // [31] healthCheckedAt is the last check every source answered: a failed first check leaves it empty.
-    expect(failed.healthCheckedAt).toBeNull();
+    // [31] The check ran (healthCheckedAt), but no check has fully answered yet (lastGoodCheckAt).
+    expect(failed.healthCheckedAt).not.toBeNull();
+    expect(failed.lastGoodCheckAt).toBeNull();
 
     const [read] = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText: fakeFeeds({[FEED_URL.vercel]: ALL_CLEAR}).fetchText});
     expect(read).toMatchObject({status: HEALTH_STATUS.ok, healthError: null});

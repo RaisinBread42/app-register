@@ -118,7 +118,7 @@ function deductionsFor(dependency: DependencyFacts): Deduction[] {
       points: lag === VERSION_LAG.major ? MAJOR_BEHIND_POINTS : MINOR_BEHIND_POINTS,
     });
   }
-  if (dependency.checkError === DEPENDENCY_CHECK_ERROR.invalidVersion) {
+  if (isRange(dependency)) {
     deductions.push({
       dimension,
       label: `${dependency.name} ${dependency.currentVersion} is not an exact version`,
@@ -130,11 +130,23 @@ function deductionsFor(dependency: DependencyFacts): Deduction[] {
 }
 
 /**
+ * A version that is a range: the registry answered and advisories cannot be checked.
+ * When a later check fails the last reading is kept (stale), range deduction included.
+ */
+function isRange(dependency: DependencyFacts): boolean {
+  if (dependency.checkError === DEPENDENCY_CHECK_ERROR.invalidVersion) {
+    return true;
+  }
+  return dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable && dependency.checkedAt !== null && !isExactVersion(dependency.currentVersion);
+}
+
+/**
  * One dependency's own status: `critical` with a critical or high advisory,
  * `attention` with anything else that costs points (a version that is a range
- * always does). Otherwise `ok`, but only once the registry and the advisory
- * source have both answered for this name and version (`checkedAt` is set);
- * until then, and for a package the registry does not know, `na`.
+ * always does). Otherwise `ok`, but only once every source that can be asked
+ * about this name and version answered (`checkedAt` is set); until then, and for
+ * a package the registry does not know, `na`. A clean reading whose latest check
+ * failed is `stale`.
  */
 export function dependencyStatus(dependency: DependencyFacts): HealthStatus {
   if (knownAdvisories(dependency).some((advisory) => URGENT_SEVERITIES.includes(advisory.severity))) {
@@ -182,6 +194,15 @@ export async function refreshDependencyHealth(
   appId: string,
   options: RefreshOptions = {},
 ): Promise<RefreshSummary> {
+  const {summary, outcomes} = await checkAppDependencies(db, workspaceId, appId, options);
+  await recordSourceOutcomes(db, workspaceId, outcomes, new Date());
+  return summary;
+}
+
+type AppCheck = {summary: RefreshSummary; outcomes: SourceOutcome[]};
+
+/** Checks one app's dependencies and stores the answers; what the run learnt about each source is left to the caller to record. */
+async function checkAppDependencies(db: AppDatabase, workspaceId: string, appId: string, options: RefreshOptions): Promise<AppCheck> {
   await assertActiveApp(db, workspaceId, appId);
   const filters = [eq(appDependencies.workspaceId, workspaceId), eq(appDependencies.appId, appId)];
   if (options.only) {
@@ -192,12 +213,11 @@ export async function refreshDependencyHealth(
   const {results, outcomes} = await checkPackages(rows, options.sources ?? createPackageSources(), outOfTime);
 
   const now = new Date();
-  await recordSourceOutcomes(db, workspaceId, outcomes, now);
   for (const result of results) {
     await db.transaction((tx) => storeResult(tx, workspaceId, result, now));
   }
   await syncAppNoticesSafely(db, workspaceId, appId, now);
-  return summarize(results);
+  return {summary: summarize(results), outcomes};
 }
 
 /**
@@ -246,9 +266,12 @@ export async function refreshWorkspaceDependencyHealth(
     .innerJoin(appDependencies, eq(appDependencies.appId, apps.id))
     .where(activeAppsIn(workspaceId));
   const total = {apps: 0, checked: 0, notFound: 0, unavailable: 0, advisories: 0};
+  const outcomes: SourceOutcome[] = [];
   for (const app of withDependencies) {
-    const summary = await refreshUnlessGone(db, workspaceId, app.id, sources);
-    if (summary) {
+    const checked = await checkUnlessGone(db, workspaceId, app.id, sources);
+    if (checked) {
+      const {summary} = checked;
+      outcomes.push(...checked.outcomes);
       total.apps++;
       total.checked += summary.checked;
       total.notFound += summary.notFound;
@@ -256,18 +279,15 @@ export async function refreshWorkspaceDependencyHealth(
       total.advisories += summary.advisories;
     }
   }
+  // One record for the whole run: an app's failure is not wiped out by the next app's answer.
+  await recordSourceOutcomes(db, workspaceId, outcomes, new Date());
   return total;
 }
 
-/** One app's refresh, or null when the app was archived since the list was read. */
-async function refreshUnlessGone(
-  db: AppDatabase,
-  workspaceId: string,
-  appId: string,
-  sources: PackageSources,
-): Promise<RefreshSummary | null> {
+/** One app's check, or null when the app was archived since the list was read. */
+async function checkUnlessGone(db: AppDatabase, workspaceId: string, appId: string, sources: PackageSources): Promise<AppCheck | null> {
   try {
-    return await refreshDependencyHealth(db, workspaceId, appId, {sources});
+    return await checkAppDependencies(db, workspaceId, appId, {sources});
   } catch (error) {
     if (error instanceof NotFoundError) {
       return null;
@@ -277,13 +297,14 @@ async function refreshUnlessGone(
 }
 
 /**
- * What to write for one result. `checkedAt` is only set when the registry and
- * the advisory source both answered; when a source gave no answer the earlier
- * `checkedAt` stays, because the earlier answers are still about this version.
+ * What to write for one result. `checkedAt` is only set when every source that can
+ * be asked answered (for a range, only the registry can); when a source gave no
+ * answer the earlier `checkedAt` stays, because the earlier answers are still about
+ * this version, and the reading then shows as stale.
  */
 function toStore(result: CheckResult, now: Date): Partial<MonitoringResults> {
-  const checkedAt: Partial<MonitoringResults> =
-    result.checkError === DEPENDENCY_CHECK_ERROR.unavailable ? {} : {checkedAt: result.checkError === null ? now : null};
+  const answered = result.checkError === null || result.checkError === DEPENDENCY_CHECK_ERROR.invalidVersion;
+  const checkedAt: Partial<MonitoringResults> = result.checkError === DEPENDENCY_CHECK_ERROR.unavailable ? {} : {checkedAt: answered ? now : null};
   return {
     checkError: result.checkError,
     ...checkedAt,
@@ -291,7 +312,7 @@ function toStore(result: CheckResult, now: Date): Partial<MonitoringResults> {
   };
 }
 
-const REGISTRY_FAILED = 'npm registry did not answer';
+const registryFailed = (failed: number, asked: number) => `npm registry did not answer for ${failed} of ${asked} packages`;
 const ADVISORIES_FAILED = 'OSV.dev did not answer';
 
 /**
@@ -306,8 +327,9 @@ async function checkPackages(
   const looked = await mapWithLimit(rows, (row) => checkRegistry(row, sources, outOfTime));
   const results = looked.filter((result) => result !== null);
   const asked = results.filter((result) => isNpmPackageName(result.name));
+  const failed = asked.filter((result) => result.checkError === DEPENDENCY_CHECK_ERROR.unavailable).length;
   const outcomes: SourceOutcome[] = asked.length
-    ? [{sourceId: MONITORING_SOURCE_ID.npmRegistry, error: asked.some((result) => result.checkError !== DEPENDENCY_CHECK_ERROR.unavailable) ? null : REGISTRY_FAILED}]
+    ? [{sourceId: MONITORING_SOURCE_ID.npmRegistry, error: failed > 0 ? registryFailed(failed, asked.length) : null}]
     : [];
 
   // Advisories only for packages the registry knows, and only at an exact version.

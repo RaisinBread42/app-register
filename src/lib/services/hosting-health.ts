@@ -21,7 +21,7 @@ import type {HostingIncident, HostingRecord} from './hosting-incidents';
 /** What scoring reads from a hosting row. */
 export type HostingFacts = Pick<
   HostingRecord,
-  'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion' | 'endOfSupportOn' | 'incidents' | 'healthCheckedAt' | 'healthError'
+  'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion' | 'endOfSupportOn' | 'incidents' | 'healthError' | 'lastGoodCheckAt'
 >;
 
 /**
@@ -58,7 +58,7 @@ export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
   if (endOfSupport || incidents.length > 0) {
     return HEALTH_STATUS.attention;
   }
-  if (!isMonitored(row) || !row.healthCheckedAt) {
+  if (!isMonitored(row) || !row.lastGoodCheckAt) {
     return HEALTH_STATUS.na;
   }
   // The latest check failed: what the last good one read is kept, labelled stale, never ok (spec §8 check 23).

@@ -473,9 +473,12 @@ export const appHosting = pgTable(
     endOfSupportSource: text('end_of_support_source').$type<EndOfSupportSource>(),
     /** The version matched more than one release, so the date is the earliest among them. Only ever true for a looked-up date. */
     isVersionInexact: boolean('is_version_inexact').notNull().default(false),
+    /** When the check last ran, whether or not every source answered. */
     healthCheckedAt: timestamp('health_checked_at', {withTimezone: true}),
     /** Which sources could not be read on the last check; null when all answered. */
     healthError: text('health_error'),
+    /** [31] The last check every source answered: the reading shown is from then. Null until one does. */
+    lastGoodCheckAt: timestamp('last_good_check_at', {withTimezone: true}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

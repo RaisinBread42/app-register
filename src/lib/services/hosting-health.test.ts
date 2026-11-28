@@ -22,7 +22,7 @@ function row(patch: Partial<HostingFacts>): HostingFacts {
     runtimeVersion: null,
     endOfSupportOn: null,
     incidents: [],
-    healthCheckedAt: CHECKED,
+    lastGoodCheckAt: CHECKED,
     healthError: null,
     ...patch,
   };
@@ -122,7 +122,7 @@ describe('hosting health', () => {
   });
 
   it('an app with no monitored hosting has hosting status na and it contributes nothing to the score', () => {
-    const unmonitored = [row({provider: 'Office server room', service: 'Windows Server', healthCheckedAt: null})];
+    const unmonitored = [row({provider: 'Office server room', service: 'Windows Server', lastGoodCheckAt: null})];
 
     for (const hosting of [[], unmonitored]) {
       const scored = health({dependencies: [dependency()], hosting});
@@ -148,7 +148,7 @@ describe('hosting health', () => {
   });
 
   it('a hosting row never checked is na and one whose latest check failed after a good one is stale: never ok; the app keeps the last good score, labelled stale', () => {
-    const neverChecked = row({healthCheckedAt: null});
+    const neverChecked = row({lastGoodCheckAt: null});
     const failed = row({service: 'Storage', healthError: 'Azure status could not be reached (HTTP 503)'});
 
     expect(hostingStatus(neverChecked, TODAY)).toBe(HEALTH_STATUS.na);

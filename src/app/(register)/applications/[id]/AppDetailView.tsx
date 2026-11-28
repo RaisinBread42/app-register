@@ -34,8 +34,8 @@ import {
   NOTICE_CATEGORY_LABEL,
   NOTICE_SEVERITY_LABEL,
   NOTICE_SEVERITY_VARIANT,
+  CHECK_FAILED,
   formatCost,
-  healthVerdict,
   orDash,
 } from '@/lib/ui/copy';
 import {BackArrowIcon, PencilIcon} from '@/lib/ui/icons';
@@ -43,7 +43,7 @@ import {appTab} from '@/lib/ui/list-filters';
 import {useRememberedListHref} from '@/lib/ui/list-memory';
 import {DEFAULT_INBOX_VIEW, inboxQuery, inboxRows} from '@/lib/ui/notice-inbox';
 import {activitySummary} from '@/lib/ui/activity';
-import {CHECK_FAILED, allDeductions, checkTimesLine, formatDate, formatDateTime, healthWord, primaryHosting, scoreBasis} from '@/lib/ui/register-view';
+import {allDeductions, checkTimesLine, formatDate, formatDateTime, healthWord, primaryHosting, scoreBasis} from '@/lib/ui/register-view';
 import {isSetupIncomplete, setupChecklist} from '@/lib/ui/setup-checklist';
 import {archiveAppAction, unarchiveAppAction} from '../../actions';
 import {AppIcon, PendingPill} from '../../_components/AppIdentity';
@@ -294,19 +294,23 @@ function HealthBreakdown({health, limit}: {health: Health; limit?: number}) {
           </HStack>
         </BreakdownRow>
       )}
-      {deductions.length === 0 && (
-        <BreakdownRow title="No active deductions">
-          <HStack style={{color: STATUS_TEXT_COLOR.green}}>
-            <Text color="inherit" weight="bold">
-              ✓
-            </Text>
-          </HStack>
-        </BreakdownRow>
-      )}
+      {deductions.length === 0 &&
+        (health.staleSince ? (
+          // A clean reading that is out of date is never ticked green (spec §8 check 23).
+          <BreakdownRow title="No active deductions in the last good reading" detail={`From ${formatDate(health.staleSince)}; a later check failed`} />
+        ) : (
+          <BreakdownRow title="No active deductions">
+            <HStack style={{color: STATUS_TEXT_COLOR.green}}>
+              <Text color="inherit" weight="bold">
+                ✓
+              </Text>
+            </HStack>
+          </BreakdownRow>
+        ))}
       <BreakdownRow title="Current health score">
         <HStack gap={2} vAlign="center">
           <Text size="sm" color="secondary">
-            {healthVerdict(health.score)}
+            {healthWord(health)}
           </Text>
           <ScorePill health={health} />
         </HStack>
@@ -326,7 +330,7 @@ function DeductionRow({deduction}: {deduction: Deduction}) {
   );
 }
 
-function BreakdownRow({title, detail, children}: {title: string; detail?: string; children: React.ReactNode}) {
+function BreakdownRow({title, detail, children}: {title: string; detail?: string; children?: React.ReactNode}) {
   return (
     <VStack gap={0}>
       <HStack gap={3} hAlign="between" vAlign="center" paddingBlock={3}>

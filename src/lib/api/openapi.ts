@@ -260,12 +260,18 @@ const hostingCheckFields = {
   healthCheckedAt: {
     ...nullable('string', {format: 'date-time'}),
     description:
-      'When the hosting check last ran for this row as it is now. null until then; ' +
+      'When the hosting check last ran for this row as it is now, whether or not every source answered. null until then; ' +
       'changing the provider, service, region, version or runtime sets it back to null.',
   },
   healthError: {
     ...nullable('string'),
     description: 'Sources that could not be read on the last check; what earlier checks found from them is kept',
+  },
+  lastGoodCheckAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'The last check every source answered: what the row shows was found then. When healthError is set as well, ' +
+      'that reading is out of date and status is stale (or worse). null until a check fully answers; reset with healthCheckedAt.',
   },
   isMonitored: {
     type: 'boolean',

@@ -407,6 +407,7 @@ describe('JSON API', () => {
       endOfSupportSource: END_OF_SUPPORT_SOURCE.endOfLifeDate,
       status: HEALTH_STATUS.critical,
       healthCheckedAt: expect.any(String),
+      lastGoodCheckAt: expect.any(String),
       updatedAt: expect.any(String),
     });
     expect(replay.body).toEqual({hosting: (await api('GET', `/api/apps/${app.id}/hosting`)).body.hosting[0]});

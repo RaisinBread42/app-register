@@ -82,6 +82,7 @@ const TABLES_0007 = ['app_environments'];
 const TABLES_0008 = ['app_notice_matches', 'notices'];
 const TABLES_0009 = ['audit_events'];
 const TABLES_0011 = ['source_checks'];
+const COLUMNS_0011 = ['last_good_check_at'];
 const COLUMNS_0007 = ['criticality', 'repository_url'];
 
 /**
@@ -424,7 +425,7 @@ describe('database schema', () => {
     const before = await columns();
 
     await rollBackThrough(t, ROLLBACK_0005);
-    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0005.includes(name)));
+    expect(await columns()).toEqual(before.filter((name) => ![...COLUMNS_0005, ...COLUMNS_0011].includes(name)));
     expect(await tables()).toEqual(
       ALL_TABLES.filter((name) => ![...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(name)),
     );
@@ -557,6 +558,32 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('migration 0011 copies each clean hosting check time into last_good_check_at and leaves failed checks without one; its rollback keeps health_checked_at', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    await rollBackThrough(t, ROLLBACK_0011);
+    const insert = (service: string, error: string | null) =>
+      t.client.query(
+        `insert into app_hosting (id, workspace_id, app_id, provider, service, health_checked_at, health_error) values ($1, $2, $3, 'Azure', $4, '2026-11-01T06:00:00Z', $5)`,
+        [newId(), t.workspaceId, w.appId, service, error],
+      );
+    await insert('Clean', null);
+    await insert('Failed', 'Azure status could not be reached (HTTP 503)');
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    const rows = await t.client.query<{service: string; checked: string; good: string | null}>(
+      `select service, health_checked_at::text as checked, last_good_check_at::text as good from app_hosting where service in ('Clean', 'Failed') order by service`,
+    );
+    expect(rows.rows.map((row) => [row.service, row.good === row.checked, row.good])).toEqual([
+      ['Clean', true, rows.rows[0].checked],
+      ['Failed', false, null],
+    ]);
+
+    await rollBackThrough(t, ROLLBACK_0011);
+    const kept = await t.client.query<{n: number}>(`select count(*)::int as n from app_hosting where health_checked_at is not null and service in ('Clean', 'Failed')`);
+    expect(kept.rows[0].n).toBe(2);
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
   });
 
   it('migration 0010 only widens the audit actions (app.unarchived); its rollback keeps every event and refuses new unarchive events', async () => {

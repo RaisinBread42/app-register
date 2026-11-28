@@ -263,12 +263,12 @@ function HealthCell({app}: {app: App}) {
   );
 }
 
-/** The most severe open notice, linked to it in the inbox; otherwise what is known about issues. */
+/** The most severe open notice, linked to it in the inbox; otherwise what is known about issues (never an all-clear after a failed check). */
 function IssueCell({app, issue}: {app: App; issue: IssueSummary | undefined}) {
   if (!issue) {
     return (
       <Text size="sm" color="secondary">
-        {app.health.score === null ? healthWord(app.health) : 'No active issues'}
+        {app.health.score === null ? healthWord(app.health) : app.health.hasFailedCheck ? 'None known: last check failed' : 'No active issues'}
       </Text>
     );
   }

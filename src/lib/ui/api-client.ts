@@ -160,6 +160,8 @@ type HostingCheckFields = {
   incidents: HostingIncident[];
   healthCheckedAt: string | null;
   healthError: string | null;
+  /** The last check every source answered; the reading shown is from then. */
+  lastGoodCheckAt: string | null;
   isMonitored: boolean;
   status: HealthStatus;
 };

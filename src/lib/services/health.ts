@@ -31,7 +31,11 @@ export type DimensionHealth = {status: HealthStatus; deductions: Deduction[]};
 export type AppHealth = {
   /** 0–100, or null when no dimension has anything to check. */
   score: number | null;
-  /** `stale` when a source behind the score failed on its latest check (the score is the last good reading). */
+  /**
+   * `stale` when a source behind an otherwise clean score failed on its latest check
+   * (the score is the last good reading, never green). A critical or attention score
+   * keeps its status; `staleSince` says it is out of date too.
+   */
   status: HealthStatus;
   dimensions: Record<HealthDimension, DimensionHealth | null>;
   /** [31] When the oldest reading still shown was taken, if a later check of its source failed; else null. */
@@ -50,7 +54,7 @@ type Reporter = (facts: HealthFacts) => Deduction[] | null;
 const STALE_SINCE: Partial<Record<HealthDimension, (facts: HealthFacts) => Date | null>> = {
   [HEALTH_DIMENSION.dependencies]: (facts) =>
     oldest(facts.dependencies.filter((dependency) => dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable).map((dependency) => dependency.checkedAt)),
-  [HEALTH_DIMENSION.hosting]: (facts) => oldest(facts.hosting.filter((row) => row.healthError !== null).map((row) => row.healthCheckedAt)),
+  [HEALTH_DIMENSION.hosting]: (facts) => oldest(facts.hosting.filter((row) => row.healthError !== null).map((row) => row.lastGoodCheckAt)),
 };
 
 function oldest(times: (Date | null)[]): Date | null {
@@ -94,7 +98,7 @@ export function appHealth(facts: HealthFacts): AppHealth {
       dimensions[dimension] = {status: HEALTH_STATUS.na, deductions: []};
     } else {
       const worstFirst = [...deductions].sort((a, b) => b.points - a.points);
-      dimensions[dimension] = {status: staleSince ? HEALTH_STATUS.stale : computeHealth(worstFirst).status, deductions: worstFirst};
+      dimensions[dimension] = {status: staleUnlessWorse(computeHealth(worstFirst).status, staleSince), deductions: worstFirst};
       all.push(...worstFirst);
       isChecked = true;
       if (staleSince) staleTimes.push(staleSince);
@@ -108,5 +112,10 @@ export function appHealth(facts: HealthFacts): AppHealth {
     return {score: null, status: HEALTH_STATUS.na, dimensions, staleSince: null, hasFailedCheck};
   }
   const health = computeHealth(all);
-  return {...health, status: staleSince ? HEALTH_STATUS.stale : health.status, dimensions, staleSince: staleSince?.toISOString() ?? null, hasFailedCheck};
+  return {...health, status: staleUnlessWorse(health.status, staleSince), dimensions, staleSince: staleSince?.toISOString() ?? null, hasFailedCheck};
+}
+
+/** A clean reading whose source then failed reads `stale`, never ok; a worse one keeps its red or amber. */
+function staleUnlessWorse(status: HealthStatus, staleSince: Date | null): HealthStatus {
+  return staleSince && status === HEALTH_STATUS.ok ? HEALTH_STATUS.stale : status;
 }

@@ -27,7 +27,7 @@ describe('setup checklist', () => {
     expect(done(typedOnly)[SETUP_ITEM.firstCheck]).toBe(false);
     const complete = app({
       kind: APP_KIND.inHouse,
-      hosting: [{healthCheckedAt: '2026-11-28T05:00:00Z', healthError: null}] as AppDetail['hosting'],
+      hosting: [{healthCheckedAt: '2026-11-28T05:00:00Z', lastGoodCheckAt: '2026-11-28T05:00:00Z', healthError: null}] as AppDetail['hosting'],
       repositoryUrl: 'https://git.example.test/x',
     });
     expect(isSetupIncomplete(setupChecklist(complete))).toBe(false);

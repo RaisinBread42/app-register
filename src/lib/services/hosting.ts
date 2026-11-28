@@ -44,9 +44,10 @@ export const CHECKED_FIELDS = [...IDENTITY_FIELDS, 'region'] as const;
  * (and forgets its incidents): what the check found was about another service,
  * version or region, or the date has yet to be looked up.
  */
-const UNCHECKED: Pick<AppHostingRow, 'healthCheckedAt' | 'healthError'> = {
+const UNCHECKED: Pick<AppHostingRow, 'healthCheckedAt' | 'healthError' | 'lastGoodCheckAt'> = {
   healthCheckedAt: null,
   healthError: null,
+  lastGoodCheckAt: null,
 };
 
 /** JSON shape of one hosting row (a provider service an app runs on) in the API: the row, its incidents and its own status. */
@@ -242,6 +243,7 @@ function toView(row: HostingRecord): HostingView {
     incidents: row.incidents,
     healthCheckedAt: row.healthCheckedAt,
     healthError: normaliseCheckError(row.healthError),
+    lastGoodCheckAt: row.lastGoodCheckAt,
     isMonitored: isMonitored(row),
     status: hostingStatus(row, todayIso()),
     createdAt: row.createdAt,
