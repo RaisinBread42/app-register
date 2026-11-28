@@ -35,7 +35,13 @@ Copy names into `.env.example` when the skeleton lands. Never commit `.env` file
 
 ## API keys
 
-Not environment variables: keys live hashed in the database. Create one per client and environment with `npm run api-key:create -- "<name>"` (against that environment's `DATABASE_URL`). Store the printed key in the client's secret store, never in the repo. Revoke with `npm run api-key:revoke -- <prefix>`.
+Not environment variables: keys live hashed in the database (`api_keys`), with optional `expires_at` and relational scopes in `api_key_scopes`.
+
+- **Full access** (no scope rows): `npm run api-key:create -- "<name>"` against that environment's `DATABASE_URL`. Use this for the UI server's `APP_REGISTER_API_KEY`. Store the printed key in the client's secret store, never in the repo.
+- **Applications register** (Settings / `POST /api/api-keys`): scoped to apps, dependencies and hosting only; optional expiry date or no expiry. The full key is shown once in Settings (copyable). Revoke from Settings or with `npm run api-key:revoke -- <prefix|id>`.
+- Expired and revoked keys get `401`. A scoped key on an out-of-scope route gets `403`.
+
+Until user sign-in exists, anyone with `UI_PASSWORD` can open Settings and mint keys; that is the same trust boundary as every other UI write.
 
 ## Deploy flow
 

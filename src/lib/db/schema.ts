@@ -19,6 +19,7 @@ import {
 import {
   ADVISORY_SEVERITIES,
   ADVISORY_SOURCES,
+  API_KEY_SCOPES,
   APP_KINDS,
   DEPENDENCY_CHECK_ERRORS,
   DEPENDENCY_SOURCE,
@@ -37,6 +38,7 @@ import {
   RESOURCE_KINDS,
   type AdvisorySeverity,
   type AdvisorySource,
+  type ApiKeyScope,
   type EndOfSupportSource,
   type IncidentImpact,
   type IncidentScope,
@@ -506,11 +508,40 @@ export const apiKeys = pgTable(
     keyHash: text('key_hash').notNull().unique('api_keys_key_hash_unique'),
     /** First characters of the key, so a person can tell keys apart. Not secret. */
     keyPrefix: text('key_prefix').notNull(),
+    /** Null = no expiry. Existing keys keep null (full access, never expire). */
+    expiresAt: timestamp('expires_at', {withTimezone: true}),
+    lastUsedAt: timestamp('last_used_at', {withTimezone: true}),
     revokedAt: timestamp('revoked_at', {withTimezone: true}),
     createdAt: createdAt(),
   },
   // Listing and revoking a workspace's keys.
-  (t) => [index('api_keys_workspace_idx').on(t.workspaceId)],
+  (t) => [
+    index('api_keys_workspace_idx').on(t.workspaceId),
+    unique('api_keys_id_workspace_unique').on(t.id, t.workspaceId),
+  ],
+);
+
+/**
+ * One permission a scoped API key holds. Keys with no rows here are unrestricted
+ * (CLI-created keys and the UI server's APP_REGISTER_API_KEY). Settings-created
+ * keys get the applications-register scopes as rows.
+ */
+export const apiKeyScopes = pgTable(
+  'api_key_scopes',
+  {
+    apiKeyId: uuid('api_key_id').notNull(),
+    workspaceId: workspaceId(),
+    scope: text('scope').notNull().$type<ApiKeyScope>(),
+  },
+  (t) => [
+    primaryKey({name: 'api_key_scopes_pk', columns: [t.apiKeyId, t.scope]}),
+    foreignKey({
+      name: 'api_key_scopes_key_fk',
+      columns: [t.apiKeyId, t.workspaceId],
+      foreignColumns: [apiKeys.id, apiKeys.workspaceId],
+    }).onDelete('cascade'),
+    check('api_key_scopes_scope_allowed', oneOf(t.scope, API_KEY_SCOPES)),
+  ],
 );
 
 /**

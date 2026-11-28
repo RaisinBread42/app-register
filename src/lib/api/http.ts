@@ -1,8 +1,15 @@
 import {readTextUpTo} from '@/lib/capped-body';
-import {API_HEADER, BYTES_PER_MB, HTTP_STATUS, IDEMPOTENT_METHODS} from '@/lib/constants';
-import {getDb, type AppDatabase} from '@/lib/db/client';
-import {findWorkspaceForApiKey} from '@/lib/services/api-keys';
 import {
+  API_HEADER,
+  BYTES_PER_MB,
+  HTTP_STATUS,
+  IDEMPOTENT_METHODS,
+  type ApiKeyScope,
+} from '@/lib/constants';
+import {getDb, type AppDatabase} from '@/lib/db/client';
+import {authenticateApiKey} from '@/lib/services/api-keys';
+import {
+  ForbiddenError,
   IdempotencyConflictError,
   NotFoundError,
   UnauthorizedError,
@@ -13,7 +20,13 @@ import {replayBody} from './replay';
 
 const BEARER_TOKEN = /^bearer\s+(\S+)$/i;
 
-export type ApiContext = {db: AppDatabase; workspaceId: string; body: string};
+export type ApiContext = {
+  db: AppDatabase;
+  workspaceId: string;
+  body: string;
+  /** `null` = unrestricted key. Otherwise the key may only call routes that require one of these. */
+  scopes: readonly ApiKeyScope[] | null;
+};
 
 /** `resource`: what a POST or PATCH answered about, so a repeat with the same Idempotency-Key can read it again. */
 export function ok(body: unknown, resource?: WrittenResource): ApiResult {
@@ -43,14 +56,21 @@ export type HandleOptions = {
    * It does not run again when a request is repeated with the same Idempotency-Key.
    */
   afterCommit?: (context: Omit<ApiContext, 'body'>, result: ApiResult) => Promise<unknown>;
+  /**
+   * Scope a restricted API key needs for this route. Unrestricted keys (no scope
+   * rows) always pass. Restricted keys without this scope get 403. Omit for
+   * routes that only unrestricted keys may call (people, alerts, key management).
+   */
+  requiredScope?: ApiKeyScope;
 };
 
 /**
  * Every API route goes through here:
  * 1. a bearer API key picks the workspace (401 without one);
- * 2. POST and PATCH run at most once per Idempotency-Key; a repeat answers with the
+ * 2. a restricted key without the route's scope is refused with 403;
+ * 3. POST and PATCH run at most once per Idempotency-Key; a repeat answers with the
  *    first status and the resource as it is now (`replayBody`);
- * 3. service errors become `{ error }` responses.
+ * 4. service errors become `{ error }` responses.
  */
 export async function handle(
   request: Request,
@@ -59,31 +79,49 @@ export async function handle(
 ): Promise<Response> {
   try {
     const db = getDb();
-    const workspaceId = await authenticate(db, request);
+    const auth = await authenticate(db, request);
+    assertScope(auth.scopes, options.requiredScope);
     const body = await readBody(request, options.maxBodyBytes);
+    const context: ApiContext = {db, workspaceId: auth.workspaceId, body, scopes: auth.scopes};
     const isWrite = (IDEMPOTENT_METHODS as readonly string[]).includes(request.method);
     if (!isWrite || options.isSafeToRepeat) {
-      return toResponse(await run({db, workspaceId, body}));
+      return toResponse(await run(context));
     }
     const url = new URL(request.url);
     const once = await runOnce(
       db,
-      workspaceId,
+      auth.workspaceId,
       request.headers.get(API_HEADER.idempotencyKey),
       {method: request.method, path: url.pathname + url.search, body},
-      (tx) => run({db: tx, workspaceId, body}),
+      (tx) => run({db: tx, workspaceId: auth.workspaceId, body, scopes: auth.scopes}),
     );
     if (once.isReplay) {
-      return toResponse({status: once.status, body: await replayBody(db, workspaceId, once.resource)});
+      return toResponse({status: once.status, body: await replayBody(db, auth.workspaceId, once.resource)});
     }
     if (options.afterCommit) {
-      await options.afterCommit({db, workspaceId}, once.result).catch((error: unknown) => {
+      await options.afterCommit(
+        {db, workspaceId: auth.workspaceId, scopes: auth.scopes},
+        once.result,
+      ).catch((error: unknown) => {
         console.error('API follow-up failed', {name: (error as Error | undefined)?.name});
       });
     }
     return toResponse(once.result);
   } catch (error) {
     return errorResponse(error);
+  }
+}
+
+/** Refuses a restricted key that lacks `requiredScope`. Unrestricted keys always pass. */
+export function assertScope(
+  scopes: readonly ApiKeyScope[] | null,
+  requiredScope: ApiKeyScope | undefined,
+): void {
+  if (scopes === null) {
+    return;
+  }
+  if (!requiredScope || !scopes.includes(requiredScope)) {
+    throw new ForbiddenError('This API key does not allow that action');
   }
 }
 
@@ -114,16 +152,19 @@ async function readBody(request: Request, maxBytes?: number): Promise<string> {
   return body;
 }
 
-async function authenticate(db: AppDatabase, request: Request): Promise<string> {
+async function authenticate(
+  db: AppDatabase,
+  request: Request,
+): Promise<{workspaceId: string; scopes: readonly ApiKeyScope[] | null}> {
   const match = BEARER_TOKEN.exec(request.headers.get(API_HEADER.authorization) ?? '');
   if (!match) {
     throw new UnauthorizedError('Send an API key as: Authorization: Bearer <key>');
   }
-  const workspaceId = await findWorkspaceForApiKey(db, match[1]);
-  if (!workspaceId) {
-    throw new UnauthorizedError('Invalid or revoked API key');
+  const auth = await authenticateApiKey(db, match[1]);
+  if (!auth) {
+    throw new UnauthorizedError('Invalid, revoked or expired API key');
   }
-  return workspaceId;
+  return auth;
 }
 
 function toResponse(result: ApiResult): Response {
@@ -146,6 +187,9 @@ function errorResponse(error: unknown): Response {
       {error: error.message},
       {status: HTTP_STATUS.unauthorized, headers: {[API_HEADER.wwwAuthenticate]: 'Bearer'}},
     );
+  }
+  if (error instanceof ForbiddenError) {
+    return Response.json({error: error.message}, {status: HTTP_STATUS.forbidden});
   }
   if (error instanceof NotFoundError) {
     return Response.json({error: error.message}, {status: HTTP_STATUS.notFound});

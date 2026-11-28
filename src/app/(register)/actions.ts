@@ -3,7 +3,13 @@
 import {revalidatePath} from 'next/cache';
 import {PERSON_STATUS, ROUTES} from '@/lib/constants';
 import {runAction, type ActionResult} from '@/lib/ui/action-result';
-import {apiClient, type DependencyImport, type PersonInput} from '@/lib/ui/api-client';
+import {
+  apiClient,
+  type ApiKey,
+  type ApiKeyInput,
+  type DependencyImport,
+  type PersonInput,
+} from '@/lib/ui/api-client';
 import {
   formToAppInput,
   formToDependencyInput,
@@ -148,5 +154,25 @@ export async function markPersonActiveAction(idempotencyKey: string, personId: s
     apiClient().updatePerson(idempotencyKey, personId, {status: PERSON_STATUS.active}),
   );
   revalidatePath(ROUTES.people);
+  return result;
+}
+
+export type CreateApiKeyResult = ActionResult & {apiKey?: ApiKey};
+
+export async function createApiKeyAction(
+  idempotencyKey: string,
+  values: ApiKeyInput,
+): Promise<CreateApiKeyResult> {
+  let apiKey: ApiKey | undefined;
+  const result = await runAction(async () => {
+    apiKey = await apiClient().createApiKey(idempotencyKey, values);
+  });
+  revalidatePath(ROUTES.settings);
+  return {...result, apiKey};
+}
+
+export async function revokeApiKeyAction(idempotencyKey: string, id: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().revokeApiKey(idempotencyKey, id));
+  revalidatePath(ROUTES.settings);
   return result;
 }

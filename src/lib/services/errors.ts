@@ -32,6 +32,14 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/** A scoped API key lacks permission for this route: the API answers 403. */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 export function isUniqueViolation(error: unknown): boolean {
   return errorCode(error) === PG_ERROR_CODE.uniqueViolation;
 }

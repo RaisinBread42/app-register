@@ -1,4 +1,4 @@
-import {RESOURCE_KIND} from '@/lib/constants';
+import {API_KEY_SCOPE, RESOURCE_KIND} from '@/lib/constants';
 import {handle, jsonObject, noContent, ok} from '@/lib/api/http';
 import {removeHosting, updateHosting, type HostingInput} from '@/lib/services/hosting';
 import {checkHostingAfterWrite} from '@/lib/services/hosting-monitor';
@@ -14,7 +14,7 @@ export async function PATCH(request: Request, {params}: Context): Promise<Respon
       const hosting = await updateHosting(db, workspaceId, id, hostingId, jsonObject<Partial<HostingInput>>(body));
       return ok({hosting}, {kind: RESOURCE_KIND.hosting, id: hosting.id});
     },
-    {afterCommit: ({db, workspaceId}) => checkHostingAfterWrite(db, workspaceId, id, [hostingId])},
+    {requiredScope: API_KEY_SCOPE.hostingWrite, afterCommit: ({db, workspaceId}) => checkHostingAfterWrite(db, workspaceId, id, [hostingId])},
   );
 }
 

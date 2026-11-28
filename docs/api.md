@@ -14,9 +14,11 @@ Authorization: Bearer ar_…
 
 - The key decides the workspace. A key only ever reads or writes its own workspace's rows; an id from another workspace answers 404.
 - Keys are 256 random bits. Only their SHA-256 hash is stored (`api_keys.key_hash`), plus the first 9 characters (`ar_` + 6) in plain text so a person can tell keys apart. Those 6 characters are part of the key (36 of its 256 bits); the rest is never stored.
-- Create a key: `npm run api-key:create -- "Front end"`. It prints the key **once**; store it in a secret manager.
-- Revoke a key: `npm run api-key:revoke -- ar_AbC123` (the prefix printed at creation), or by its id. If two active keys ever share a prefix, it refuses and asks for the id. Takes effect on the next request.
-- Missing, malformed, unknown or revoked key → `401 { error }` with `WWW-Authenticate: Bearer`.
+- **Scopes.** Keys from Settings (`POST /api/api-keys`) are scoped to the **Applications register**: create/read/update apps, add/import/read dependencies, and read/update hosting (including the hosting catalog). They get `403` on every other endpoint (people, notice alerts, monitoring refresh, key management, archive, dependency/hosting deletes and refreshes). Keys from `npm run api-key:create` (including the UI server's `APP_REGISTER_API_KEY`) have **full access** — no rows in `api_key_scopes`.
+- **Expiry.** A key may have an `expires_at` (end of a chosen UTC calendar day) or none. Expired and revoked keys → `401`. Active keys record `last_used_at` on each successful auth.
+- Create a full-access key: `npm run api-key:create -- "Front end"`. It prints the key **once**; store it in a secret manager. Or create a scoped key from Settings / `POST /api/api-keys` with `{ "name", "expiresOn": "YYYY-MM-DD" | null }`.
+- List / revoke: `GET /api/api-keys`, `POST /api/api-keys/:id/revoke`. Revoke also works with `npm run api-key:revoke -- ar_AbC123` (prefix or id). Takes effect on the next request.
+- Missing, malformed, unknown, revoked or expired key → `401 { error }` with `WWW-Authenticate: Bearer`. A valid key without the needed scope → `403 { error }`.
 - Until sign-in exists, the scripts create keys for the default workspace.
 
 ## Duplicate requests (Idempotency-Key)
@@ -36,7 +38,7 @@ Bodies are compared byte for byte, so send the same JSON text when retrying. Key
 
 How it works: the key is claimed inside the same database transaction as the write. A concurrent duplicate waits on that claim, then reads what the first one recorded. Exactly one request does the work.
 
-**A replay returns the same status and the resource's current state**, not a copy of the first response (which is what it was before migration `0004`). No response body is stored: the key's row holds the status code, the kind of resource (`app`, `person`, `dependency`, `hosting`, `notice_alert`, `dependency_import`) and its id, and the replay reads that resource again the way a `GET` would.
+**A replay returns the same status and the resource's current state**, not a copy of the first response (which is what it was before migration `0004`). No response body is stored: the key's row holds the status code, the kind of resource (`app`, `person`, `dependency`, `hosting`, `notice_alert`, `dependency_import`, `api_key`) and its id, and the replay reads that resource again the way a `GET` would. An `api_key` replay never includes the secret (shown only on first create).
 
 - Usually the two are the same. They differ when the resource changed in between: a replayed `POST /api/apps/:id/dependencies` shows what the check has found since, and a replay after someone else's edit shows that edit.
 - If the resource has since been deleted (a dependency or hosting entry), the replay answers `404`, like any read. The write still ran only once.
@@ -48,7 +50,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 ## Conventions
 
 - JSON in and out. Dates are `YYYY-MM-DD`; timestamps are ISO 8601 UTC.
-- Errors are `{ "error": "<message>" }` with status 400 (validation), 401 (auth), 404 (not found), 422 (idempotency conflict) or 500 (unexpected; logged by error code only).
+- Errors are `{ "error": "<message>" }` with status 400 (validation), 401 (auth), 403 (scope), 404 (not found), 422 (idempotency conflict) or 500 (unexpected; logged by error code only).
 - Ids are UUIDs. A malformed id answers 404 (path) or 400 (query).
 
 ## Endpoints
@@ -76,6 +78,9 @@ How it works: the key is claimed inside the same database transaction as the wri
 | PATCH | `/api/people/:id` | Rename, re-email, or `{"status":"left","leftOn":"YYYY-MM-DD"}`; `{"status":"active"}` reverses it |
 | GET | `/api/notice-alerts` | `?status=`, `?appId=`; by due date; includes archived apps' history |
 | POST | `/api/notice-alerts/:id/acknowledge` | Mark seen; first time wins; never changes the app |
+| GET / POST | `/api/api-keys` | List keys / create a Settings-scoped key (`expiresOn` date or null); full key only on create |
+| POST | `/api/api-keys/:id/revoke` | Revoke an active key |
+| GET | `/api/settings/monitoring-sources` | Monitoring data sources in use (npm, OSV, endoflife.date, provider status feeds) |
 | GET | `/api/openapi.json` | The spec (no key needed) |
 
 ## Business rules
