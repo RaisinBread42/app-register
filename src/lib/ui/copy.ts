@@ -6,6 +6,7 @@ import {
   APP_HEALTH_FILTER,
   APP_KINDS,
   APP_LIST_SORT,
+  AUDIT_ACTION,
   MATCH_CONFIDENCE,
   MATCH_STATUS,
   NOTICE_CATEGORY,
@@ -20,12 +21,12 @@ import {
   type AppEnvironment,
   type AppKind,
   type AppListSort,
+  type AuditAction,
   type MatchConfidence,
   type MatchStatus,
   type NoticeCategory,
   type NoticeSeverity,
   type DependencyCheckError,
-  type HealthDimension,
   type HealthStatus,
 } from "@/lib/constants";
 
@@ -106,6 +107,17 @@ export const MATCH_CONFIDENCE_LABEL: Record<MatchConfidence, string> = {
   [MATCH_CONFIDENCE.low]: "Low confidence: may not affect this app",
 };
 
+/** How an audit event reads between "<who> " and what it was done to (a notice or an application), in activity lists. */
+export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
+  [AUDIT_ACTION.noticeStatusChanged]: "changed the status of",
+  [AUDIT_ACTION.noticeAssigned]: "changed the owner of",
+  [AUDIT_ACTION.noticeStatusUndone]: "undid a status change on",
+  [AUDIT_ACTION.noticeAssignmentUndone]: "undid an owner change on",
+  [AUDIT_ACTION.noticeSnoozeEnded]: "ended the snooze on",
+  [AUDIT_ACTION.noticeReopened]: "reopened",
+  [AUDIT_ACTION.appArchived]: "archived",
+};
+
 export const NO_BACKUP_OWNER = "No backup owner";
 export const CRITICALITY_NOT_SET = "Not set";
 
@@ -126,7 +138,6 @@ export const HEALTH_FILTER_OPTIONS = [
 
 /** For parts of the prototype that have no API yet. */
 export const COMING_SOON = "Coming soon";
-export const MONITORING_COMING_SOON = 'Source monitoring is coming soon';
 export const LIVE_DATA_NOTE =
   "Health scores come from dependency and hosting checks; licence and pricing checks are coming soon.";
 
@@ -158,12 +169,6 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
 export const healthVerdict = (score: number) =>
   score >= HEALTH_ATTENTION_BELOW ? HEALTHY : NEEDS_ATTENTION;
 
-export const DIMENSION_LABEL: Record<HealthDimension, string> = {
-  dependencies: "Dependencies",
-  hosting: "Hosting & infrastructure",
-  licence: "Licence",
-  pricing: "Pricing",
-};
 
 export const SEVERITY_VARIANT: Record<AdvisorySeverity, StatusVariant> = {
   critical: "red",

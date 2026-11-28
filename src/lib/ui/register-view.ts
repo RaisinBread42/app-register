@@ -5,14 +5,11 @@ import {
   END_OF_SUPPORT_SOON_DAYS,
   FILTER_ALL,
   HEALTH_ATTENTION_BELOW,
-  HEALTH_CRITICAL_BELOW,
-  HEALTH_MAX_SCORE,
   HEALTH_STATUS,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   MS_PER_DAY,
   type AppListSort,
-  type HealthStatus,
 } from "@/lib/constants";
 import type {
   Advisory,
@@ -106,23 +103,7 @@ export function healthStats(apps: App[]): HealthStats {
   };
 }
 
-/** Apps that have lost points, lowest score first. */
-export function appsNeedingAttention(apps: App[]): App[] {
-  return apps
-    .filter((app) => app.health.score !== null && app.health.score < HEALTH_MAX_SCORE)
-    .sort(byScoreThenName);
-}
 
-/** The prototype's three score bands and how many scored apps fall in each. */
-export function healthDistribution(apps: App[]): { range: string; status: HealthStatus; count: number }[] {
-  const count = (status: HealthStatus) =>
-    apps.filter((app) => app.health.score !== null && app.health.status === status).length;
-  return [
-    { range: `${HEALTH_ATTENTION_BELOW}–${HEALTH_MAX_SCORE}`, status: HEALTH_STATUS.ok, count: count(HEALTH_STATUS.ok) },
-    { range: `${HEALTH_CRITICAL_BELOW}–${HEALTH_ATTENTION_BELOW - 1}`, status: HEALTH_STATUS.attention, count: count(HEALTH_STATUS.attention) },
-    { range: `Below ${HEALTH_CRITICAL_BELOW}`, status: HEALTH_STATUS.critical, count: count(HEALTH_STATUS.critical) },
-  ];
-}
 
 /** Advisory ids recorded by hand that monitoring did not find under any of its ids. */
 export function handRecordedAdvisories(dependency: Dependency): string[] {
@@ -171,16 +152,6 @@ export function appsWithRenewal(apps: App[]): App[] {
   return apps.filter((app) => app.renewalDate !== null).sort(byRenewalThenName);
 }
 
-/** Applications whose notice deadline is today (UTC YYYY-MM-DD) or later, soonest first. */
-export function upcomingNoticeDeadlines(apps: App[], today: string): App[] {
-  return apps
-    .filter((app) => app.noticeDeadline !== null && app.noticeDeadline >= today)
-    .sort(
-      (a, b) =>
-        (a.noticeDeadline ?? "").localeCompare(b.noticeDeadline ?? "") ||
-        a.name.localeCompare(b.name),
-    );
-}
 
 /** The first hosting row as "Provider Service", or null when none is recorded. */
 export function primaryHosting(hosting: Hosting[]): string | null {

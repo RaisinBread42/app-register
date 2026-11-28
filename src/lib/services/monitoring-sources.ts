@@ -53,7 +53,8 @@ export async function listMonitoringSources(
     .where(eq(appHosting.workspaceId, workspaceId));
 
   const dependencyLast = maxIso(deps.map((row) => row.checkedAt));
-  const hostingLast = maxIso(hosting.map((row) => row.healthCheckedAt));
+  // A hosting run that failed still writes healthCheckedAt, so only clean rows count as an answer.
+  const hostingLast = maxIso(hosting.filter((row) => row.healthError === null).map((row) => row.healthCheckedAt));
 
   const npmAnswered = deps.some((row) => row.latestVersion !== null || row.checkedAt !== null);
   const npmFailed = deps.some(

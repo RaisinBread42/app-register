@@ -19,14 +19,11 @@ import {createApiClient, type ApiClient, type Hosting} from '@/lib/ui/api-client
 import {appToForm, emptyAppForm, hostingToForm, type AppFormValues} from '@/lib/ui/forms';
 import {
   applyAppListView,
-  appsNeedingAttention,
   appsWithRenewal,
   endOfSupportNote,
-  healthDistribution,
   healthStats,
   hostingStatusReason,
   openIncidents,
-  upcomingNoticeDeadlines,
 } from '@/lib/ui/register-view';
 import * as actions from './actions';
 
@@ -137,11 +134,6 @@ describe('App Register UI', () => {
     const apps = await api.listApps();
 
     expect(appsWithRenewal(apps).map((app) => app.name)).toEqual(['Slate Chat', 'Atlas Board']);
-    expect(upcomingNoticeDeadlines(apps, '2098-11-30').map((app) => [app.name, app.noticeDeadline])).toEqual([
-      ['Slate Chat', '2098-11-30'],
-      ['Atlas Board', '2099-03-31'],
-    ]);
-    expect(upcomingNoticeDeadlines(apps, '2098-12-01').map((app) => app.name)).toEqual(['Atlas Board']);
   });
 
   it('AC2: saving the add-app form twice with the same idempotency key creates one app', async () => {
@@ -330,8 +322,6 @@ describe('App Register UI', () => {
     expect(list(APP_HEALTH_FILTER.attention)).toEqual([['Customer Portal', 77]]);
     expect(list(APP_HEALTH_FILTER.healthy)).toEqual([['Atlas Board', 100]]);
     expect(healthStats(apps)).toEqual({average: 89, healthy: 1, needAttention: 1});
-    expect(appsNeedingAttention(apps).map((app) => app.name)).toEqual(['Customer Portal']);
-    expect(healthDistribution(apps).map((band) => [band.range, band.count])).toEqual([['95–100', 1], ['80–94', 0], ['Below 80', 1]]);
   });
 
   it('AC7: archiving an app removes it from the apps list but keeps its page', async () => {
