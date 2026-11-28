@@ -9,17 +9,16 @@ import {HStack} from '@astryxdesign/core/HStack';
 import {Table} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
+import {VStack} from '@astryxdesign/core/VStack';
 import type {Person, PersonInput} from '@/lib/ui/api-client';
 import {markPersonActiveAction, markPersonLeftAction, savePersonAction} from '../actions';
 import {EditDialog} from '../_components/EditDialog';
 import {FormError} from '../_components/FormError';
 import {PanelCard} from '../_components/Cards';
-import {PageFrame} from '../_components/PageFrame';
-import {PageHeader} from '../_components/PageHeader';
 import {useAction} from '../_components/use-action';
 import {isoDate} from '../_components/iso-date';
 
-type PeopleKeys = {add: string; reactivate: string; edit: Record<string, string>; markLeft: Record<string, string>};
+export type PeopleKeys = {add: string; reactivate: string; edit: Record<string, string>; markLeft: Record<string, string>};
 
 /** `null` adds a new person; `undefined` means the dialog is closed. */
 type Editing = Person | null | undefined;
@@ -31,7 +30,8 @@ const todayIso = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
-export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys}) {
+/** Settings › People: everyone who can own applications. */
+export function PeopleSection({people, keys}: {people: Person[]; keys: PeopleKeys}) {
   const [editing, setEditing] = useState<Editing>(undefined);
   const [values, setValues] = useState<PersonInput>({name: '', email: ''});
   const [leaving, setLeaving] = useState<Person | null>(null);
@@ -69,12 +69,14 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
   }
 
   return (
-    <PageFrame crumbs={[{label: 'People'}]}>
-      <PageHeader
-        title="People"
-        description="Active people who can own applications. Mark someone as left when they go; their applications keep them until reassigned."
-        actions={<Button label="+ Add person" variant="primary" onClick={() => openEdit(null)} />}
-      />
+    <VStack gap={5}>
+      <HStack gap={4} vAlign="center" hAlign="between" wrap="wrap">
+        <Text color="secondary">
+          Active people who can own applications. Mark someone as left when they go; their applications keep them until
+          reassigned.
+        </Text>
+        <Button label="+ Add person" variant="primary" onClick={() => openEdit(null)} />
+      </HStack>
       {justLeft && (
         <Banner
           status="success"
@@ -144,6 +146,6 @@ export function PeopleView({people, keys}: {people: Person[]; keys: PeopleKeys})
         </Text>
         <DateInput label="Left on" value={isoDate(leftOn)} onChange={(value) => setLeftOn(value ?? '')} isRequired />
       </EditDialog>
-    </PageFrame>
+    </VStack>
   );
 }

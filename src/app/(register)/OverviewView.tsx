@@ -12,7 +12,7 @@ import {Icon} from '@astryxdesign/core/Icon';
 import {Link} from '@astryxdesign/core/Link';
 import {ProgressBar} from '@astryxdesign/core/ProgressBar';
 import {Table, proportional} from '@astryxdesign/core/Table';
-import {HEALTH_ATTENTION_BELOW, HEALTH_MAX_SCORE, HEALTH_STATUS, OVERVIEW_LIST_LIMIT, ROUTES, appRoute, type HealthStatus} from '@/lib/constants';
+import {HEALTH_ATTENTION_BELOW, HEALTH_MAX_SCORE, HEALTH_STATUS, OVERVIEW_LIST_LIMIT, ROUTES, SETTINGS_SECTION, appRoute, settingsRoute, type HealthStatus} from '@/lib/constants';
 import type {App} from '@/lib/ui/api-client';
 import {DIMENSION_LABEL, HEALTH_BASIS_NOTE, HEALTH_STATUS_VARIANT, MONITORING_COMING_SOON, NO_SCORE_HINT, NO_SCORE_TITLE, NOT_SET} from '@/lib/ui/copy';
 import {AppsIcon, ArrowIcon, CalendarIcon, CheckIcon, ShieldIcon, WarningIcon} from '@/lib/ui/icons';
@@ -127,7 +127,7 @@ export function OverviewView({apps, people, addKey, today}: Props) {
             <PanelCard
               title="Monitoring coverage"
               subtitle="Source health at a glance"
-              action={<CardLink label="View sources" href={ROUTES.sources} />}>
+              action={<CardLink label="View sources" href={settingsRoute(SETTINGS_SECTION.sources)} />}>
               <HStack gap={4} vAlign="center">
                 <Text type="display-3" color="secondary">
                   {NOT_SET}
