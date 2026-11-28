@@ -11,7 +11,7 @@ import {
   NOTICE_ORIGIN,
   NOTICE_STATE,
 } from '@/lib/constants';
-import {appHosting, notices} from '@/lib/db/schema';
+import {appHosting} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
 import {archiveApp, createApp} from './apps';
 import {addDependency, removeDependency} from './dependencies';

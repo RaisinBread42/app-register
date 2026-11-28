@@ -25,7 +25,6 @@ import {
   type NoticeCategory,
   type NoticeSeverity,
   type DependencyCheckError,
-  type HealthDimension,
   type HealthStatus,
 } from "@/lib/constants";
 
@@ -126,7 +125,6 @@ export const HEALTH_FILTER_OPTIONS = [
 
 /** For parts of the prototype that have no API yet. */
 export const COMING_SOON = "Coming soon";
-export const MONITORING_COMING_SOON = 'Source monitoring is coming soon';
 export const LIVE_DATA_NOTE =
   "Health scores come from dependency and hosting checks; licence and pricing checks are coming soon.";
 
@@ -158,12 +156,6 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
 export const healthVerdict = (score: number) =>
   score >= HEALTH_ATTENTION_BELOW ? HEALTHY : NEEDS_ATTENTION;
 
-export const DIMENSION_LABEL: Record<HealthDimension, string> = {
-  dependencies: "Dependencies",
-  hosting: "Hosting & infrastructure",
-  licence: "Licence",
-  pricing: "Pricing",
-};
 
 export const SEVERITY_VARIANT: Record<AdvisorySeverity, StatusVariant> = {
   critical: "red",

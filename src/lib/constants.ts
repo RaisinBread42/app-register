@@ -85,8 +85,6 @@ export const APP_LIST_SORT = {
 export const APP_LIST_SORTS = Object.values(APP_LIST_SORT);
 export type AppListSort = (typeof APP_LIST_SORTS)[number];
 
-/** How many rows the overview's short lists show. */
-export const OVERVIEW_LIST_LIMIT = 5;
 
 /** Environment variables the UI server reads. Never exposed to the browser. */
 export const ENV = {
@@ -362,6 +360,10 @@ export const ACTION_NOTE_MAX_LENGTH = 1000;
 /** Largest page of audit events one request returns. */
 export const AUDIT_PAGE_MAX = 200;
 export const AUDIT_PAGE_DEFAULT = 50;
+
+/** The kinds of date the Overview lists. */
+export const DATE_KIND = {notice: 'notice', renewal: 'renewal'} as const;
+export type DateKind = (typeof DATE_KIND)[keyof typeof DATE_KIND];
 
 /** Longest text kept for a notice title and summary. */
 export const NOTICE_TITLE_MAX_LENGTH = 300;
