@@ -10,12 +10,13 @@ type Props = {params: Promise<{id: string}>; searchParams: Promise<SearchParams>
 
 export default async function AppPage({params, searchParams}: Props) {
   const [{id}, query] = await Promise.all([params, searchParams]);
-  const app = await loadApp(id);
   const client = apiClient();
-  const [catalog, notices, activity] = await Promise.all([
+  // All at once; notices and activity are secondary, so if either fails the page still shows the app.
+  const [app, catalog, notices, activity] = await Promise.all([
+    loadApp(id),
     client.getHostingCatalog(),
-    client.listNotices({appId: app.id}),
-    client.listAuditEvents({appId: app.id, limit: APP_ACTIVITY_LIMIT}),
+    client.listNotices({appId: id}).catch(() => null),
+    client.listAuditEvents({appId: id, limit: APP_ACTIVITY_LIMIT}).catch(() => null),
   ]);
   return (
     <AppDetailView

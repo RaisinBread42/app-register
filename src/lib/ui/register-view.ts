@@ -5,6 +5,7 @@ import {
   END_OF_SUPPORT_SOON_DAYS,
   FILTER_ALL,
   HEALTH_ATTENTION_BELOW,
+  HEALTH_DIMENSIONS,
   HEALTH_STATUS,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
@@ -21,7 +22,7 @@ import type {
   Hosting,
   HostingIncident,
 } from "./api-client";
-import { CHECK_ERROR_LABEL, NOT_CHECKED_YET, NOT_MONITORED } from "./copy";
+import { CHECK_ERROR_LABEL, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED } from "./copy";
 
 /**
  * Display-only shaping of data the pages already loaded: search, filters,
@@ -331,8 +332,47 @@ export function allDeductions(health: Health): Deduction[] {
     .sort((a, b) => b.points - a.points);
 }
 
-/** When any check last looked at the app (its dependencies or hosting), as an ISO time, or null if never. */
-export function latestCheck(app: Pick<AppDetail, 'dependencies' | 'hosting'>): string | null {
-  const times = [...app.dependencies.flatMap((dependency) => dependency.checkedAt ?? []), ...app.hosting.flatMap((row) => row.healthCheckedAt ?? [])].sort();
-  return times.at(-1) ?? null;
+export type CheckTimes = {dependencies: string | null; hosting: string | null};
+
+/**
+ * When each source last answered for this app, as ISO times, or null: dependencies
+ * (a complete registry and advisory check) and hosting (a run with no error). A
+ * failed run never counts as a check, and each source is shown on its own so an old
+ * one is not hidden behind a fresh one (spec §8).
+ */
+export function checkTimes(app: Pick<AppDetail, 'dependencies' | 'hosting'>): CheckTimes {
+  const latest = (times: string[]) => times.sort().at(-1) ?? null;
+  return {
+    dependencies: latest(app.dependencies.flatMap((dependency) => dependency.checkedAt ?? [])),
+    hosting: latest(app.hosting.flatMap((row) => (row.healthError === null && row.healthCheckedAt ? [row.healthCheckedAt] : []))),
+  };
 }
+
+/** "Dependencies 28 Nov 2026 · Hosting not checked yet", for what the app has recorded; "Not checked yet" when nothing is. */
+export function checkTimesLine(app: Pick<AppDetail, 'dependencies' | 'hosting'>): string {
+  const times = checkTimes(app);
+  const parts = [
+    ...(app.dependencies.length ? [`Dependencies ${times.dependencies ? formatDate(times.dependencies) : NOT_CHECKED_YET.toLowerCase()}`] : []),
+    ...(app.hosting.length ? [`Hosting ${times.hosting ? formatDate(times.hosting) : NOT_CHECKED_YET.toLowerCase()}`] : []),
+  ];
+  return parts.join(' · ') || NOT_CHECKED_YET;
+}
+
+/**
+ * What the score covers (spec §8 coverage): the checks behind it, the monitored ones
+ * with nothing checked yet, and those not monitored at all.
+ */
+export function scoreBasis(health: Health): string {
+  const dimensions = HEALTH_DIMENSIONS.map((dimension) => ({dimension, health: health.dimensions[dimension]}));
+  const monitored = dimensions.filter((entry) => entry.health !== null);
+  const checked = monitored.filter((entry) => entry.health?.status !== HEALTH_STATUS.na).map((entry) => DIMENSION_NAME[entry.dimension]);
+  const unchecked = monitored.filter((entry) => entry.health?.status === HEALTH_STATUS.na).map((entry) => DIMENSION_NAME[entry.dimension]);
+  const notMonitored = dimensions.filter((entry) => entry.health === null).map((entry) => DIMENSION_NAME[entry.dimension]);
+  const basis = checked.length ? `Based on ${listWords(checked)} (${checked.length} of ${monitored.length} checks)` : '';
+  const gaps = unchecked.length ? `${checked.length ? '; ' : ''}${checked.length ? listWords(unchecked) : capitalise(listWords(unchecked))} not checked yet` : '';
+  const later = notMonitored.length ? ` ${capitalise(listWords(notMonitored))} checks are coming soon.` : '';
+  return `${basis}${gaps}.${later}`;
+}
+
+const listWords = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
+const capitalise = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);

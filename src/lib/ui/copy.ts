@@ -15,6 +15,7 @@ import {
   DEPENDENCY_CHECK_ERROR,
   FILTER_ALL,
   HEALTH_ATTENTION_BELOW,
+  HEALTH_DIMENSION,
   HEALTH_STATUS,
   type AdvisorySeverity,
   type AppCriticality,
@@ -27,6 +28,7 @@ import {
   type NoticeCategory,
   type NoticeSeverity,
   type DependencyCheckError,
+  type HealthDimension,
   type HealthStatus,
 } from "@/lib/constants";
 
@@ -188,6 +190,14 @@ export const CHECK_ERROR_LABEL: Record<DependencyCheckError, string> = {
 /** Beside a looked-up end-of-support date whose version matched several releases. */
 export const VERSION_NOT_EXACT = 'Version is not exact; using the earliest matching release';
 export const NOT_CHECKED_YET = "Not checked yet";
+
+/** A health dimension in a sentence ("Based on dependencies and hosting"). */
+export const DIMENSION_NAME: Record<HealthDimension, string> = {
+  [HEALTH_DIMENSION.dependencies]: "dependencies",
+  [HEALTH_DIMENSION.hosting]: "hosting",
+  [HEALTH_DIMENSION.licence]: "licence",
+  [HEALTH_DIMENSION.pricing]: "pricing",
+};
 
 export const NOT_SET = "—";
 

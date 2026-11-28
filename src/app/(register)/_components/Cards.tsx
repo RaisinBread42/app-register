@@ -64,7 +64,7 @@ export function PanelCard({title, subtitle, action, children, isFlush = false}: 
   return (
     <Card padding={0}>
       <VStack gap={0}>
-        <HStack gap={3} hAlign="between" vAlign="center" paddingInline={5} paddingBlockStart={5} paddingBlockEnd={3}>
+        <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap" paddingInline={5} paddingBlockStart={5} paddingBlockEnd={3}>
           <VStack gap={0.5}>
             <Heading level={2}>{title}</Heading>
             {subtitle && (
@@ -111,13 +111,16 @@ export function KeyValueRows({rows, isLabelStrong = false}: KeyValueProps) {
             <Text color={isLabelStrong ? 'primary' : 'secondary'} weight={isLabelStrong ? 'semibold' : undefined} size="sm">
               {row.label}
             </Text>
-            {typeof row.value === 'string' ? (
-              <Text weight="bold" size="sm">
-                {row.value}
-              </Text>
-            ) : (
-              row.value
-            )}
+            {/* Long values (addresses, host names) wrap anywhere instead of running off a phone screen. */}
+            <HStack hAlign="end" style={{minWidth: 0, overflowWrap: 'anywhere', textAlign: 'end'}}>
+              {typeof row.value === 'string' ? (
+                <Text weight="bold" size="sm">
+                  {row.value}
+                </Text>
+              ) : (
+                row.value
+              )}
+            </HStack>
           </HStack>
         </VStack>
       ))}
