@@ -2,7 +2,7 @@
 
 ## What the app does
 
-App Register is a flat-priced register of the SaaS a company buys and the apps its staff build in-house. Lean IT teams (1–5 people) keep named owners, backup owners, renewal dates, notice deadlines, attachments, and a light quarterly review — without enterprise discovery or analytics.
+App Register is an application health and lifecycle monitoring service for lean IT teams (1–5 people). It tracks bought SaaS and in-house apps with named owners, watches their dependencies, hosting, vendor notices and renewal deadlines, ties each change to the apps it affects, and surfaces the next useful action. A Governance Board summarises it all for managers and executives. The spec is [docs/product/spec-v1.md](product/spec-v1.md), and the decisions are in [docs/product/gap-analysis.md](product/gap-analysis.md).
 
 ## How a request flows
 
