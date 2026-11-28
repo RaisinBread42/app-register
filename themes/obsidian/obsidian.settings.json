@@ -72,12 +72,6 @@
       "mode": "light"
     },
     {
-      "thing": "--color-text-secondary",
-      "value": "#767087",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-border",
       "value": "#E7E4EE",
       "source": "token",
@@ -108,32 +102,8 @@
       "mode": "light"
     },
     {
-      "thing": "--color-text-green",
-      "value": "#18834F",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-green",
-      "value": "#18834F",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-background-yellow",
       "value": "#FFF0D7",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-text-yellow",
-      "value": "#A86409",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-yellow",
-      "value": "#A86409",
       "source": "token",
       "mode": "light"
     },
@@ -144,32 +114,8 @@
       "mode": "light"
     },
     {
-      "thing": "--color-text-orange",
-      "value": "#DA653A",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-orange",
-      "value": "#DA653A",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-background-red",
       "value": "#FCE7EB",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-text-red",
-      "value": "#C93147",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-red",
-      "value": "#C93147",
       "source": "token",
       "mode": "light"
     },
@@ -216,38 +162,8 @@
       "mode": "light"
     },
     {
-      "thing": "--color-text-gray",
-      "value": "#7D7787",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-gray",
-      "value": "#7D7787",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-background-pink",
       "value": "#FFE8F2",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-text-pink",
-      "value": "#C42D71",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-icon-pink",
-      "value": "#C42D71",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-success",
-      "value": "#18834F",
       "source": "token",
       "mode": "light"
     },
@@ -258,38 +174,14 @@
       "mode": "light"
     },
     {
-      "thing": "--color-text-success",
-      "value": "#18834F",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-warning-muted",
       "value": "#FFF0D7",
       "source": "token",
       "mode": "light"
     },
     {
-      "thing": "--color-text-warning",
-      "value": "#A86409",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-error",
-      "value": "#C93147",
-      "source": "token",
-      "mode": "light"
-    },
-    {
       "thing": "--color-error-muted",
       "value": "#FCE7EB",
-      "source": "token",
-      "mode": "light"
-    },
-    {
-      "thing": "--color-text-error",
-      "value": "#C93147",
       "source": "token",
       "mode": "light"
     },
@@ -497,13 +389,6 @@
     {
       "thing": "background-color",
       "value": "#F1EFF4",
-      "source": "property",
-      "on": "badge",
-      "when": "variant:neutral"
-    },
-    {
-      "thing": "color",
-      "value": "#7D7787",
       "source": "property",
       "on": "badge",
       "when": "variant:neutral"
@@ -746,6 +631,127 @@
     {
       "thing": "--font-weight-semibold",
       "value": "700",
+      "source": "token",
+      "on": "side-nav-heading"
+    },
+    {
+      "thing": "--color-text-secondary",
+      "value": "#6E697E",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-green",
+      "value": "#167C4B",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-green",
+      "value": "#167C4B",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-yellow",
+      "value": "#9D5E08",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-yellow",
+      "value": "#9D5E08",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-orange",
+      "value": "#B0512E",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-orange",
+      "value": "#B0512E",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-red",
+      "value": "#C43045",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-red",
+      "value": "#C43045",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-gray",
+      "value": "#6F6978",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-gray",
+      "value": "#6F6978",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-pink",
+      "value": "#C22C6F",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-icon-pink",
+      "value": "#C22C6F",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-success",
+      "value": "#167C4B",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-success",
+      "value": "#167C4B",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-warning",
+      "value": "#9D5E08",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-error",
+      "value": "#C43045",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "--color-text-error",
+      "value": "#C43045",
+      "source": "token",
+      "mode": "light"
+    },
+    {
+      "thing": "color",
+      "value": "#6F6978",
+      "source": "property",
+      "on": "badge",
+      "when": "variant:neutral"
+    },
+    {
+      "thing": "--color-text-secondary",
+      "value": "#A69FB6",
       "source": "token",
       "on": "side-nav-heading"
     }
