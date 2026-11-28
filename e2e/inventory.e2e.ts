@@ -15,9 +15,8 @@ test('adding an application asks for name, type, criticality and owner; backup o
   await dialog.getByRole('combobox', {name: /^Criticality/}).click();
   await page.getByRole('option', {name: 'High'}).click();
   await dialog.getByRole('button', {name: 'Add application'}).click();
-  await expect(page.getByRole('link', {name}).first()).toBeVisible();
-
-  await page.getByRole('link', {name}).first().click();
+  // The new app's own page opens, with its setup checklist.
+  await expect(page.getByRole('heading', {level: 1, name})).toBeVisible();
   await expect(page.getByText('No backup owner')).toBeVisible();
   await expect(page.getByText('High', {exact: true})).toBeVisible();
 });

@@ -8,6 +8,7 @@ import {migrate} from 'drizzle-orm/pglite/migrator';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {
   ADVISORY_SEVERITY,
+  AUDIT_ACTION,
   ADVISORY_SOURCE,
   DEFAULT_WORKSPACE_SLUG,
   INCIDENT_IMPACT,
@@ -86,6 +87,7 @@ const COLUMNS_0007 = ['criticality', 'repository_url'];
  * applies migrations newer than the last one recorded, so an older one rolled
  * back alone would never come back.
  */
+const ROLLBACK_0010 = '0010_app_unarchive_audit.down.sql';
 const ROLLBACK_0009 = '0009_notice_actions_audit.down.sql';
 const ROLLBACK_0008 = '0008_notices.down.sql';
 const ROLLBACK_0007 = '0007_app_criticality_environments.down.sql';
@@ -102,7 +104,7 @@ function rollbackSql(file: string): string {
 
 /** Runs the rollbacks down to and including `oldest`, newest first. */
 async function rollBackThrough(t: TestDb, oldest: string) {
-  const newestFirst = [ROLLBACK_0009, ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
+  const newestFirst = [ROLLBACK_0010, ROLLBACK_0009, ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
   for (const file of newestFirst.slice(0, newestFirst.indexOf(oldest) + 1)) {
     await t.client.exec(rollbackSql(file));
   }
@@ -552,6 +554,26 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('migration 0010 only widens the audit actions (app.unarchived); its rollback keeps every event and refuses new unarchive events', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const insert = (action: string) =>
+      t.client.query(
+        `insert into audit_events (id, workspace_id, occurred_at, actor, action, subject_kind, subject_id, app_id) values ($1, $2, now(), 'System', $3, 'app', $4, $4)`,
+        [newId(), t.workspaceId, action, w.appId],
+      );
+    await insert(AUDIT_ACTION.appArchived);
+    await insert(AUDIT_ACTION.appUnarchived);
+
+    await rollBackThrough(t, ROLLBACK_0010);
+    const count = async () => (await t.client.query<{n: number}>(`select count(*)::int as n from audit_events`)).rows[0].n;
+    expect(await count()).toBe(2);
+    await expect(insert(AUDIT_ACTION.appUnarchived)).rejects.toThrow(/audit_events_action_allowed/);
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    await insert(AUDIT_ACTION.appUnarchived);
+    expect(await count()).toBe(3);
   });
 
   it('rolling back migration 0008 removes only the notice tables; apps stay and migrating again restores them', async () => {

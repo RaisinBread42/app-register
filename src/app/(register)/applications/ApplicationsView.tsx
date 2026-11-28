@@ -1,7 +1,7 @@
 'use client';
 
 import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
-import {useSearchParams} from 'next/navigation';
+import {useRouter, useSearchParams} from 'next/navigation';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
@@ -13,10 +13,11 @@ import {Selector} from '@astryxdesign/core/Selector';
 import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
+import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_CRITICALITIES, APP_LIST_SORTS, CRITICALITY_FILTER_NOT_SET, DATE_KIND, FILTER_ALL, ROUTES, UI_QUERY_ON, type AppListSort} from '@/lib/constants';
+import {APP_CRITICALITIES, APP_LIST_SORTS, APP_STATE, CRITICALITY_FILTER_NOT_SET, DATE_KIND, FILTER_ALL, ROUTES, UI_QUERY_ON, type AppListSort, type AppState} from '@/lib/constants';
 import type {App} from '@/lib/ui/api-client';
-import {applyAppListView, catalogOwners, DEFAULT_APP_LIST_VIEW, isFiltered, nextDate, type AppListView, type IssueSummary} from '@/lib/ui/catalog';
+import {applyAppListView, catalogOwners, DEFAULT_APP_LIST_VIEW, filterByName, isFiltered, nextDate, type AppListView, type IssueSummary} from '@/lib/ui/catalog';
 import {
   APP_LIST_SORT_LABEL,
   CRITICALITY_LABEL,
@@ -33,6 +34,7 @@ import {appListQuery, appListViewFrom} from '@/lib/ui/list-filters';
 import {rememberListQuery} from '@/lib/ui/list-memory';
 import {DEFAULT_INBOX_VIEW, inboxQuery} from '@/lib/ui/notice-inbox';
 import {formatDate} from '@/lib/ui/register-view';
+import {unarchiveAppAction} from '../actions';
 import {AppCell} from '../_components/AppIdentity';
 import {ScorePill} from '../_components/Health';
 import {PageFrame} from '../_components/PageFrame';
@@ -59,6 +61,9 @@ type Props = {
   apps: App[];
   /** Each app's most severe open notice, worked out on the server; null when the notices could not be read. */
   issues: Record<string, IssueSummary> | null;
+  archivedApps: App[];
+  /** One Idempotency-Key per archived app for Unarchive, rendered with the page. */
+  unarchiveKeys: Record<string, string>;
   people: PersonOption[];
   addKey: string;
   initialView: AppListView;
@@ -70,7 +75,7 @@ type Props = {
  * The applications catalog (spec §4): one dense row per app with its highest active
  * issue, the apps that need attention first, and search, filters and sort in the URL.
  */
-export function ApplicationsView({apps, issues: issueRecord, people, addKey, initialView, isAddOpen, today}: Props) {
+export function ApplicationsView({apps, issues: issueRecord, archivedApps, unarchiveKeys, people, addKey, initialView, isAddOpen, today}: Props) {
   const searchParams = useSearchParams();
   const [view, setView] = useState<AppListView>(initialView);
   const [isAdding, setIsAdding] = useState(isAddOpen);
@@ -115,7 +120,7 @@ export function ApplicationsView({apps, issues: issueRecord, people, addKey, ini
       <PageHeader
         title="Applications"
         description="Every application your company buys or builds, the ones that need attention first."
-        actions={apps.length > 0 ? addButton : undefined}
+        actions={apps.length > 0 || archivedApps.length > 0 ? addButton : undefined}
       />
       {issueRecord === null && apps.length > 0 && (
         <Banner
@@ -125,7 +130,7 @@ export function ApplicationsView({apps, issues: issueRecord, people, addKey, ini
           collapsible={false}
         />
       )}
-      {apps.length === 0 ? (
+      {apps.length === 0 && archivedApps.length === 0 ? (
         <Card>
           <EmptyState
             title="No applications yet"
@@ -137,6 +142,17 @@ export function ApplicationsView({apps, issues: issueRecord, people, addKey, ini
         <Card padding={0}>
           <VStack gap={0}>
             <HStack gap={2} padding={4} vAlign="center" wrap="wrap">
+              <Selector
+                label="Status"
+                isLabelHidden
+                options={[
+                  {value: APP_STATE.active, label: 'Active applications'},
+                  {value: APP_STATE.archived, label: `Archived (${archivedApps.length})`},
+                ]}
+                value={view.state}
+                onChange={(value) => update({state: (value as AppState | null) ?? APP_STATE.active})}
+                width={190}
+              />
               <TextInput
                 label="Filter applications by name"
                 isLabelHidden
@@ -145,72 +161,90 @@ export function ApplicationsView({apps, issues: issueRecord, people, addKey, ini
                 onChange={(value) => update({query: value ?? ''})}
                 width={288}
               />
-              <Selector label="Type" isLabelHidden options={TYPE_FILTERS} value={view.kind} onChange={(value) => update({kind: value ?? FILTER_ALL})} width={140} />
-              <Selector
-                label="Criticality"
-                isLabelHidden
-                options={CRITICALITY_FILTERS}
-                value={view.criticality}
-                onChange={(value) => update({criticality: value ?? FILTER_ALL})}
-                width={140}
-              />
-              <Selector label="Owner" isLabelHidden options={owners} value={view.owner} onChange={(value) => update({owner: value ?? FILTER_ALL})} width={140} hasSearch />
-              <Selector label="Health" isLabelHidden options={HEALTH_FILTER_OPTIONS} value={view.health} onChange={(value) => update({health: value ?? FILTER_ALL})} width={140} />
-              <Selector
-                label="Notices"
-                isLabelHidden
-                options={NOTICE_FILTERS}
-                value={view.openNotices ? UI_QUERY_ON : FILTER_ALL}
-                onChange={(value) => update({openNotices: value === UI_QUERY_ON})}
-                width={140}
-              />
-              <Selector
-                label="Sort by"
-                isLabelHidden
-                options={SORT_OPTIONS}
-                value={view.sort}
-                onChange={(value) => update({sort: (value as AppListSort | null) ?? DEFAULT_APP_LIST_VIEW.sort})}
-                width={190}
-              />
-            </HStack>
-            <Table
-              aria-label="Applications"
-              data={shown}
-              idKey="id"
-              hasHover
-              emptyState={
-                <EmptyState
-                  title="No applications match these filters"
-                  description="Change the search or clear the filters to see every application."
-                  actions={<Button label="Clear filters" variant="secondary" onClick={() => update({...DEFAULT_APP_LIST_VIEW, sort: view.sort})} />}
-                  isCompact
+              {view.state === APP_STATE.active && (
+                <>
+                <Selector label="Type" isLabelHidden options={TYPE_FILTERS} value={view.kind} onChange={(value) => update({kind: value ?? FILTER_ALL})} width={140} />
+                <Selector
+                  label="Criticality"
+                  isLabelHidden
+                  options={CRITICALITY_FILTERS}
+                  value={view.criticality}
+                  onChange={(value) => update({criticality: value ?? FILTER_ALL})}
+                  width={140}
                 />
-              }
-              columns={[
-                {key: 'name', header: 'Application', width: proportional(2, {minWidth: 170}), renderCell: (app: App) => <AppCell app={app} />},
-                {key: 'kind', header: 'Type', width: proportional(1.2, {minWidth: 120}), renderCell: (app: App) => <Badge label={KIND_LABEL[app.kind]} variant="purple" />},
-                {key: 'owner', header: 'Owner', width: column(1.1), renderCell: (app: App) => app.owner.name},
-                {
-                  key: 'criticality',
-                  header: 'Criticality',
-                  width: column(0.9),
-                  renderCell: (app: App) => (app.criticality ? CRITICALITY_LABEL[app.criticality] : CRITICALITY_NOT_SET),
-                },
-                {key: 'health', header: 'Health', width: column(1.2), renderCell: (app: App) => <HealthCell app={app} />},
-                {
-                  key: 'issue',
-                  header: 'Highest active issue',
-                  width: proportional(2, {minWidth: 170}),
-                  renderCell: (app: App) => <IssueCell app={app} issue={issues.get(app.id)} />,
-                },
-                {key: 'next', header: 'Next date', width: column(1), renderCell: (app: App) => <NextDateCell app={app} today={today} />},
-              ]}
-            />
-            <HStack paddingInline={4} paddingBlock={4} role="status">
-              <Text type="supporting" color="secondary">
-                {`Showing ${shown.length} of ${apps.length} applications${isFiltered(deferredView) ? ' (filtered)' : ''}`}
-              </Text>
+                <Selector label="Owner" isLabelHidden options={owners} value={view.owner} onChange={(value) => update({owner: value ?? FILTER_ALL})} width={140} hasSearch />
+                <Selector label="Health" isLabelHidden options={HEALTH_FILTER_OPTIONS} value={view.health} onChange={(value) => update({health: value ?? FILTER_ALL})} width={140} />
+                <Selector
+                  label="Notices"
+                  isLabelHidden
+                  options={NOTICE_FILTERS}
+                  value={view.openNotices ? UI_QUERY_ON : FILTER_ALL}
+                  onChange={(value) => update({openNotices: value === UI_QUERY_ON})}
+                  width={140}
+                />
+                <Selector
+                  label="Sort by"
+                  isLabelHidden
+                  options={SORT_OPTIONS}
+                  value={view.sort}
+                  onChange={(value) => update({sort: (value as AppListSort | null) ?? DEFAULT_APP_LIST_VIEW.sort})}
+                  width={190}
+                />
+                </>
+              )}
             </HStack>
+            {view.state === APP_STATE.archived ? (
+              <ArchivedTable apps={filterByName(archivedApps, view.query)} total={archivedApps.length} keys={unarchiveKeys} />
+            ) : (
+              <>
+              <Table
+                aria-label="Applications"
+                data={shown}
+                idKey="id"
+                hasHover
+                emptyState={
+                  apps.length === 0 ? (
+                    <EmptyState
+                      title="No active applications"
+                      description={`All ${archivedApps.length} are archived. Unarchive one from the Archived list, or add a new one.`}
+                      isCompact
+                    />
+                  ) : (
+                    <EmptyState
+                      title="No applications match these filters"
+                      description="Change the search or clear the filters to see every application."
+                      actions={<Button label="Clear filters" variant="secondary" onClick={() => update({...DEFAULT_APP_LIST_VIEW, sort: view.sort})} />}
+                      isCompact
+                    />
+                  )
+                }
+                columns={[
+                  {key: 'name', header: 'Application', width: proportional(2, {minWidth: 170}), renderCell: (app: App) => <AppCell app={app} />},
+                  {key: 'kind', header: 'Type', width: proportional(1.2, {minWidth: 120}), renderCell: (app: App) => <Badge label={KIND_LABEL[app.kind]} variant="purple" />},
+                  {key: 'owner', header: 'Owner', width: column(1.1), renderCell: (app: App) => app.owner.name},
+                  {
+                    key: 'criticality',
+                    header: 'Criticality',
+                    width: column(0.9),
+                    renderCell: (app: App) => (app.criticality ? CRITICALITY_LABEL[app.criticality] : CRITICALITY_NOT_SET),
+                  },
+                  {key: 'health', header: 'Health', width: column(1.2), renderCell: (app: App) => <HealthCell app={app} />},
+                  {
+                    key: 'issue',
+                    header: 'Highest active issue',
+                    width: proportional(2, {minWidth: 170}),
+                    renderCell: (app: App) => <IssueCell app={app} issue={issues.get(app.id)} />,
+                  },
+                  {key: 'next', header: 'Next date', width: column(1), renderCell: (app: App) => <NextDateCell app={app} today={today} />},
+                ]}
+              />
+              <HStack paddingInline={4} paddingBlock={4} role="status">
+                <Text type="supporting" color="secondary">
+                  {`Showing ${shown.length} of ${apps.length} applications${isFiltered(deferredView) ? ' (filtered)' : ''}`}
+                </Text>
+              </HStack>
+              </>
+            )}
           </VStack>
         </Card>
       )}
@@ -273,5 +307,44 @@ function NextDateCell({app, today}: {app: App; today: string}) {
         </Text>
       )}
     </VStack>
+  );
+}
+
+/** Archived applications, each with Unarchive; the toast says why when it cannot (for example, the name is in use). */
+function ArchivedTable({apps, total, keys}: {apps: App[]; total: number; keys: Record<string, string>}) {
+  const router = useRouter();
+  const showToast = useToast();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const restore = async (app: App) => {
+    setPendingId(app.id);
+    const result = await unarchiveAppAction(keys[app.id], app.id);
+    setPendingId(null);
+    showToast(result.ok ? {body: `${app.name} is active again`} : {body: `Could not unarchive: ${result.error}`, type: 'error'});
+    router.refresh();
+  };
+  return (
+    <Table
+      aria-label="Archived applications"
+      data={apps}
+      idKey="id"
+      hasHover
+      emptyState={
+        <EmptyState
+          title={total === 0 ? 'No archived applications' : 'No archived applications match the search'}
+          description={total === 0 ? 'Archived applications show here, each with Unarchive.' : 'Change or clear the search.'}
+          isCompact
+        />
+      }
+      columns={[
+        {key: 'name', header: 'Application', width: proportional(2, {minWidth: 170}), renderCell: (app: App) => <AppCell app={app} />},
+        {key: 'archived', header: 'Archived on', width: column(1), renderCell: (app: App) => (app.archivedAt ? formatDate(app.archivedAt) : '')},
+        {
+          key: 'action',
+          header: 'Action',
+          width: column(1),
+          renderCell: (app: App) => <Button label="Unarchive" size="sm" variant="secondary" isLoading={pendingId === app.id} onClick={() => void restore(app)} />,
+        },
+      ]}
+    />
   );
 }

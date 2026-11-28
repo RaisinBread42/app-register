@@ -5,6 +5,7 @@ import {
   API_QUERY,
   API_ROUTES,
   API_SUB_ROUTE,
+  APP_STATE,
   AUDIT_ACTION,
   BEARER_PREFIX,
   ENV,
@@ -364,6 +365,12 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     },
     async archiveApp(idempotencyKey: string, id: string): Promise<AppDetail> {
       return (await post<{app: AppDetail}>(`${appPath(id)}/${API_SUB_ROUTE.archive}`, idempotencyKey)).app;
+    },
+    async unarchiveApp(idempotencyKey: string, id: string): Promise<AppDetail> {
+      return (await post<{app: AppDetail}>(`${appPath(id)}/${API_SUB_ROUTE.unarchive}`, idempotencyKey)).app;
+    },
+    async listArchivedApps(): Promise<App[]> {
+      return (await get<{apps: App[]}>(`${API_ROUTES.apps}?${new URLSearchParams({[API_QUERY.state]: APP_STATE.archived})}`)).apps;
     },
     async addDependency(idempotencyKey: string, appId: string, input: DependencyInput): Promise<Dependency> {
       return (await post<{dependency: Dependency}>(`${appPath(appId)}/${API_SUB_ROUTE.dependencies}`, idempotencyKey, input)).dependency;

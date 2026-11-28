@@ -3,6 +3,7 @@ import {todayIso} from '@/lib/notice-alerts';
 import {apiClient} from '@/lib/ui/api-client';
 import {topIssues} from '@/lib/ui/catalog';
 import {appListViewFrom, textParam, type SearchParams} from '@/lib/ui/list-filters';
+import {keysFor} from '../_components/idempotency-keys';
 import {ownerOptions} from './people-options';
 import {ApplicationsView} from './ApplicationsView';
 
@@ -10,10 +11,17 @@ export default async function ApplicationsPage({searchParams}: {searchParams: Pr
   const params = await searchParams;
   const client = apiClient();
   // Notices only feed the issue column: if they fail, the list still shows and says so.
-  const [apps, people, notices] = await Promise.all([client.listApps(), client.listPeople(), client.listNotices().catch(() => null)]);
+  const [apps, archivedApps, people, notices] = await Promise.all([
+    client.listApps(),
+    client.listArchivedApps(),
+    client.listPeople(),
+    client.listNotices().catch(() => null),
+  ]);
   return (
     <ApplicationsView
       apps={apps}
+      archivedApps={archivedApps}
+      unarchiveKeys={keysFor(archivedApps)}
       issues={notices ? Object.fromEntries(topIssues(notices)) : null}
       people={ownerOptions(people)}
       addKey={crypto.randomUUID()}

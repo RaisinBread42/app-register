@@ -8,6 +8,7 @@ import {
   APP_CRITICALITIES,
   APP_ENVIRONMENTS,
   APP_KINDS,
+  APP_STATES,
   ACTION_NOTE_MAX_LENGTH,
   AUDIT_ACTION,
   AUDIT_ACTIONS,
@@ -571,8 +572,9 @@ export const openApiSpec = {
   paths: {
     '/api/apps': {
       get: {
-        summary: 'List active (not archived) apps',
+        summary: 'List active apps, or archived ones with state=archived',
         parameters: [
+          {name: 'state', in: 'query', description: 'archived lists archived apps by name; the other filters then do not apply', schema: {type: 'string', enum: [...APP_STATES], default: 'active'}},
           {name: 'kind', in: 'query', schema: {type: 'string', enum: [...APP_KINDS]}},
           {name: 'sort', in: 'query', schema: {type: 'string', enum: [...APP_SORTS], default: 'name'}},
           {
@@ -616,9 +618,16 @@ export const openApiSpec = {
     },
     '/api/apps/{id}/archive': {
       post: {
-        summary: 'Archive (soft delete) an app: hides it, frees its name, drops scheduled alerts',
+        summary: 'Archive (soft delete) an app: hides it, frees its name, drops scheduled alerts, resolves its notice matches; appends an audit event',
         parameters: [appId, idempotencyKey],
         responses: {200: json(strict({app: ref('AppDetail')}), 'Archived'), ...errors},
+      },
+    },
+    '/api/apps/{id}/unarchive': {
+      post: {
+        summary: 'Unarchive an app: active again (its name must be free), notice alerts rescheduled, notices checked again; appends an audit event',
+        parameters: [appId, idempotencyKey],
+        responses: {200: json(strict({app: ref('AppDetail')}), 'Unarchived'), ...errors},
       },
     },
     '/api/apps/{id}/dependencies': {

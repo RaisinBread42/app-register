@@ -55,6 +55,12 @@ export async function archiveAppAction(idempotencyKey: string, id: string): Prom
   return result;
 }
 
+export async function unarchiveAppAction(idempotencyKey: string, id: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().unarchiveApp(idempotencyKey, id));
+  refreshApps();
+  return result;
+}
+
 export async function saveDependencyAction(
   idempotencyKey: string,
   appId: string,

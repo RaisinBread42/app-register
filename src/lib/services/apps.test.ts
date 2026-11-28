@@ -1,10 +1,11 @@
 import {and, eq} from 'drizzle-orm';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {APP_CRITICALITY, APP_ENVIRONMENT, APP_KIND, NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
+import {APP_CRITICALITY, APP_ENVIRONMENT, APP_KIND, AUDIT_ACTION, NOTICE_ALERT_OFFSET_DAYS, NOTICE_ALERT_STATUS, PERSON_STATUS} from '@/lib/constants';
 import {noticeAlerts, people} from '@/lib/db/schema';
 import {createTestDb, type TestDb} from '@/lib/db/test-db';
-import {archiveApp, createApp, getApp, listActiveApps, updateApp} from './apps';
+import {archiveApp, createApp, getApp, listActiveApps, listArchivedApps, unarchiveApp, updateApp} from './apps';
 import {ValidationError} from './errors';
+import {listAuditEvents} from './notice-actions';
 import {acknowledgeAlert} from './notice-alerts';
 import {createPerson} from './people';
 
@@ -186,6 +187,45 @@ describe('app domain model', () => {
     await expect(createApp(t.db, t.workspaceId, saas('FABRIKAM DRIVE'))).rejects.toThrow(
       /already exists/,
     );
+  });
+
+  it('[24] archiving lists the app under Archived; unarchiving brings it back with its alerts, and both are in the audit history', async () => {
+    const actor = {name: 'API key "Ops"', keyId: null};
+    const app = await createApp(t.db, t.workspaceId, saas('Fabrikam Drive', '2026-12-31'), TODAY);
+    const scheduled = (await alertsByStatus(app.id, NOTICE_ALERT_STATUS.scheduled)).length;
+    await archiveApp(t.db, t.workspaceId, app.id, actor);
+    expect((await listArchivedApps(t.db, t.workspaceId)).map((row) => row.name)).toEqual(['Fabrikam Drive']);
+
+    await unarchiveApp(t.db, t.workspaceId, app.id, actor, TODAY);
+    expect((await listActiveApps(t.db, t.workspaceId)).map((row) => row.id)).toEqual([app.id]);
+    expect(await listArchivedApps(t.db, t.workspaceId)).toEqual([]);
+    expect(await alertsByStatus(app.id, NOTICE_ALERT_STATUS.scheduled)).toHaveLength(scheduled);
+    const history = await listAuditEvents(t.db, t.workspaceId, {appId: app.id});
+    expect(history.map((event) => [event.action, event.actor, event.appName])).toEqual([
+      [AUDIT_ACTION.appUnarchived, actor.name, 'Fabrikam Drive'],
+      [AUDIT_ACTION.appArchived, actor.name, 'Fabrikam Drive'],
+    ]);
+
+    // Unarchiving an active app changes nothing and records nothing.
+    await unarchiveApp(t.db, t.workspaceId, app.id, actor, TODAY);
+    expect(await listAuditEvents(t.db, t.workspaceId, {appId: app.id})).toHaveLength(2);
+  });
+
+  it('[24] an app cannot be unarchived while an active app has its name; nothing changes and nothing is recorded', async () => {
+    const old = await createApp(t.db, t.workspaceId, saas('Fabrikam Drive'), TODAY);
+    await archiveApp(t.db, t.workspaceId, old.id);
+    await createApp(t.db, t.workspaceId, saas('fabrikam drive'), TODAY);
+
+    await expect(unarchiveApp(t.db, t.workspaceId, old.id)).rejects.toThrow(/already exists/);
+    expect((await getApp(t.db, t.workspaceId, old.id)).archivedAt).not.toBeNull();
+    expect((await listAuditEvents(t.db, t.workspaceId, {appId: old.id})).map((event) => event.action)).toEqual([AUDIT_ACTION.appArchived]);
+  });
+
+  it('[24] only name, kind and owner are required to create an app; a missing one is refused by name', async () => {
+    const minimal = await createApp(t.db, t.workspaceId, {name: 'Quill Notes', kind: APP_KIND.inHouse, ownerId});
+    expect(minimal).toMatchObject({criticality: null, backupOwner: null, vendor: null, renewalDate: null, health: {score: null}});
+    await expect(createApp(t.db, t.workspaceId, {name: '  ', kind: APP_KIND.inHouse, ownerId})).rejects.toThrow(/name is required/i);
+    await expect(createApp(t.db, t.workspaceId, {name: 'X', kind: 'spaceship', ownerId})).rejects.toThrow(/kind/i);
   });
 
   // Edge cases.

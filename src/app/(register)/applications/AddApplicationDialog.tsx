@@ -12,7 +12,7 @@ import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_KINDS, ROUTES} from '@/lib/constants';
+import {APP_KINDS, ROUTES, appRoute} from '@/lib/constants';
 import {CRITICALITY_OPTIONS, KIND_OPTIONS} from '@/lib/ui/copy';
 
 const CRITICALITY_REQUIRED = 'Choose how critical this application is.';
@@ -55,11 +55,12 @@ export function AddApplicationDialog({isOpen, onClose, idempotencyKey, people}: 
     setMissing(null);
     run(
       () => createAppAction(idempotencyKey, values),
-      () => {
+      (result) => {
         setValues(emptyAppForm(APP_KINDS[0]));
         onClose();
         showToast({body: `${values.name.trim()} added to the register`});
-        router.push(ROUTES.applications);
+        // Its page shows the setup checklist: what to add so it can be watched (Journey B).
+        router.push(result.appId ? appRoute(result.appId) : ROUTES.applications);
         router.refresh();
       },
     );

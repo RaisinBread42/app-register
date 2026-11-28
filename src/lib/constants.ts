@@ -51,6 +51,8 @@ export const UI_QUERY = {
   health: 'health',
   /** `?open_notices=1` keeps only applications with an open notice. */
   openNotices: 'open_notices',
+  /** `?state=archived` shows the archived applications, each with Unarchive. */
+  state: 'state',
   sort: 'sort',
   /** Which Settings section is open. */
   section: 'section',
@@ -83,6 +85,11 @@ export const APP_HEALTH_FILTER = {
   notMonitored: 'not_monitored',
 } as const;
 export const APP_HEALTH_FILTERS = Object.values(APP_HEALTH_FILTER);
+
+/** Which apps `GET /api/apps?state=` lists: active ones (the default) or archived ones. */
+export const APP_STATE = {active: 'active', archived: 'archived'} as const;
+export const APP_STATES = Object.values(APP_STATE);
+export type AppState = (typeof APP_STATES)[number];
 
 /** Sort orders of the applications list (sorted in the browser over the loaded apps). `attention` is the default. */
 export const APP_LIST_SORT = {
@@ -126,6 +133,7 @@ export const API_SUB_ROUTE = {
   assign: 'assign',
   undo: 'undo',
   archive: 'archive',
+  unarchive: 'unarchive',
   dependencies: 'dependencies',
   hosting: 'hosting',
   acknowledge: 'acknowledge',
@@ -246,6 +254,12 @@ export const APP_KIND = {
   vendorService: 'vendor_service',
 } as const;
 export const APP_KINDS = Object.values(APP_KIND);
+/** Kinds bought from a supplier (a contract and dates to track); the others are built (code to check). */
+export const BOUGHT_APP_KINDS: readonly string[] = [APP_KIND.saas, APP_KIND.vendorService];
+
+/** The setup checklist on a new app's page ([24]); each item ticks itself off from the app's data. */
+export const SETUP_ITEM = {supplier: 'supplier', hosting: 'hosting', code: 'code', firstCheck: 'first_check'} as const;
+export type SetupItemKey = (typeof SETUP_ITEM)[keyof typeof SETUP_ITEM];
 
 export type AppKind = (typeof APP_KINDS)[number];
 
@@ -352,6 +366,7 @@ export const AUDIT_ACTION = {
   /** The source reported a handled notice again for the app, so it is open again. */
   noticeReopened: 'notice.reopened',
   appArchived: 'app.archived',
+  appUnarchived: 'app.unarchived',
 } as const;
 export const AUDIT_ACTIONS = Object.values(AUDIT_ACTION);
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

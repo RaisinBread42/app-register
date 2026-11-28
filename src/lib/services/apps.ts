@@ -1,4 +1,4 @@
-import {and, asc, between, eq, inArray, sql} from 'drizzle-orm';
+import {and, asc, between, eq, inArray, isNotNull, sql} from 'drizzle-orm';
 import {alias} from 'drizzle-orm/pg-core';
 import {
   APP_CRITICALITIES,
@@ -153,6 +153,24 @@ export async function listActiveApps(
   const rows = await selectAppViews(db)
     .where(and(...filters))
     .orderBy(...order);
+  return withFacts(db, workspaceId, rows, today);
+}
+
+/** Archived apps, by name, for the catalog's Archived list (each can be unarchived). */
+export async function listArchivedApps(db: AppDatabase, workspaceId: string, today = todayIso()): Promise<AppView[]> {
+  const rows = await selectAppViews(db)
+    .where(and(eq(apps.workspaceId, workspaceId), isNotNull(apps.archivedAt)))
+    .orderBy(asc(apps.name));
+  return withFacts(db, workspaceId, rows, today);
+}
+
+/** App rows with their dependencies, hosting and environments loaded in one query each. */
+async function withFacts(
+  db: AppDatabase,
+  workspaceId: string,
+  rows: Awaited<ReturnType<ReturnType<typeof selectAppViews>['where']>>,
+  today: string,
+): Promise<AppView[]> {
   const appIds = rows.map((row) => row.app.id);
   const dependencies = await dependenciesByApp(db, workspaceId, appIds);
   const hosting = await hostingByApp(db, workspaceId, appIds);
@@ -329,6 +347,38 @@ export async function archiveApp(
     }
   });
   // An archived app is no longer affected by anything: its notice matches resolve.
+  await syncAppNoticesSafely(db, workspaceId, id);
+}
+
+/**
+ * Brings an archived app back: active again (its name must be free), notice alerts
+ * scheduled again, notices checked again, and an `app.unarchived` audit event.
+ * Unarchiving an active app does nothing.
+ */
+export async function unarchiveApp(
+  db: AppDatabase,
+  workspaceId: string,
+  id: string,
+  actor: Actor = SYSTEM_ACTOR,
+  today = todayIso(),
+): Promise<void> {
+  await getApp(db, workspaceId, id);
+  await withNameCheck(() =>
+    db.transaction(async (tx) => {
+      const [restored] = await tx
+        .update(apps)
+        .set({archivedAt: null})
+        .where(and(eq(apps.workspaceId, workspaceId), eq(apps.id, id), isNotNull(apps.archivedAt)))
+        .returning({noticeDeadline: apps.noticeDeadline});
+      if (!restored) {
+        return;
+      }
+      if (restored.noticeDeadline) {
+        await scheduleAlerts(tx, workspaceId, id, restored.noticeDeadline, today);
+      }
+      await recordAppEvent(tx, workspaceId, id, {action: AUDIT_ACTION.appUnarchived, actor, fromValue: null, toValue: null, note: null});
+    }),
+  );
   await syncAppNoticesSafely(db, workspaceId, id);
 }
 
