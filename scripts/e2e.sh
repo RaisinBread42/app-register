@@ -22,14 +22,17 @@ if [ "${E2E_SKIP_BUILD:-}" != "1" ]; then
 fi
 
 mkdir -p e2e-artifacts/screenshots
-if curl -fsS -o /dev/null "$E2E_BASE_URL" 2>/dev/null; then
+# Any HTTP answer (even 401 from a leftover app server) means the port is taken.
+if curl -s -o /dev/null "$E2E_BASE_URL" 2>/dev/null; then
   echo "e2e: something already answers on port $PORT; stop it or set E2E_PORT"; exit 1
 fi
-# Own process group, so the cleanup stops the server and every child it starts.
+# Own process group where setsid exists (Linux, CI), so the cleanup stops the server and every child.
+group=""
+command -v setsid >/dev/null && group="setsid"
 APP_URL="$E2E_BASE_URL" NODE_OPTIONS="--require ./e2e/block-network.cjs" \
-  setsid node node_modules/next/dist/bin/next start -p "$PORT" > e2e-artifacts/server.log 2>&1 &
+  $group node node_modules/next/dist/bin/next start -p "$PORT" > e2e-artifacts/server.log 2>&1 &
 server_pid=$!
-trap 'kill -- -"$server_pid" 2>/dev/null || true' EXIT
+trap 'kill -- -"$server_pid" 2>/dev/null || kill "$server_pid" 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 60); do
   if curl -fsS -o /dev/null "$E2E_BASE_URL/api/openapi.json"; then break; fi

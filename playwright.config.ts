@@ -13,6 +13,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  /** A committed test.only must fail CI instead of quietly running a subset. */
+  forbidOnly: Boolean(process.env.CI),
   reporter: [['list'], ['json', {outputFile: `${E2E.artifactsDir}/report.json`}]],
   use: {
     baseURL: E2E.baseUrl,

@@ -17,6 +17,7 @@ for (const screen of SCREENS) {
     await expectNoAxeViolations(page);
     await page.setViewportSize({width: 360, height: 780});
     await expectNoHorizontalScroll(page);
+    await expectNoAxeViolations(page);
     await captureAtAllWidths(page, screen.name);
   });
 }
@@ -28,5 +29,6 @@ test('application detail: loads, is accessible and fits every width', async ({pa
   await expectNoAxeViolations(page);
   await page.setViewportSize({width: 360, height: 780});
   await expectNoHorizontalScroll(page);
+  await expectNoAxeViolations(page);
   await captureAtAllWidths(page, 'application-detail');
 });

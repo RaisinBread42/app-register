@@ -1,4 +1,4 @@
-import {and, eq, inArray, isNull, notInArray, sql} from 'drizzle-orm';
+import {and, eq, inArray, isNull, notInArray, or, sql} from 'drizzle-orm';
 import {
   ADVISORY_SEVERITY,
   ADVISORY_SOURCE,
@@ -133,31 +133,57 @@ export const DEMO_APP_NAMES = DEMO_APPS.map((app) => app.name);
 
 export type SeedResult = {peopleCreated: number; appsCreated: number; appsSkipped: number};
 
-/** Loads the demo data into `workspaceId`. Safe to run again: it only adds what is missing. */
+/**
+ * Loads the demo data into `workspaceId`, all in one transaction: an interrupted
+ * run leaves nothing behind. Safe to run again: it only adds what is missing.
+ */
 export async function seedDemoData(db: AppDatabase, workspaceId: string, today = todayIso()): Promise<SeedResult> {
-  await assertOnlyDemoApps(db, workspaceId);
-  const {ids, created} = await ensurePeople(db, workspaceId);
-  const existing = await existingAppNames(db, workspaceId);
-  let appsCreated = 0;
-  for (const app of DEMO_APPS) {
-    if (existing.has(app.name.toLowerCase())) {
-      continue;
+  return db.transaction(async (tx) => {
+    await assertOnlyDemoData(tx, workspaceId);
+    const {ids, created} = await ensurePeople(tx, workspaceId);
+    const existing = await existingAppNames(tx, workspaceId);
+    let appsCreated = 0;
+    for (const app of DEMO_APPS) {
+      if (existing.has(app.name.toLowerCase())) {
+        continue;
+      }
+      await createDemoApp(tx, workspaceId, app, ids, today);
+      appsCreated += 1;
     }
-    await createDemoApp(db, workspaceId, app, ids, today);
-    appsCreated += 1;
-  }
-  await markLeaver(db, workspaceId, ids);
-  return {peopleCreated: created, appsCreated, appsSkipped: DEMO_APPS.length - appsCreated};
+    await markLeaver(tx, workspaceId, ids, today);
+    return {peopleCreated: created, appsCreated, appsSkipped: DEMO_APPS.length - appsCreated};
+  });
 }
 
-async function assertOnlyDemoApps(db: AppDatabase, workspaceId: string): Promise<void> {
-  const others = await db
-    .select({name: apps.name})
-    .from(apps)
-    .where(and(eq(apps.workspaceId, workspaceId), notInArray(sql`lower(${apps.name})`, DEMO_APP_NAMES.map((name) => name.toLowerCase()))))
+/**
+ * Real data is anything the seed did not make: a person without a demo email,
+ * or an app (archived or not) owned or backed up by someone who is not a demo person.
+ * A real app that happens to share a demo app's name is still refused.
+ */
+async function assertOnlyDemoData(db: AppDatabase, workspaceId: string): Promise<void> {
+  const demoEmails = DEMO_PEOPLE.map((person) => person.email);
+  const realPeople = await db
+    .select({id: people.id})
+    .from(people)
+    .where(and(eq(people.workspaceId, workspaceId), notInArray(people.email, demoEmails)))
     .limit(1);
-  if (others.length > 0) {
-    throw new ValidationError('This workspace holds apps that are not demo data, so the seed will not touch it.');
+  const demoIds = db.select({id: people.id}).from(people).where(and(eq(people.workspaceId, workspaceId), inArray(people.email, demoEmails)));
+  const realApps = await db
+    .select({id: apps.id})
+    .from(apps)
+    .where(
+      and(
+        eq(apps.workspaceId, workspaceId),
+        or(
+          notInArray(sql`lower(${apps.name})`, DEMO_APP_NAMES.map((name) => name.toLowerCase())),
+          notInArray(apps.ownerId, demoIds),
+          notInArray(apps.backupOwnerId, demoIds),
+        ),
+      ),
+    )
+    .limit(1);
+  if (realPeople.length > 0 || realApps.length > 0) {
+    throw new ValidationError('This workspace holds people or apps that are not demo data, so the seed will not touch it.');
   }
 }
 
@@ -196,8 +222,11 @@ async function createDemoApp(
   ids: Map<string, string>,
   today: string,
 ): Promise<void> {
-  // The leaver must still be active while their apps are created; they leave afterwards.
-  await updatePerson(db, workspaceId, personId(ids, DEMO_LEAVER_KEY), {status: PERSON_STATUS.active, leftOn: null});
+  // The leaver must be active while one of their apps is created; markLeaver sets them back to left.
+  const leaverId = personId(ids, DEMO_LEAVER_KEY);
+  if (app.owner === DEMO_LEAVER_KEY || app.backup === DEMO_LEAVER_KEY) {
+    await updatePerson(db, workspaceId, leaverId, {status: PERSON_STATUS.active, leftOn: null});
+  }
   const created = await createApp(
     db,
     workspaceId,
@@ -256,8 +285,13 @@ async function addCheckedHosting(db: AppDatabase, workspaceId: string, appId: st
   });
 }
 
-async function markLeaver(db: AppDatabase, workspaceId: string, ids: Map<string, string>): Promise<void> {
-  await updatePerson(db, workspaceId, personId(ids, DEMO_LEAVER_KEY), {status: PERSON_STATUS.left, leftOn: todayIso()});
+/** The leaver leaves once; a later run leaves their date alone. */
+async function markLeaver(db: AppDatabase, workspaceId: string, ids: Map<string, string>, today: string): Promise<void> {
+  const leaverId = personId(ids, DEMO_LEAVER_KEY);
+  const [leaver] = await db.select({status: people.status}).from(people).where(eq(people.id, leaverId));
+  if (leaver?.status !== PERSON_STATUS.left) {
+    await updatePerson(db, workspaceId, leaverId, {status: PERSON_STATUS.left, leftOn: today});
+  }
 }
 
 function personId(ids: Map<string, string>, key: string): string {
