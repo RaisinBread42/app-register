@@ -47,6 +47,7 @@ const ALL_TABLES = [
   'app_dependencies',
   'app_environments',
   'app_hosting',
+  'app_notice_matches',
   'apps',
   'attachments',
   'dependency_advisories',
@@ -54,6 +55,7 @@ const ALL_TABLES = [
   'hosting_incidents',
   'idempotency_keys',
   'notice_alerts',
+  'notices',
   'ownership_changes',
   'people',
   'review_cycles',
@@ -74,6 +76,7 @@ const TABLES_0006 = ['api_key_scopes'];
 const COLUMNS_0006 = ['expires_at', 'last_used_at'];
 
 const TABLES_0007 = ['app_environments'];
+const TABLES_0008 = ['app_notice_matches', 'notices'];
 const COLUMNS_0007 = ['criticality', 'repository_url'];
 
 /**
@@ -81,6 +84,7 @@ const COLUMNS_0007 = ['criticality', 'repository_url'];
  * applies migrations newer than the last one recorded, so an older one rolled
  * back alone would never come back.
  */
+const ROLLBACK_0008 = '0008_notices.down.sql';
 const ROLLBACK_0007 = '0007_app_criticality_environments.down.sql';
 const ROLLBACK_0006 = '0006_tearful_old_lace.down.sql';
 const ROLLBACK_0005 = '0005_hosting_health.down.sql';
@@ -95,7 +99,7 @@ function rollbackSql(file: string): string {
 
 /** Runs the rollbacks down to and including `oldest`, newest first. */
 async function rollBackThrough(t: TestDb, oldest: string) {
-  const newestFirst = [ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
+  const newestFirst = [ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
   for (const file of newestFirst.slice(0, newestFirst.indexOf(oldest) + 1)) {
     await t.client.exec(rollbackSql(file));
   }
@@ -414,7 +418,7 @@ describe('database schema', () => {
     await rollBackThrough(t, ROLLBACK_0005);
     expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0005.includes(name)));
     expect(await tables()).toEqual(
-      ALL_TABLES.filter((name) => ![...TABLES_0005, ...TABLES_0006, ...TABLES_0007].includes(name)),
+      ALL_TABLES.filter((name) => ![...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008].includes(name)),
     );
     const kept = await t.client.query<{end_of_support_on: string}>(`select end_of_support_on::text from app_hosting`);
     expect(kept.rows).toEqual([{end_of_support_on: '2027-02-04'}]);
@@ -531,13 +535,13 @@ describe('database schema', () => {
   });
 
   it('rolling back migration 0001 removes only its tables, and migrating again restores them', async () => {
-    // Rollbacks run newest first: 0007…0002 changed tables that 0001 created.
+    // Rollbacks run newest first: 0008…0002 changed tables that 0001 created.
     await rollBackThrough(t, ROLLBACK_0001);
     const after = await t.client.query<{table_name: string}>(
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(after.rows.map((r) => r.table_name)).toEqual(
-      ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003, ...TABLES_0005, ...TABLES_0006, ...TABLES_0007].includes(n)),
+      ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003, ...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008].includes(n)),
     );
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
@@ -545,6 +549,20 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('rolling back migration 0008 removes only the notice tables; apps stay and migrating again restores them', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    const tables = async () =>
+      (
+        await t.client.query<{table_name: string}>(`select table_name from information_schema.tables where table_schema = 'public' order by 1`)
+      ).rows.map((r) => r.table_name);
+    const before = await tables();
+    await rollBackThrough(t, ROLLBACK_0008);
+    expect(await tables()).toEqual(before.filter((name) => !TABLES_0008.includes(name)));
+    expect((await t.client.query<{id: string}>(`select id from apps`)).rows).toEqual([{id: w.appId}]);
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    expect(await tables()).toEqual(before);
   });
 
   it('rolling back migration 0007 removes criticality, repository URL and environments; apps stay and migrating again restores them', async () => {
@@ -564,7 +582,7 @@ describe('database schema', () => {
 
     await rollBackThrough(t, ROLLBACK_0007);
     expect(await columns()).toEqual(beforeColumns.filter((name) => !COLUMNS_0007.includes(name)));
-    expect(await tables()).toEqual(beforeTables.filter((name) => !TABLES_0007.includes(name)));
+    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0007, ...TABLES_0008].includes(name)));
     const kept = await t.client.query<{id: string}>(`select id from apps`);
     expect(kept.rows).toEqual([{id: w.appId}]);
 
@@ -589,7 +607,7 @@ describe('database schema', () => {
 
     await rollBackThrough(t, ROLLBACK_0006);
     expect(await columns()).toEqual(beforeColumns.filter((name) => !COLUMNS_0006.includes(name)));
-    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0006, ...TABLES_0007].includes(name)));
+    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0006, ...TABLES_0007, ...TABLES_0008].includes(name)));
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     expect(await columns()).toEqual(beforeColumns);
@@ -619,7 +637,7 @@ describe('database schema', () => {
   });
 
   it('every rollback names the hash of the migration file it undoes, so migrating again re-applies it', () => {
-    for (const file of [ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
+    for (const file of [ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001]) {
       const migration = readFileSync(path.join(MIGRATIONS_FOLDER, file.replace('.down.sql', '.sql')));
       const down = readFileSync(path.join(MIGRATIONS_FOLDER, 'rollback', file), 'utf8');
       expect(down, file).toContain(createHash('sha256').update(migration).digest('hex'));

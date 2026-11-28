@@ -22,6 +22,8 @@ import * as openapi from '@/app/api/openapi.json/route';
 import * as personById from '@/app/api/people/[id]/route';
 import * as people from '@/app/api/people/route';
 import * as monitoringSources from '@/app/api/settings/monitoring-sources/route';
+import * as noticeById from '@/app/api/notices/[id]/route';
+import * as noticesRoute from '@/app/api/notices/route';
 import {API_HEADER, BEARER_PREFIX, IDEMPOTENT_METHODS} from '@/lib/constants';
 import {openApiSpec} from '../openapi';
 
@@ -53,6 +55,8 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/api-keys': apiKeys,
   '/api/api-keys/{id}/revoke': apiKeyRevoke,
   '/api/settings/monitoring-sources': monitoringSources,
+  '/api/notices': noticesRoute,
+  '/api/notices/{id}': noticeById,
   '/api/openapi.json': openapi,
 };
 

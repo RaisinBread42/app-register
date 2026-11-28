@@ -101,6 +101,7 @@ export const API_ROUTES = {
   noticeAlerts: `${API_PATH_PREFIX}/notice-alerts`,
   apiKeys: `${API_PATH_PREFIX}/api-keys`,
   monitoringSources: `${API_PATH_PREFIX}/settings/monitoring-sources`,
+  notices: `${API_PATH_PREFIX}/notices`,
 } as const;
 
 /** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
@@ -242,6 +243,69 @@ export const APP_ENVIRONMENT = {
 export const APP_ENVIRONMENTS = Object.values(APP_ENVIRONMENT);
 export type AppEnvironment = (typeof APP_ENVIRONMENTS)[number];
 
+/** What a notice is about (spec §3 P0 Relevant notices). */
+export const NOTICE_CATEGORY = {
+  security: 'security',
+  lifecycle: 'lifecycle',
+  outage: 'outage',
+  licensing: 'licensing',
+  pricing: 'pricing',
+  deadline: 'deadline',
+} as const;
+export const NOTICE_CATEGORIES = Object.values(NOTICE_CATEGORY);
+export type NoticeCategory = (typeof NOTICE_CATEGORIES)[number];
+
+/** Potential impact, kept apart from status (spec §6): handling a critical notice leaves it critical. */
+export const NOTICE_SEVERITY = {
+  critical: 'critical',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  /** The source gave no severity. */
+  unknown: 'unknown',
+} as const;
+export const NOTICE_SEVERITIES = Object.values(NOTICE_SEVERITY);
+export type NoticeSeverity = (typeof NOTICE_SEVERITIES)[number];
+
+/** Where a notice came from. `manual` is a fact a person entered; the rest are outside claims (spec §9). */
+export const NOTICE_SOURCE = {
+  osv: 'osv',
+  endOfLifeDate: 'endoflife_date',
+  statusFeed: 'status_feed',
+  manual: 'manual',
+} as const;
+export const NOTICE_SOURCES = Object.values(NOTICE_SOURCE);
+export type NoticeSource = (typeof NOTICE_SOURCES)[number];
+
+export const NOTICE_ORIGIN = {
+  external: 'external',
+  person: 'person',
+} as const;
+export const NOTICE_ORIGINS = Object.values(NOTICE_ORIGIN);
+export type NoticeOrigin = (typeof NOTICE_ORIGINS)[number];
+
+/** How sure the match between a notice and an app is (spec §8: unverified links are never high). */
+export const MATCH_CONFIDENCE = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+export const MATCH_CONFIDENCES = Object.values(MATCH_CONFIDENCE);
+export type MatchConfidence = (typeof MATCH_CONFIDENCES)[number];
+
+/** Which notices a list shows: open (not resolved upstream, still matching an app), resolved, or all. */
+export const NOTICE_STATE = {
+  open: 'open',
+  resolved: 'resolved',
+  all: 'all',
+} as const;
+export const NOTICE_STATES = Object.values(NOTICE_STATE);
+export type NoticeState = (typeof NOTICE_STATES)[number];
+
+/** Longest text kept for a notice title and summary. */
+export const NOTICE_TITLE_MAX_LENGTH = 300;
+export const NOTICE_SUMMARY_MAX_LENGTH = 2000;
+
 /** Longest repository URL accepted. */
 export const REPOSITORY_URL_MAX_LENGTH = 500;
 
@@ -292,6 +356,9 @@ export const API_QUERY = {
   noticeDeadlineWithinDays: 'noticeDeadlineWithinDays',
   status: 'status',
   appId: 'appId',
+  severity: 'severity',
+  category: 'category',
+  state: 'state',
 } as const;
 
 /** Postgres error codes the services translate into user errors. */
