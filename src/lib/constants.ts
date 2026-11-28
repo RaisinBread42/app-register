@@ -102,6 +102,8 @@ export const API_ROUTES = {
   apiKeys: `${API_PATH_PREFIX}/api-keys`,
   monitoringSources: `${API_PATH_PREFIX}/settings/monitoring-sources`,
   notices: `${API_PATH_PREFIX}/notices`,
+  noticeMatches: `${API_PATH_PREFIX}/notice-matches`,
+  auditEvents: `${API_PATH_PREFIX}/audit-events`,
 } as const;
 
 /** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
@@ -302,6 +304,44 @@ export const NOTICE_STATE = {
 export const NOTICE_STATES = Object.values(NOTICE_STATE);
 export type NoticeState = (typeof NOTICE_STATES)[number];
 
+/** Where a notice stands for one app. Kept apart from severity (spec §6). */
+export const MATCH_STATUS = {
+  new: 'new',
+  reviewing: 'reviewing',
+  snoozed: 'snoozed',
+  handled: 'handled',
+} as const;
+export const MATCH_STATUSES = Object.values(MATCH_STATUS);
+export type MatchStatus = (typeof MATCH_STATUSES)[number];
+/** Statuses that still need someone's attention. */
+export const OPEN_MATCH_STATUSES: readonly MatchStatus[] = [MATCH_STATUS.new, MATCH_STATUS.reviewing];
+
+/** What an audit event records (append-only history, spec §3 P0 Action workflow). */
+export const AUDIT_ACTION = {
+  noticeStatusChanged: 'notice.status_changed',
+  noticeAssigned: 'notice.assigned',
+  noticeUndone: 'notice.undone',
+  noticeSnoozeEnded: 'notice.snooze_ended',
+  appArchived: 'app.archived',
+  appUnarchived: 'app.unarchived',
+} as const;
+export const AUDIT_ACTIONS = Object.values(AUDIT_ACTION);
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export const AUDIT_SUBJECT = {
+  noticeMatch: 'notice_match',
+  app: 'app',
+} as const;
+export const AUDIT_SUBJECTS = Object.values(AUDIT_SUBJECT);
+export type AuditSubject = (typeof AUDIT_SUBJECTS)[number];
+
+/** Who did it, when no person signed in did: a scheduled job. Until sign-in ([37]) people act through an API key. */
+export const ACTOR_SYSTEM = 'System';
+export const ACTION_NOTE_MAX_LENGTH = 1000;
+/** Largest page of audit events one request returns. */
+export const AUDIT_PAGE_MAX = 200;
+export const AUDIT_PAGE_DEFAULT = 50;
+
 /** Longest text kept for a notice title and summary. */
 export const NOTICE_TITLE_MAX_LENGTH = 300;
 export const NOTICE_SUMMARY_MAX_LENGTH = 2000;
@@ -359,6 +399,10 @@ export const API_QUERY = {
   severity: 'severity',
   category: 'category',
   state: 'state',
+  noticeId: 'noticeId',
+  matchId: 'matchId',
+  limit: 'limit',
+  before: 'before',
 } as const;
 
 /** Postgres error codes the services translate into user errors. */
@@ -469,6 +513,7 @@ export const RESOURCE_KIND = {
   /** An import answers with counts, not a row; they are stored beside the key. */
   dependencyImport: 'dependency_import',
   apiKey: 'api_key',
+  noticeMatch: 'notice_match',
 } as const;
 export const RESOURCE_KINDS = Object.values(RESOURCE_KIND);
 export type ResourceKind = (typeof RESOURCE_KINDS)[number];

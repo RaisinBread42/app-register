@@ -204,6 +204,15 @@ curl -fsS -X POST "$APP_REGISTER_URL/api/monitoring/refresh" -H "Authorization: 
 
 `GET /api/notices` lists notices that concern active apps, most severe first, then the soonest date. Filters: `appId`, `severity`, `category`, `state` (`open`, the default; `resolved`; `all`). `GET /api/notices/:id` returns one. Each notice has its source (`source`, `sourceName`, `sourceUrl`, `externalId`), its `origin` (`external`, an outside claim, or `person`, entered by a person), when it was first and last seen, `resolvedUpstreamAt`, and `matches`: one per affected app with the `component`, `version` and `region` it matched on, the `matchReason` and the `confidence` (`high`, `medium`, `low`). Notices are derived from what the dependency and hosting checks store, so there is no endpoint to create one; licensing and pricing notices entered by a person come with [36]. Keys created in Settings (scoped to the applications register) get 403 here.
 
+## Notice actions and audit history
+
+Each match (a notice on one app) has a `status`: `new`, `reviewing`, `snoozed` or `handled`. Status never changes the notice's severity.
+- `POST /api/notice-matches/:id/status` with `{status, note?, snoozedUntil?}`. A snooze needs a date after today and a reason (`note`); `handled` needs a note with the evidence; `new` reopens. A snooze whose date has come reads as `new` straight away, and the daily refresh records that it ended (actor `System`).
+- `POST /api/notice-matches/:id/assign` with `{assigneeId, note?}` assigns an active person; `null` clears.
+- `POST /api/notice-matches/:id/undo` reverses the latest status change or assignment by writing a new event; the original stays. Undoing back to a snooze whose date has passed is refused.
+- `GET /api/audit-events?appId=&noticeId=&matchId=&limit=&before=` lists the append-only history, newest first (page back with `before`). Each event has `actor` (the API key by name until people sign in, or `System`), `action`, `fromValue`, `toValue`, `note` and when it happened. Rows can't be changed: a database trigger refuses UPDATE.
+- The three POST routes need an `Idempotency-Key`, like every other write.
+
 ## Health score
 
 Every app carries `health: { score, status, dimensions }`. It is the one place health lives: there is no separate hosting field.

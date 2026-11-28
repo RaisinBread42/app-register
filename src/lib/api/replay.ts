@@ -7,6 +7,7 @@ import {NotFoundError} from '@/lib/services/errors';
 import {getHosting} from '@/lib/services/hosting';
 import type {WrittenResource} from '@/lib/services/idempotency';
 import {getAlert} from '@/lib/services/notice-alerts';
+import {getMatch} from '@/lib/services/notices';
 import {getPerson} from '@/lib/services/people';
 
 /**
@@ -27,6 +28,8 @@ export async function replayBody(db: AppDatabase, workspaceId: string, resource:
       return {hosting: await getHosting(db, workspaceId, resource.id)};
     case RESOURCE_KIND.noticeAlert:
       return {alert: await getAlert(db, workspaceId, resource.id)};
+    case RESOURCE_KIND.noticeMatch:
+      return {match: await getMatch(db, workspaceId, resource.id)};
     case RESOURCE_KIND.dependencyImport:
       return {import: resource.counts};
     case RESOURCE_KIND.apiKey: {

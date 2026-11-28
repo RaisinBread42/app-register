@@ -24,6 +24,10 @@ import * as people from '@/app/api/people/route';
 import * as monitoringSources from '@/app/api/settings/monitoring-sources/route';
 import * as noticeById from '@/app/api/notices/[id]/route';
 import * as noticesRoute from '@/app/api/notices/route';
+import * as matchStatus from '@/app/api/notice-matches/[id]/status/route';
+import * as matchAssign from '@/app/api/notice-matches/[id]/assign/route';
+import * as matchUndo from '@/app/api/notice-matches/[id]/undo/route';
+import * as auditEventsRoute from '@/app/api/audit-events/route';
 import {API_HEADER, BEARER_PREFIX, IDEMPOTENT_METHODS} from '@/lib/constants';
 import {openApiSpec} from '../openapi';
 
@@ -57,6 +61,10 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/settings/monitoring-sources': monitoringSources,
   '/api/notices': noticesRoute,
   '/api/notices/{id}': noticeById,
+  '/api/notice-matches/{id}/status': matchStatus,
+  '/api/notice-matches/{id}/assign': matchAssign,
+  '/api/notice-matches/{id}/undo': matchUndo,
+  '/api/audit-events': auditEventsRoute,
   '/api/openapi.json': openapi,
 };
 

@@ -44,6 +44,8 @@ export type ListedApiKey = {
 
 export type ApiKeyAuth = {
   workspaceId: string;
+  /** The key's name, recorded as who did what until people sign in ([37]). */
+  keyName: string;
   /** `null` = unrestricted (no scope rows). Otherwise the key's scopes. */
   scopes: readonly ApiKeyScope[] | null;
 };
@@ -142,6 +144,7 @@ export async function authenticateApiKey(db: AppDatabase, key: string): Promise<
     .select({
       id: apiKeys.id,
       workspaceId: apiKeys.workspaceId,
+      name: apiKeys.name,
       revokedAt: apiKeys.revokedAt,
       expiresAt: apiKeys.expiresAt,
     })
@@ -160,6 +163,7 @@ export async function authenticateApiKey(db: AppDatabase, key: string): Promise<
     .where(and(eq(apiKeyScopes.apiKeyId, row.id), eq(apiKeyScopes.workspaceId, row.workspaceId)));
   return {
     workspaceId: row.workspaceId,
+    keyName: row.name,
     scopes: scopes.length === 0 ? null : scopes.map((s) => s.scope),
   };
 }

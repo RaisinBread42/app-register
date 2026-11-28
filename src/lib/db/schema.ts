@@ -30,7 +30,11 @@ import {
   END_OF_SUPPORT_SOURCES,
   INCIDENT_IMPACTS,
   INCIDENT_SCOPES,
+  AUDIT_ACTIONS,
+  AUDIT_SUBJECTS,
   MATCH_CONFIDENCES,
+  MATCH_STATUS,
+  MATCH_STATUSES,
   NOTICE_CATEGORIES,
   NOTICE_ORIGINS,
   NOTICE_SEVERITIES,
@@ -596,11 +600,28 @@ export const appNoticeMatches = pgTable(
     firstSeenAt: timestamp('first_seen_at', {withTimezone: true}).notNull(),
     lastSeenAt: timestamp('last_seen_at', {withTimezone: true}).notNull(),
     resolvedAt: timestamp('resolved_at', {withTimezone: true}),
+    /** Where it stands for this app ([26]); a check never changes these columns. */
+    status: text('status').notNull().default(MATCH_STATUS.new),
+    /** The reason for a snooze or the evidence for handled. */
+    statusNote: text('status_note'),
+    snoozedUntil: date('snoozed_until', {mode: 'string'}),
+    statusChangedAt: timestamp('status_changed_at', {withTimezone: true}),
+    assigneeId: uuid('assignee_id'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     unique('app_notice_matches_id_workspace_unique').on(t.id, t.workspaceId),
+    check('app_notice_matches_status_allowed', oneOf(t.status, MATCH_STATUSES)),
+    check(
+      'app_notice_matches_snooze_has_date',
+      sql`(${t.status} = ${sql.raw(`'${MATCH_STATUS.snoozed}'`)}) = (${t.snoozedUntil} is not null)`,
+    ),
+    foreignKey({
+      name: 'app_notice_matches_assignee_fk',
+      columns: [t.assigneeId, t.workspaceId],
+      foreignColumns: [people.id, people.workspaceId],
+    }).onDelete('restrict'),
     unique('app_notice_matches_notice_app_component_unique').on(t.noticeId, t.appId, t.component),
     foreignKey({
       name: 'app_notice_matches_notice_fk',
@@ -614,6 +635,40 @@ export const appNoticeMatches = pgTable(
     }).onDelete('cascade'),
     check('app_notice_matches_confidence_allowed', oneOf(t.confidence, MATCH_CONFIDENCES)),
     index('app_notice_matches_app_idx').on(t.appId),
+  ],
+);
+
+/**
+ * Append-only history of what people and jobs did (spec §3 P0): who, what, when, before,
+ * after and the note. A hand-written trigger in drizzle/0009 refuses UPDATE. No foreign keys
+ * to the subjects, so history outlives what it describes; `app_id` and `notice_id` let a
+ * page list an app's or a notice's activity.
+ */
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    occurredAt: timestamp('occurred_at', {withTimezone: true}).notNull(),
+    actor: text('actor').notNull(),
+    action: text('action').notNull(),
+    subjectKind: text('subject_kind').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+    appId: uuid('app_id'),
+    noticeId: uuid('notice_id'),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    /** The snooze date the change set, so an undo can bring a snooze back. */
+    snoozedUntil: date('snoozed_until', {mode: 'string'}),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('audit_events_action_allowed', oneOf(t.action, AUDIT_ACTIONS)),
+    check('audit_events_subject_kind_allowed', oneOf(t.subjectKind, AUDIT_SUBJECTS)),
+    index('audit_events_workspace_occurred_idx').on(t.workspaceId, t.occurredAt),
+    index('audit_events_subject_idx').on(t.subjectId, t.occurredAt),
+    index('audit_events_app_idx').on(t.appId, t.occurredAt),
   ],
 );
 
