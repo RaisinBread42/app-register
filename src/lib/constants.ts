@@ -195,17 +195,18 @@ export const BASIC_PREFIX = 'Basic ';
 /** Notice-deadline alert offsets in days (MVP email alerts). */
 export const NOTICE_ALERT_OFFSET_DAYS = [90, 60, 30] as const;
 
-export const APP_KINDS = [
-  'saas',
-  'in_house',
-  'citizen_built',
-  'vendor_service',
-] as const;
+export const APP_KIND = {
+  saas: 'saas',
+  inHouse: 'in_house',
+  citizenBuilt: 'citizen_built',
+  vendorService: 'vendor_service',
+} as const;
+export const APP_KINDS = Object.values(APP_KIND);
 
 export type AppKind = (typeof APP_KINDS)[number];
 
 /** Kinds that must record where they run, the data and keys they touch, and what breaks if they stop. */
-export const RUNTIME_DETAIL_KINDS: readonly AppKind[] = ['in_house', 'citizen_built'];
+export const RUNTIME_DETAIL_KINDS: readonly AppKind[] = [APP_KIND.inHouse, APP_KIND.citizenBuilt];
 
 /** The one workspace every request uses until sign-in exists. */
 export const DEFAULT_WORKSPACE_SLUG = 'default';

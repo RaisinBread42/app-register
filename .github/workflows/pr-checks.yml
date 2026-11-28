@@ -69,6 +69,51 @@ jobs:
             { echo "## Database migrations changed"; echo; echo "$changed" | sed 's/^/- /'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: app_register
+          POSTGRES_PASSWORD: app_register_ci
+          POSTGRES_DB: app_register
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_register -d app_register"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Journeys, accessibility (axe) and screenshots on seeded demo data
+        env:
+          DATABASE_URL: postgres://app_register:app_register_ci@localhost:5432/app_register
+        run: npm run e2e
+
+      - name: Summarise e2e in the job summary
+        if: always()
+        run: node scripts/e2e-summary.mjs e2e-artifacts/report.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: e2e-artifacts/
+          retention-days: 14
+
   ensure-mvp-label:
     runs-on: ubuntu-latest
     permissions:

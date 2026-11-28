@@ -54,6 +54,17 @@ npm run api-key:create -- "Front end"   # prints the key once
 npm run api-key:revoke -- ar_AbC123     # by the prefix printed at creation
 ```
 
+## Demo data and end-to-end checks
+
+```bash
+npm run db:seed      # fictional demo data into the default workspace (refuses a workspace with real apps)
+DATABASE_URL=postgres://… npm run e2e          # migrate, seed, build, start, then Playwright
+DATABASE_URL=postgres://… npm run e2e -- journeys   # one file
+E2E_SKIP_BUILD=1 DATABASE_URL=postgres://… npm run e2e   # reuse the last build
+```
+
+`npm run e2e` runs the journeys in `e2e/`, an axe WCAG 2.2 A/AA audit and a no-sideways-scroll check on every primary screen, and saves screenshots at 360, 768 and 1280 px to `e2e-artifacts/screenshots/`. Point it at a throwaway database: local Docker or CI, never UAT. Outside sources are blocked in the app server during the run. CI runs it on every PR and uploads `e2e-artifacts/`.
+
 ## Checks
 
 ```bash
