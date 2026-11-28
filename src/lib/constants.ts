@@ -50,6 +50,13 @@ export const UI_QUERY = {
   sort: 'sort',
   /** Which Settings section is open. */
   section: 'section',
+  /** Notices inbox: filters, grouping and the open notice (a match id). */
+  status: 'status',
+  severity: 'severity',
+  category: 'category',
+  app: 'app',
+  group: 'group',
+  notice: 'notice',
 } as const;
 export const UI_QUERY_ON = '1';
 
@@ -108,6 +115,9 @@ export const API_ROUTES = {
 
 /** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
 export const API_SUB_ROUTE = {
+  status: 'status',
+  assign: 'assign',
+  undo: 'undo',
   archive: 'archive',
   dependencies: 'dependencies',
   hosting: 'hosting',

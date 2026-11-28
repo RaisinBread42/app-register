@@ -6,17 +6,17 @@ const topbarSearch = (page: Page) => page.getByRole('searchbox', {name: 'Search 
 test('primary navigation is Overview, Applications, Notices and Settings, reachable by keyboard with the current page marked', async ({page}) => {
   await page.goto('/');
   const nav = page.getByRole('navigation').first();
-  for (const name of ['Overview', 'Applications', 'Notices', 'Settings']) {
-    await expect(nav.getByRole('link', {name, exact: true})).toBeVisible();
+  for (const name of [/^Overview$/, /^Applications$/, /^Notices( \d+)?$/, /^Settings$/]) {
+    await expect(nav.getByRole('link', {name})).toBeVisible();
   }
   await expect(nav.getByRole('link', {name: 'Sources', exact: true})).toHaveCount(0);
   await expect(nav.getByRole('link', {name: 'People', exact: true})).toHaveCount(0);
 
-  const notices = nav.getByRole('link', {name: 'Notices', exact: true});
+  const notices = nav.getByRole('link', {name: /^Notices( \d+)?$/});
   await notices.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', {level: 1, name: 'Notices'})).toBeVisible();
-  await expect(nav.getByRole('link', {name: 'Notices', exact: true})).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', {name: /^Notices( \d+)?$/})).toHaveAttribute('aria-current', 'page');
 });
 
 test('old Sources and People links land in Settings', async ({page}) => {
@@ -77,7 +77,9 @@ test('Tab reaches the side nav links in order: Overview, Applications, Notices, 
   const order: string[] = [];
   for (let presses = 0; presses < 25 && order.length < 4; presses += 1) {
     await page.keyboard.press('Tab');
-    const name = await page.evaluate(() => document.activeElement?.closest('nav') ? document.activeElement?.textContent?.trim() : null);
+    const name = await page.evaluate(() =>
+      document.activeElement?.closest('nav') ? document.activeElement?.textContent?.replace(/\d+$/, '').trim() : null,
+    );
     if (name && ['Overview', 'Applications', 'Notices', 'Settings'].includes(name) && !order.includes(name)) {
       order.push(name);
     }

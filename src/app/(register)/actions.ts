@@ -9,6 +9,7 @@ import {
   type ApiKeyInput,
   type DependencyImport,
   type PersonInput,
+  type StatusChangeInput,
 } from '@/lib/ui/api-client';
 import {
   formToAppInput,
@@ -174,5 +175,28 @@ export async function createApiKeyAction(
 export async function revokeApiKeyAction(idempotencyKey: string, id: string): Promise<ActionResult> {
   const result = await runAction(() => apiClient().revokeApiKey(idempotencyKey, id));
   revalidatePath(ROUTES.settings);
+  return result;
+}
+
+/** Notices and the overview show notice statuses. */
+function refreshNotices() {
+  revalidatePath(ROUTES.home, 'layout');
+}
+
+export async function changeMatchStatusAction(idempotencyKey: string, matchId: string, change: StatusChangeInput): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().changeMatchStatus(idempotencyKey, matchId, change));
+  refreshNotices();
+  return result;
+}
+
+export async function assignMatchAction(idempotencyKey: string, matchId: string, assigneeId: string | null): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().assignMatch(idempotencyKey, matchId, assigneeId));
+  refreshNotices();
+  return result;
+}
+
+export async function undoMatchAction(idempotencyKey: string, matchId: string): Promise<ActionResult> {
+  const result = await runAction(() => apiClient().undoMatch(idempotencyKey, matchId));
+  refreshNotices();
   return result;
 }
