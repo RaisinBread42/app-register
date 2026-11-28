@@ -9,23 +9,17 @@ import {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
 import {DateInput} from '@astryxdesign/core/DateInput';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {FormLayout} from '@astryxdesign/core/FormLayout';
-import {HStack} from '@astryxdesign/core/HStack';
 import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
-import {
-  API_KEY_STATUS,
-  MONITORING_SOURCE_STATUS,
-  type ApiKeyStatus,
-  type MonitoringSourceStatus,
-} from '@/lib/constants';
+import {API_KEY_STATUS, type ApiKeyStatus} from '@/lib/constants';
 import type {ApiKey} from '@/lib/ui/api-client';
 import {NOT_SET} from '@/lib/ui/copy';
 import {formatDate, formatDateTime} from '@/lib/ui/register-view';
 import {createApiKeyAction, revokeApiKeyAction} from '../actions';
 import {EditDialog} from '../_components/EditDialog';
-import {KeyValueRows, PanelCard} from '../_components/Cards';
+import {PanelCard} from '../_components/Cards';
 import {isoDate} from '../_components/iso-date';
 import {useAction} from '../_components/use-action';
 

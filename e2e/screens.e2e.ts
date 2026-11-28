@@ -9,15 +9,13 @@ const SCREENS = [
   {name: 'settings-sources', path: '/settings?section=sources', heading: 'Settings'},
   {name: 'settings-people', path: '/settings?section=people', heading: 'Settings'},
   {name: 'settings-api-keys', path: '/settings?section=api-keys', heading: 'Settings'},
-  {name: 'not-found', path: '/no-such-page', heading: null},
+  {name: 'not-found', path: '/no-such-page', heading: 'Page not found'},
 ] as const;
 
 for (const screen of SCREENS) {
   test(`${screen.name}: loads, is accessible and fits every width`, async ({page}) => {
     await page.goto(screen.path);
-    if (screen.heading) {
-      await expect(page.getByRole('heading', {level: 1, name: screen.heading})).toBeVisible();
-    }
+    await expect(page.getByRole('heading', {level: 1, name: screen.heading})).toBeVisible();
     await expectNoAxeViolations(page);
     await page.setViewportSize({width: 360, height: 780});
     await expectNoHorizontalScroll(page);

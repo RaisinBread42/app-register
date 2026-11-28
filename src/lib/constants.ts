@@ -13,13 +13,6 @@ export const ROUTES = {
   settings: '/settings',
 } as const;
 
-/** Paths from earlier UIs; each page there redirects to its new home. */
-export const LEGACY_ROUTES = {
-  apps: '/apps',
-  sources: '/sources',
-  people: '/people',
-} as const;
-
 /** Sections of Settings, chosen with `?section=`. Sources and People live here (ADR 0003). */
 export const SETTINGS_SECTION = {
   sources: 'sources',

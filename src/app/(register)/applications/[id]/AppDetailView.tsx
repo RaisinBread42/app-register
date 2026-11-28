@@ -31,6 +31,7 @@ import {
   orDash,
 } from '@/lib/ui/copy';
 import {BackArrowIcon, PencilIcon} from '@/lib/ui/icons';
+import {useRememberedListHref} from '@/lib/ui/list-memory';
 import {formatDate, primaryHosting} from '@/lib/ui/register-view';
 import {archiveAppAction} from '../../actions';
 import {AppIcon, PendingPill} from '../../_components/AppIdentity';
@@ -64,6 +65,8 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
     setTabState(value);
     router.replace(appTabRoute(app.id, value as AppTab), {scroll: false});
   };
+  /** Back to the list as the user left it (filters, search, sort); the plain list until known. */
+  const listHref = useRememberedListHref();
   const confirm = useImperativeAlertDialog();
   const archive = useAction();
   const isArchived = app.archivedAt !== null;
@@ -82,10 +85,10 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
   }
 
   return (
-    <PageFrame crumbs={[{label: 'Applications', href: ROUTES.applications}, {label: app.name}]}>
+    <PageFrame crumbs={[{label: 'Applications', href: listHref}, {label: app.name}]}>
       <VStack gap={4}>
         <HStack hAlign="between" vAlign="center">
-          <Link href={ROUTES.applications} size="sm" weight="bold">
+          <Link href={listHref} size="sm" weight="bold">
             <HStack gap={1} vAlign="center" as="span">
               <Icon icon={BackArrowIcon} size="xsm" />
               All applications

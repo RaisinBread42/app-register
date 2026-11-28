@@ -1,7 +1,7 @@
 'use client';
 
-import {useState} from 'react';
-import {useRouter} from 'next/navigation';
+import {useEffect, useRef, useState} from 'react';
+import {useSearchParams} from 'next/navigation';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {Card} from '@astryxdesign/core/Card';
@@ -34,7 +34,8 @@ import {
   NOT_SET,
 } from '@/lib/ui/copy';
 import {AppsIcon, CalendarIcon, ShieldIcon, WarningIcon} from '@/lib/ui/icons';
-import {appListQuery} from '@/lib/ui/list-filters';
+import {appListQuery, appListViewFrom} from '@/lib/ui/list-filters';
+import {rememberListQuery} from '@/lib/ui/list-memory';
 import {applyAppListView, appsWithRenewal, formatDate, healthStats, type AppListView} from '@/lib/ui/register-view';
 import {AppCell, PendingPill} from '../_components/AppIdentity';
 import {FootNote, MetricCard} from '../_components/Cards';
@@ -53,16 +54,34 @@ const SORT_OPTIONS = APP_LIST_SORTS.map((sort) => ({value: sort, label: APP_LIST
 type Props = {apps: App[]; people: PersonOption[]; addKey: string; initialView: AppListView; isAddOpen: boolean};
 
 export function ApplicationsView({apps, people, addKey, initialView, isAddOpen}: Props) {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [view, setView] = useState<AppListView>(initialView);
   const [isAdding, setIsAdding] = useState(isAddOpen);
+  /** The query string this view last wrote, so its own URL updates are not read back as outside changes. */
+  const written = useRef(appListQuery(initialView));
   const {query, kind, health, sort} = view;
   const shown = applyAppListView(apps, view);
-  /** Every change goes into the URL, so Back from an app and shared links restore the same list. */
+
+  // The URL is the source of truth: when it changes from outside (topbar search, the side nav,
+  // Back and Forward), the list follows it.
+  const urlQuery = searchParams.toString();
+  useEffect(() => {
+    const fromUrl = appListViewFrom(Object.fromEntries(new URLSearchParams(urlQuery)));
+    const asQuery = appListQuery(fromUrl);
+    rememberListQuery(asQuery);
+    if (asQuery !== written.current) {
+      written.current = asQuery;
+      setView(fromUrl);
+    }
+  }, [urlQuery]);
+
+  /** Every change goes into the URL (no server round trip), so Back from an app and shared links restore the same list. */
   const update = (change: Partial<AppListView>) => {
     const next = {...view, ...change};
     setView(next);
-    router.replace(`${ROUTES.applications}${appListQuery(next)}`, {scroll: false});
+    written.current = appListQuery(next);
+    rememberListQuery(written.current);
+    window.history.replaceState(null, '', `${ROUTES.applications}${written.current}`);
   };
   const stats = healthStats(apps);
 
