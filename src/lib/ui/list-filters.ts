@@ -3,6 +3,7 @@ import {
   APP_HEALTH_FILTERS,
   APP_KINDS,
   APP_LIST_SORTS,
+  APP_STATES,
   APP_TAB,
   APP_TABS,
   CRITICALITY_FILTER_NOT_SET,
@@ -56,6 +57,7 @@ export function appListViewFrom(params: SearchParams): AppListView {
     owner: textParam(params, UI_QUERY.owner) || FILTER_ALL,
     health: oneOf(APP_HEALTH_FILTERS, first(params[UI_QUERY.health])) ?? FILTER_ALL,
     openNotices: first(params[UI_QUERY.openNotices]) === UI_QUERY_ON,
+    state: oneOf(APP_STATES, first(params[UI_QUERY.state])) ?? DEFAULT_APP_LIST_VIEW.state,
     sort: oneOf<AppListSort>(APP_LIST_SORTS, first(params[UI_QUERY.sort])) ?? DEFAULT_APP_LIST_VIEW.sort,
   };
 }
@@ -69,6 +71,7 @@ export function appListQuery(view: AppListView): string {
   if (view.owner !== FILTER_ALL) query.set(UI_QUERY.owner, view.owner);
   if (view.health !== FILTER_ALL) query.set(UI_QUERY.health, view.health);
   if (view.openNotices) query.set(UI_QUERY.openNotices, UI_QUERY_ON);
+  if (view.state !== DEFAULT_APP_LIST_VIEW.state) query.set(UI_QUERY.state, view.state);
   if (view.sort !== DEFAULT_APP_LIST_VIEW.sort) query.set(UI_QUERY.sort, view.sort);
   const text = query.toString();
   return text ? `?${text}` : "";

@@ -1,0 +1,2 @@
+ALTER TABLE "audit_events" DROP CONSTRAINT "audit_events_action_allowed";--> statement-breakpoint
+ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_action_allowed" CHECK ("audit_events"."action" in ('notice.status_changed', 'notice.assigned', 'notice.status_undone', 'notice.assignment_undone', 'notice.snooze_ended', 'notice.reopened', 'app.archived', 'app.unarchived'));

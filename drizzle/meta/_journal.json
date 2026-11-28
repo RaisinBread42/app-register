@@ -71,6 +71,13 @@
       "when": 1795859546003,
       "tag": "0009_notice_actions_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795864528452,
+      "tag": "0010_app_unarchive_audit",
+      "breakpoints": true
     }
   ]
 }

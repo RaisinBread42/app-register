@@ -14,7 +14,7 @@ Authorization: Bearer ar_…
 
 - The key decides the workspace. A key only ever reads or writes its own workspace's rows; an id from another workspace answers 404.
 - Keys are 256 random bits. Only their SHA-256 hash is stored (`api_keys.key_hash`), plus the first 9 characters (`ar_` + 6) in plain text so a person can tell keys apart. Those 6 characters are part of the key (36 of its 256 bits); the rest is never stored.
-- **Scopes.** Keys from Settings (`POST /api/api-keys`) are scoped to the **Applications register**: create/read/update apps, add/import/read dependencies, and read/update hosting (including the hosting catalog). They get `403` on every other endpoint (people, notice alerts, monitoring refresh, key management, archive, dependency/hosting deletes and refreshes). Keys from `npm run api-key:create` (including the UI server's `APP_REGISTER_API_KEY`) have **full access** — no rows in `api_key_scopes`.
+- **Scopes.** Keys from Settings (`POST /api/api-keys`) are scoped to the **Applications register**: create/read/update apps, add/import/read dependencies, and read/update hosting (including the hosting catalog). They get `403` on every other endpoint (people, notice alerts, monitoring refresh, key management, archive and unarchive, dependency/hosting deletes and refreshes). Keys from `npm run api-key:create` (including the UI server's `APP_REGISTER_API_KEY`) have **full access** — no rows in `api_key_scopes`.
 - **Expiry.** A key may have an `expires_at` (end of a chosen UTC calendar day) or none. Expired and revoked keys → `401`. Active keys record `last_used_at` on each successful auth.
 - Create a full-access key: `npm run api-key:create -- "Front end"`. It prints the key **once**; store it in a secret manager. Or create a scoped key from Settings / `POST /api/api-keys` with `{ "name", "expiresOn": "YYYY-MM-DD" | null }`.
 - List / revoke: `GET /api/api-keys`, `POST /api/api-keys/:id/revoke`. Revoke also works with `npm run api-key:revoke -- ar_AbC123` (prefix or id). Takes effect on the next request.
@@ -57,11 +57,12 @@ How it works: the key is claimed inside the same database transaction as the wri
 
 | Method | Path | Does |
 | --- | --- | --- |
-| GET | `/api/apps` | Active apps. `?kind=`, `?sort=name\|notice_deadline`, `?noticeDeadlineWithinDays=0–36500` |
+| GET | `/api/apps` | Active apps. `?kind=`, `?sort=name\|notice_deadline`, `?noticeDeadlineWithinDays=0–36500`. `?state=archived` lists archived apps by name instead (the other filters do not apply) |
 | POST | `/api/apps` | Create; schedules notice alerts |
 | GET | `/api/apps/:id` | One app (archived too) with `alerts`, `dependencies`, `hosting` and `health` |
 | PATCH | `/api/apps/:id` | Update an active app; a new deadline replaces scheduled alerts |
-| POST | `/api/apps/:id/archive` | Soft delete: hides it, frees its name, drops scheduled alerts |
+| POST | `/api/apps/:id/archive` | Soft delete: hides it, frees its name, drops scheduled alerts, resolves its notice matches; writes `app.archived` |
+| POST | `/api/apps/:id/unarchive` | Active again (its name must be free), notice alerts scheduled again, notices checked again; writes `app.unarchived`. Unarchiving an active app does nothing |
 | GET / POST | `/api/apps/:id/dependencies` | List / add (name unique per app, case-insensitive); a new one is checked straight away |
 | PATCH / DELETE | `/api/apps/:id/dependencies/:dependencyId` | Update (then checked again) / remove |
 | POST | `/api/apps/:id/dependencies/import` | Body is a `package.json` or `package-lock.json`; imports the direct dependencies, then checks them |
@@ -211,7 +212,7 @@ Each match (a notice on one app) has a `status`: `new`, `reviewing`, `snoozed` o
 - `POST /api/notice-matches/:id/assign` with `{assigneeId, note?}` assigns an active person; `assigneeId` is required, and `null` clears.
 - `POST /api/notice-matches/:id/undo` reverses the latest status change or assignment by writing a new event (`notice.status_undone` or `notice.assignment_undone`) that restores the previous status, snooze date and note, or the previous owner. The original stays. It is refused when the latest event is not a person's action (an undo, a snooze that ended, a reopen), when it would bring back a snooze whose date has passed, or when it would bring back an owner who has left. An optional body `{"action": "notice.status_changed" | "notice.assigned", "toValue": …}` names the action meant (the UI always sends it): status and owner are then undone separately, so undoing a review after an assignment keeps the owner, and the undo is refused when a later change of that kind has happened since.
 - A handled notice that the source reports again for the app reopens (`notice.reopened`, actor `System`). Unhandled risk never hides.
-- Actions on a notice of an archived application get 404. Archiving an application writes `app.archived`.
+- Actions on a notice of an archived application get 404. Archiving an application writes `app.archived`; unarchiving writes `app.unarchived`.
 - `GET /api/audit-events?appId=&noticeId=&matchId=&limit=&before=` lists the append-only history, newest first, in the order things happened (a database sequence). Page back with `before=<id of the last event you have>`. Each event has `actor` (an API key by name until people sign in, or `System`), `actorKeyId`, `action`, `fromValue`, `toValue`, `note`, `occurredAt`, and `appName` and `noticeTitle` so a history line can say which app and notice (an archived app keeps its name). Triggers refuse UPDATE, TRUNCATE and direct DELETE; history is only removed with its workspace or by a retention job ([41]).
 - The three POST routes need an `Idempotency-Key`, like every other write.
 

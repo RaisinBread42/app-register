@@ -28,6 +28,7 @@ export default async function AppPage({params, searchParams}: Props) {
       initialTab={appTab(query[UI_QUERY.tab])}
       keys={{
         archive: crypto.randomUUID(),
+        unarchive: crypto.randomUUID(),
         addDependency: crypto.randomUUID(),
         importDependencies: crypto.randomUUID(),
         addHosting: crypto.randomUUID(),

@@ -3,6 +3,7 @@ import {expect} from 'vitest';
 import * as apiKeyRevoke from '@/app/api/api-keys/[id]/revoke/route';
 import * as apiKeys from '@/app/api/api-keys/route';
 import * as appArchive from '@/app/api/apps/[id]/archive/route';
+import * as appUnarchive from '@/app/api/apps/[id]/unarchive/route';
 import * as appDependency from '@/app/api/apps/[id]/dependencies/[dependencyId]/route';
 import * as appDependencyImport from '@/app/api/apps/[id]/dependencies/import/route';
 import * as appDependencyRefresh from '@/app/api/apps/[id]/dependencies/refresh/route';
@@ -40,6 +41,7 @@ export const ROUTES: Record<string, Record<string, unknown>> = {
   '/api/apps': apps,
   '/api/apps/{id}': appById,
   '/api/apps/{id}/archive': appArchive,
+  '/api/apps/{id}/unarchive': appUnarchive,
   '/api/apps/{id}/dependencies': appDependencies,
   '/api/apps/{id}/dependencies/import': appDependencyImport,
   '/api/apps/{id}/dependencies/refresh': appDependencyRefresh,

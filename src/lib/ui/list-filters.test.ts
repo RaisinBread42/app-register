@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {APP_CRITICALITY, APP_HEALTH_FILTER, APP_KIND, APP_LIST_SORT, SETTINGS_SECTION} from '@/lib/constants';
+import {APP_CRITICALITY, APP_HEALTH_FILTER, APP_KIND, APP_LIST_SORT, APP_STATE, SETTINGS_SECTION} from '@/lib/constants';
 import {DEFAULT_APP_LIST_VIEW} from './catalog';
 import {appListQuery, appListViewFrom, settingsSection} from './list-filters';
 
@@ -12,6 +12,7 @@ describe('list state in the URL', () => {
       owner: '7d0c1f3e-1111-4222-8333-944455556666',
       health: APP_HEALTH_FILTER.notMonitored,
       openNotices: true,
+      state: APP_STATE.archived,
       sort: APP_LIST_SORT.deadline,
     };
     const params = Object.fromEntries(new URLSearchParams(appListQuery(view).slice(1)));

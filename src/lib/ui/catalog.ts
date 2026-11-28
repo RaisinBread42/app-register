@@ -2,6 +2,7 @@ import {
   APP_CRITICALITY,
   APP_HEALTH_FILTER,
   APP_LIST_SORT,
+  APP_STATE,
   CRITICALITY_FILTER_NOT_SET,
   DATE_KIND,
   FILTER_ALL,
@@ -9,6 +10,7 @@ import {
   NOTICE_SEVERITIES,
   type AppCriticality,
   type AppListSort,
+  type AppState,
   type DateKind,
   type NoticeSeverity,
 } from '@/lib/constants';
@@ -31,6 +33,8 @@ export type AppListView = {
   health: string;
   /** Only applications with an open (new or reviewing) notice. */
   openNotices: boolean;
+  /** Active applications (the catalog) or the archived ones. */
+  state: AppState;
   sort: AppListSort;
 };
 
@@ -41,6 +45,7 @@ export const DEFAULT_APP_LIST_VIEW: AppListView = {
   owner: FILTER_ALL,
   health: FILTER_ALL,
   openNotices: false,
+  state: APP_STATE.active,
   sort: APP_LIST_SORT.attention,
 };
 
@@ -94,12 +99,16 @@ export function catalogOwners(apps: App[]): {value: string; label: string}[] {
   return [...owners].map(([value, label]) => ({value, label})).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/** Apps whose name contains the search text, ignoring case and surrounding spaces. */
+export function filterByName(apps: App[], query: string): App[] {
+  const needle = query.trim().toLowerCase();
+  return needle ? apps.filter((app) => app.name.toLowerCase().includes(needle)) : apps;
+}
+
 /** The list as the view asks: search, filters, then the chosen order. */
 export function applyAppListView(apps: App[], view: AppListView, issues: Map<string, IssueSummary>, today: string): App[] {
-  const needle = view.query.trim().toLowerCase();
-  const shown = apps.filter(
+  const shown = filterByName(apps, view.query).filter(
     (app) =>
-      (!needle || app.name.toLowerCase().includes(needle)) &&
       (view.kind === FILTER_ALL || app.kind === view.kind) &&
       (view.criticality === FILTER_ALL || (app.criticality ?? CRITICALITY_FILTER_NOT_SET) === view.criticality) &&
       (view.owner === FILTER_ALL || app.owner.id === view.owner) &&

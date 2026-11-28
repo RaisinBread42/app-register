@@ -12,10 +12,10 @@ import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_KINDS, ROUTES} from '@/lib/constants';
+import {APP_KINDS, ROUTES, appRoute} from '@/lib/constants';
 import {CRITICALITY_OPTIONS, KIND_OPTIONS} from '@/lib/ui/copy';
 
-const CRITICALITY_REQUIRED = 'Choose how critical this application is.';
+const CRITICALITY_REQUIRED = 'Criticality: choose Low, Medium, High or Critical, how much the business depends on it.';
 import {emptyAppForm, type AppFormValues} from '@/lib/ui/forms';
 import {createAppAction} from '../actions';
 import {FormError} from '../_components/FormError';
@@ -55,11 +55,12 @@ export function AddApplicationDialog({isOpen, onClose, idempotencyKey, people}: 
     setMissing(null);
     run(
       () => createAppAction(idempotencyKey, values),
-      () => {
+      (result) => {
         setValues(emptyAppForm(APP_KINDS[0]));
         onClose();
         showToast({body: `${values.name.trim()} added to the register`});
-        router.push(ROUTES.applications);
+        // Its page shows the setup checklist: what to add so it can be watched (Journey B).
+        router.push(result.appId ? appRoute(result.appId) : ROUTES.applications);
         router.refresh();
       },
     );
@@ -84,6 +85,7 @@ export function AddApplicationDialog({isOpen, onClose, idempotencyKey, people}: 
             value={values.criticality || undefined}
             onChange={text('criticality')}
             placeholder="Choose a level"
+            status={missing ? {type: 'error', message: missing} : undefined}
           />
           <Selector label="Owner" options={people} value={values.ownerId || undefined} onChange={text('ownerId')} hasSearch placeholder="Choose a person" />
           <Selector

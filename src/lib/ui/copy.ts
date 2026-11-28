@@ -118,6 +118,7 @@ export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
   [AUDIT_ACTION.noticeSnoozeEnded]: "ended the snooze on",
   [AUDIT_ACTION.noticeReopened]: "reopened",
   [AUDIT_ACTION.appArchived]: "archived",
+  [AUDIT_ACTION.appUnarchived]: "unarchived",
 };
 
 export const NO_BACKUP_OWNER = "No backup owner";

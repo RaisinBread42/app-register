@@ -8,7 +8,7 @@ export function activitySummary(event: AuditEvent): string {
   const until = event.toValue === MATCH_STATUS.snoozed && event.snoozedUntil ? ` until ${formatDate(event.snoozedUntil)}` : '';
   const status = event.toValue && event.toValue in MATCH_STATUS_LABEL ? ` (now ${MATCH_STATUS_LABEL[event.toValue as MatchStatus]}${until})` : '';
   const target =
-    event.action === AUDIT_ACTION.appArchived
+    event.action === AUDIT_ACTION.appArchived || event.action === AUDIT_ACTION.appUnarchived
       ? (event.appName ?? 'an application')
       : `${event.noticeTitle ? `“${event.noticeTitle}”` : 'a notice'}${event.appName ? ` on ${event.appName}` : ''}`;
   return `${event.actor} ${AUDIT_ACTION_LABEL[event.action]} ${target}${status}`;

@@ -16,8 +16,9 @@ import {Icon} from '@astryxdesign/core/Icon';
 import {Link} from '@astryxdesign/core/Link';
 import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Text} from '@astryxdesign/core/Text';
+import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_ACTIVITY_LIMIT, APP_TAB, APP_TABS, HEALTH_MAX_SCORE, UI_QUERY, ROUTES, appTabRoute, editAppRoute, type AppTab} from '@/lib/constants';
+import {APP_ACTIVITY_LIMIT, APP_TAB, APP_TABS, HEALTH_MAX_SCORE, ROUTES, SETUP_ITEM, UI_QUERY, appTabRoute, editAppRoute, type AppTab, type SetupItemKey} from '@/lib/constants';
 import type {AppDetail, AuditEvent, Deduction, Health, HostingCatalog, Notice} from '@/lib/ui/api-client';
 import {
   CRITICALITY_LABEL,
@@ -43,7 +44,8 @@ import {useRememberedListHref} from '@/lib/ui/list-memory';
 import {DEFAULT_INBOX_VIEW, inboxQuery, inboxRows} from '@/lib/ui/notice-inbox';
 import {activitySummary} from '@/lib/ui/activity';
 import {allDeductions, checkTimesLine, formatDate, formatDateTime, primaryHosting, scoreBasis} from '@/lib/ui/register-view';
-import {archiveAppAction} from '../../actions';
+import {isSetupIncomplete, setupChecklist} from '@/lib/ui/setup-checklist';
+import {archiveAppAction, unarchiveAppAction} from '../../actions';
 import {AppIcon, PendingPill} from '../../_components/AppIdentity';
 import {FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
 import {DimensionPill, STATUS_TEXT_COLOR, ScorePill} from '../../_components/Health';
@@ -55,6 +57,7 @@ import {HostingTab} from './HostingTab';
 
 export type AppDetailKeys = {
   archive: string;
+  unarchive: string;
   addDependency: string;
   importDependencies: string;
   addHosting: string;
@@ -88,17 +91,34 @@ export function AppDetailView({app, notices, activity, initialTab, keys, catalog
   const listHref = useRememberedListHref();
   const confirm = useImperativeAlertDialog();
   const archive = useAction();
+  const unarchive = useAction();
+  const showToast = useToast();
   const isArchived = app.archivedAt !== null;
   const hosting = primaryHosting(app.hosting) ?? NOT_RECORDED;
+
+  /** Undo from the list after archiving; the toast says why when it cannot (for example, the name was reused). */
+  async function undoArchive() {
+    const result = await unarchiveAppAction(keys.unarchive, app.id);
+    showToast(result.ok ? {body: `${app.name} is active again`} : {body: `Could not undo: ${result.error}`, type: 'error'});
+    router.refresh();
+  }
 
   function askToArchive() {
     confirm.show({
       title: `Archive ${app.name}?`,
-      description: 'It leaves the applications list and its scheduled alerts are dropped. Its history stays.',
+      description:
+        'Its alerts stop, it leaves the applications list and its open notices close. Its history stays, and you can unarchive it from Applications › Archived.',
       actionLabel: 'Archive application',
       onAction: () => {
         confirm.hide();
-        archive.run(() => archiveAppAction(keys.archive, app.id), () => router.push(ROUTES.applications));
+        archive.run(
+          () => archiveAppAction(keys.archive, app.id),
+          () => {
+            // Undo stays until dismissed (WCAG 2.2.1): focus moves to the list, so a timed toast could vanish first.
+            showToast({body: `${app.name} archived`, isAutoHide: false, endContent: <Button label="Undo" size="sm" variant="secondary" onClick={() => void undoArchive()} />});
+            router.push(ROUTES.applications);
+          },
+        );
       },
     });
   }
@@ -121,9 +141,23 @@ export function AppDetailView({app, notices, activity, initialTab, keys, catalog
           )}
         </HStack>
         {isArchived && (
-          <Banner status="info" title="Archived" description={`Archived on ${dateOrDash(app.archivedAt)}. Kept as history.`} collapsible={false} />
+          <Banner
+            status="info"
+            title="Archived"
+            description={`Archived on ${dateOrDash(app.archivedAt)}. No alerts are sent and it is not in the lists; its history stays.`}
+            collapsible={false}
+            endContent={
+              <Button
+                label="Unarchive"
+                variant="secondary"
+                size="sm"
+                isLoading={unarchive.isPending}
+                onClick={() => unarchive.run(() => unarchiveAppAction(keys.unarchive, app.id), () => showToast({body: `${app.name} is active again`}))}
+              />
+            }
+          />
         )}
-        <FormError error={archive.error} />
+        <FormError error={archive.error ?? unarchive.error} />
         <Hero app={app} hosting={hosting} />
       </VStack>
 
@@ -134,7 +168,7 @@ export function AppDetailView({app, notices, activity, initialTab, keys, catalog
           ))}
         </TabList>
         <VStack gap={4} role="tabpanel" id={TAB_PANEL_ID} aria-label={TAB_LABEL[tab]}>
-          {tab === APP_TAB.overview && <OverviewTab app={app} hosting={hosting} notices={notices} />}
+          {tab === APP_TAB.overview && <OverviewTab app={app} hosting={hosting} notices={notices} onOpenTab={setTab} />}
           {tab === APP_TAB.dependencies && (
             <DependenciesTab
               app={app}
@@ -308,13 +342,15 @@ function BreakdownRow({title, detail, children}: {title: string; detail?: string
   );
 }
 
-function OverviewTab({app, hosting, notices}: {app: AppDetail; hosting: string; notices: Notice[] | null}) {
+function OverviewTab({app, hosting, notices, onOpenTab}: {app: AppDetail; hosting: string; notices: Notice[] | null; onOpenTab: (tab: AppTab) => void}) {
   const [showAllDeductions, setShowAllDeductions] = useState(false);
   const deductions = allDeductions(app.health);
   const rows = inboxRows(notices ?? [], DEFAULT_INBOX_VIEW).filter((row) => row.match.app.id === app.id);
+  const setup = setupChecklist(app);
   return (
     <Grid columns={{minWidth: 320, max: 2}} gap={4} align="start">
       <VStack gap={4}>
+        {app.archivedAt === null && isSetupIncomplete(setup) && <SetupChecklist app={app} items={setup} onOpenTab={onOpenTab} />}
         <PanelCard title="Needs attention" subtitle="Open notices on this application, most severe first">
           {notices === null ? (
             <EmptyState title="Notices could not be loaded" description="Reload the page to try again; the rest of this page is current." isCompact />
@@ -457,6 +493,52 @@ function LicenceTab({app}: {app: AppDetail}) {
           ]}
         />
         <FootNote>Licence and pricing checks are coming soon. Change dates and cost with Edit application.</FootNote>
+      </VStack>
+    </PanelCard>
+  );
+}
+
+/** What each setup item asks for, and where to add it. */
+const SETUP_COPY: Record<SetupItemKey, {label: string; hint: string; action: string; tab: AppTab | null}> = {
+  [SETUP_ITEM.supplier]: {label: 'Supplier and contract dates', hint: 'Who sells it, and its renewal or notice date.', action: 'Edit details', tab: null},
+  [SETUP_ITEM.hosting]: {label: 'Where it runs', hint: 'The hosting provider and service, so outages and end of support are watched.', action: 'Add hosting', tab: APP_TAB.hosting},
+  [SETUP_ITEM.code]: {label: 'Dependencies or repository', hint: 'Import a package.json, or add the repository on Edit.', action: 'Add dependencies', tab: APP_TAB.dependencies},
+  [SETUP_ITEM.firstCheck]: {label: 'First check by a source', hint: 'Happens on the next check once hosting or dependencies are recorded; until then there is no score.', action: '', tab: null},
+};
+
+/** The new app's checklist (spec Journey B): each item ticks itself off when its data is added. */
+function SetupChecklist({app, items, onOpenTab}: {app: AppDetail; items: ReturnType<typeof setupChecklist>; onOpenTab: (tab: AppTab) => void}) {
+  const doneCount = items.filter((item) => item.isDone).length;
+  return (
+    <PanelCard title="Set up monitoring" subtitle={`${doneCount} of ${items.length} done · each item ticks itself off when its data is added`}>
+      <VStack gap={0}>
+        {items.map((item, index) => {
+          const copy = SETUP_COPY[item.key];
+          return (
+            <VStack key={item.key} gap={0}>
+              {index > 0 && <Divider />}
+              <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3} wrap="wrap">
+                <VStack gap={0.5} style={{flex: 1, minWidth: 0}}>
+                  <Text weight="bold" size="sm">
+                    {copy.label}
+                  </Text>
+                  <Text type="supporting" color="secondary">
+                    {copy.hint}
+                  </Text>
+                </VStack>
+                {item.isDone ? (
+                  <Badge label="Done" variant="green" />
+                ) : copy.tab ? (
+                  <Button label={copy.action} size="sm" onClick={() => onOpenTab(copy.tab as AppTab)} />
+                ) : copy.action ? (
+                  <Button label={copy.action} size="sm" href={editAppRoute(app.id)} />
+                ) : (
+                  <Badge label="Waiting" variant="neutral" />
+                )}
+              </HStack>
+            </VStack>
+          );
+        })}
       </VStack>
     </PanelCard>
   );

@@ -281,7 +281,8 @@ test('ADV-E13 archived application: read-only, Activity shows the archive, Needs
   await post(request, `/api/apps/${id}/archive`);
   await page.goto(`/applications/${id}`);
   await expect(page.getByText('Archived', {exact: true})).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Archive'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Archive', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Unarchive'}).first()).toBeVisible();
   await expect(page.getByRole('link', {name: 'Edit application'})).toHaveCount(0);
   const needs = await page.getByRole('heading', {level: 2, name: 'Needs attention'}).locator('xpath=ancestor::*[3]').innerText();
   const inbox = (await allMatches(request)).filter((match) => match.app.id === id).length;
