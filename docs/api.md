@@ -204,6 +204,17 @@ curl -fsS -X POST "$APP_REGISTER_URL/api/monitoring/refresh" -H "Authorization: 
 
 `GET /api/notices` lists notices that concern active apps, most severe first, then the soonest date. Filters: `appId`, `severity`, `category`, `state` (`open`, the default; `resolved`; `all`). `GET /api/notices/:id` returns one. Each notice has its source (`source`, `sourceName`, `sourceUrl`, `externalId`), its `origin` (`external`, an outside claim, or `person`, entered by a person), when it was first and last seen, `resolvedUpstreamAt`, and `matches`: one per affected app with the `component`, `version` and `region` it matched on, the `matchReason` and the `confidence` (`high`, `medium`, `low`). Notices are derived from what the dependency and hosting checks store, so there is no endpoint to create one; licensing and pricing notices entered by a person come with [36]. Keys created in Settings (scoped to the applications register) get 403 here.
 
+## Notice actions and audit history
+
+Each match (a notice on one app) has a `status`: `new`, `reviewing`, `snoozed` or `handled`. Status never changes the notice's severity.
+- `POST /api/notice-matches/:id/status` with `{status, note?, snoozedUntil?}`. A snooze needs a date after today and a reason (`note`); `handled` needs a note with the evidence; `new` reopens. A snooze whose date has come reads as `new` straight away, and the daily refresh records that it ended (actor `System`).
+- `POST /api/notice-matches/:id/assign` with `{assigneeId, note?}` assigns an active person; `assigneeId` is required, and `null` clears.
+- `POST /api/notice-matches/:id/undo` reverses the latest status change or assignment by writing a new event (`notice.status_undone` or `notice.assignment_undone`) that restores the previous status, snooze date and note, or the previous owner. The original stays. It is refused when the latest event is not a person's action (an undo, a snooze that ended, a reopen), when it would bring back a snooze whose date has passed, or when it would bring back an owner who has left.
+- A handled notice that the source reports again for the app reopens (`notice.reopened`, actor `System`). Unhandled risk never hides.
+- Actions on a notice of an archived application get 404. Archiving an application writes `app.archived`.
+- `GET /api/audit-events?appId=&noticeId=&matchId=&limit=&before=` lists the append-only history, newest first, in the order things happened (a database sequence). Page back with `before=<id of the last event you have>`. Each event has `actor` (an API key by name until people sign in, or `System`), `actorKeyId`, `action`, `fromValue`, `toValue`, `note` and `occurredAt`. Triggers refuse UPDATE, TRUNCATE and direct DELETE; history is only removed with its workspace or by a retention job ([41]).
+- The three POST routes need an `Idempotency-Key`, like every other write.
+
 ## Health score
 
 Every app carries `health: { score, status, dimensions }`. It is the one place health lives: there is no separate hosting field.

@@ -1,6 +1,7 @@
 import type {AppDatabase} from '@/lib/db/client';
 import {refreshWorkspaceDependencyHealth, type RefreshSummary as DependencyRefreshSummary} from './dependency-health';
 import {refreshWorkspaceHostingHealth, type RefreshOptions, type RefreshSummary as HostingRefreshSummary} from './hosting-monitor';
+import {endExpiredSnoozes} from './notice-actions';
 import {syncWorkspaceNotices} from './notices';
 import type {PackageSources} from './package-sources';
 
@@ -26,5 +27,7 @@ export async function refreshWorkspaceHealth(
   const hosting = await refreshWorkspaceHostingHealth(db, workspaceId, options.hosting);
   // Every active app's notices follow what both checks stored (also ages end-of-support dates daily).
   await syncWorkspaceNotices(db, workspaceId, options.hosting?.now);
+  // Snoozes whose date has come go back to new, with an audit event each.
+  await endExpiredSnoozes(db, workspaceId, options.hosting?.now);
   return {dependencies, hosting};
 }

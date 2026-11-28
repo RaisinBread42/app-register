@@ -1,10 +1,12 @@
-import {and, asc, desc, eq, inArray, isNull, notInArray, sql} from 'drizzle-orm';
+import {and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql} from 'drizzle-orm';
+import {alias} from 'drizzle-orm/pg-core';
 import {
   END_OF_SUPPORT_SOURCE,
   END_OF_SUPPORT_SOON_DAYS,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   MATCH_CONFIDENCE,
+  MATCH_STATUS,
   NOTICE_CATEGORIES,
   NOTICE_CATEGORY,
   NOTICE_ORIGIN,
@@ -17,6 +19,7 @@ import {
   NOTICE_TITLE_MAX_LENGTH,
   type IncidentImpact,
   type MatchConfidence,
+  type MatchStatus,
   type NoticeCategory,
   type NoticeOrigin,
   type NoticeSeverity,
@@ -24,7 +27,7 @@ import {
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appDependencies, appHosting, appNoticeMatches, apps, notices} from '@/lib/db/schema';
+import {appDependencies, appHosting, appNoticeMatches, apps, notices, people, type AppNoticeMatchRow} from '@/lib/db/schema';
 import {findRuntime, findService} from '@/lib/hosting-catalog';
 import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import {advisoryUrl} from './advisories';
@@ -32,6 +35,7 @@ import {activeAppsIn} from './app-scope';
 import {loadDependencies, type DependencyRecord} from './dependency-advisories';
 import {NotFoundError, ValidationError} from './errors';
 import {loadHosting, type HostingRecord} from './hosting-incidents';
+import {effectiveStatus, reopenBySource} from './notice-actions';
 
 /**
  * Notices (spec §3 P0): durable, explainable records of what changed or is due,
@@ -288,10 +292,27 @@ export async function syncAppNotices(
           await loadHosting(tx, and(eq(appHosting.workspaceId, workspaceId), eq(appHosting.appId, appId))),
           today,
         );
+    // Handled matches the source had stopped reporting: if they come back, they reopen.
+    const handledAndResolved = await tx
+      .select()
+      .from(appNoticeMatches)
+      .where(
+        and(
+          eq(appNoticeMatches.workspaceId, workspaceId),
+          eq(appNoticeMatches.appId, appId),
+          eq(appNoticeMatches.status, MATCH_STATUS.handled),
+          isNotNull(appNoticeMatches.resolvedAt),
+        ),
+      );
     const seenMatchIds: string[] = [];
     for (const {match, ...facts} of derived) {
       const noticeId = await upsertNotice(tx, workspaceId, facts, now);
-      seenMatchIds.push(await upsertMatch(tx, workspaceId, noticeId, appId, match, now));
+      const matchId = await upsertMatch(tx, workspaceId, noticeId, appId, match, now);
+      seenMatchIds.push(matchId);
+      const returning = handledAndResolved.find((row) => row.id === matchId);
+      if (returning) {
+        await reopenBySource(tx, workspaceId, returning, now);
+      }
     }
     const resolved = await tx
       .update(appNoticeMatches)
@@ -420,6 +441,12 @@ export type NoticeMatchView = {
   firstSeenAt: Date;
   lastSeenAt: Date;
   resolvedAt: Date | null;
+  /** Where it stands for this app; a snooze whose date has come reads as new. */
+  status: MatchStatus;
+  statusNote: string | null;
+  snoozedUntil: string | null;
+  statusChangedAt: Date | null;
+  assignee: {id: string; name: string} | null;
 };
 
 /** JSON shape of a notice in the API: the notice, its source, and the active apps it matches. */
@@ -472,10 +499,11 @@ async function loadNoticeViews(
   filter: {id?: string; severity?: NoticeSeverity; category?: NoticeCategory; appId?: string},
 ): Promise<NoticeView[]> {
   const rows = await db
-    .select({notice: notices, match: appNoticeMatches, app: {id: apps.id, name: apps.name}})
+    .select({notice: notices, match: appNoticeMatches, app: {id: apps.id, name: apps.name}, assignee: {id: assignee.id, name: assignee.name}})
     .from(notices)
     .innerJoin(appNoticeMatches, and(eq(appNoticeMatches.noticeId, notices.id), eq(appNoticeMatches.workspaceId, workspaceId)))
     .innerJoin(apps, and(eq(apps.id, appNoticeMatches.appId), activeAppsIn(workspaceId)))
+    .leftJoin(assignee, eq(assignee.id, appNoticeMatches.assigneeId))
     .where(
       and(
         eq(notices.workspaceId, workspaceId),
@@ -489,23 +517,51 @@ async function loadNoticeViews(
     )
     .orderBy(asc(notices.dueOn), desc(notices.lastSeenAt), asc(apps.name));
   const byId = new Map<string, NoticeView>();
-  for (const {notice, match, app} of rows) {
+  for (const {notice, match, app, assignee: person} of rows) {
     const view = byId.get(notice.id) ?? toNoticeView(notice);
-    view.matches.push({
-      id: match.id,
-      app,
-      component: match.component,
-      version: match.version,
-      region: match.region,
-      matchReason: match.matchReason,
-      confidence: match.confidence as MatchConfidence,
-      firstSeenAt: match.firstSeenAt,
-      lastSeenAt: match.lastSeenAt,
-      resolvedAt: match.resolvedAt,
-    });
+    view.matches.push(toMatchView(match, app, person));
     byId.set(notice.id, view);
   }
   return [...byId.values()].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+}
+
+const assignee = alias(people, 'assignee');
+
+function toMatchView(match: AppNoticeMatchRow, app: {id: string; name: string}, person: {id: string; name: string} | null): NoticeMatchView {
+  const status = effectiveStatus(match);
+  return {
+    id: match.id,
+    app,
+    component: match.component,
+    version: match.version,
+    region: match.region,
+    matchReason: match.matchReason,
+    confidence: match.confidence as MatchConfidence,
+    firstSeenAt: match.firstSeenAt,
+    lastSeenAt: match.lastSeenAt,
+    resolvedAt: match.resolvedAt,
+    status,
+    statusNote: status === match.status ? match.statusNote : null,
+    snoozedUntil: status === match.status ? match.snoozedUntil : null,
+    statusChangedAt: match.statusChangedAt,
+    assignee: person,
+  };
+}
+
+/** One notice-on-an-app, as the action routes answer with. 404 outside the workspace. */
+export async function getMatch(db: AppDatabase, workspaceId: string, id: string): Promise<NoticeMatchView> {
+  const [row] = isUuid(id)
+    ? await db
+        .select({match: appNoticeMatches, app: {id: apps.id, name: apps.name}, assignee: {id: assignee.id, name: assignee.name}})
+        .from(appNoticeMatches)
+        .innerJoin(apps, eq(apps.id, appNoticeMatches.appId))
+        .leftJoin(assignee, eq(assignee.id, appNoticeMatches.assigneeId))
+        .where(and(eq(appNoticeMatches.workspaceId, workspaceId), eq(appNoticeMatches.id, id)))
+    : [];
+  if (!row) {
+    throw new NotFoundError('Notice match not found');
+  }
+  return toMatchView(row.match, row.app, row.assignee);
 }
 
 function toNoticeView(notice: typeof notices.$inferSelect): NoticeView {

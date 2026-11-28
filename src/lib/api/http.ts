@@ -7,6 +7,7 @@ import {
   type ApiKeyScope,
 } from '@/lib/constants';
 import {getDb, type AppDatabase} from '@/lib/db/client';
+import {apiKeyActor, type Actor} from '@/lib/services/actor';
 import {authenticateApiKey} from '@/lib/services/api-keys';
 import {
   ForbiddenError,
@@ -26,6 +27,8 @@ export type ApiContext = {
   body: string;
   /** `null` = unrestricted key. Otherwise the key may only call routes that require one of these. */
   scopes: readonly ApiKeyScope[] | null;
+  /** Who is acting, for the audit trail: the API key until people sign in ([37]). */
+  actor: Actor;
 };
 
 /** `resource`: what a POST or PATCH answered about, so a repeat with the same Idempotency-Key can read it again. */
@@ -82,7 +85,8 @@ export async function handle(
     const auth = await authenticate(db, request);
     assertScope(auth.scopes, options.requiredScope);
     const body = await readBody(request, options.maxBodyBytes);
-    const context: ApiContext = {db, workspaceId: auth.workspaceId, body, scopes: auth.scopes};
+    const actor = apiKeyActor(auth.keyName, auth.keyId);
+    const context: ApiContext = {db, workspaceId: auth.workspaceId, body, scopes: auth.scopes, actor};
     const isWrite = (IDEMPOTENT_METHODS as readonly string[]).includes(request.method);
     if (!isWrite || options.isSafeToRepeat) {
       return toResponse(await run(context));
@@ -93,14 +97,14 @@ export async function handle(
       auth.workspaceId,
       request.headers.get(API_HEADER.idempotencyKey),
       {method: request.method, path: url.pathname + url.search, body},
-      (tx) => run({db: tx, workspaceId: auth.workspaceId, body, scopes: auth.scopes}),
+      (tx) => run({db: tx, workspaceId: auth.workspaceId, body, scopes: auth.scopes, actor}),
     );
     if (once.isReplay) {
       return toResponse({status: once.status, body: await replayBody(db, auth.workspaceId, once.resource)});
     }
     if (options.afterCommit) {
       await options.afterCommit(
-        {db, workspaceId: auth.workspaceId, scopes: auth.scopes},
+        {db, workspaceId: auth.workspaceId, scopes: auth.scopes, actor},
         once.result,
       ).catch((error: unknown) => {
         console.error('API follow-up failed', {name: (error as Error | undefined)?.name});
@@ -155,7 +159,7 @@ async function readBody(request: Request, maxBytes?: number): Promise<string> {
 async function authenticate(
   db: AppDatabase,
   request: Request,
-): Promise<{workspaceId: string; scopes: readonly ApiKeyScope[] | null}> {
+): Promise<{workspaceId: string; keyId: string; keyName: string; scopes: readonly ApiKeyScope[] | null}> {
   const match = BEARER_TOKEN.exec(request.headers.get(API_HEADER.authorization) ?? '');
   if (!match) {
     throw new UnauthorizedError('Send an API key as: Authorization: Bearer <key>');
