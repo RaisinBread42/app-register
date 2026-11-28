@@ -20,7 +20,7 @@ const notice = (title: string, severity: string, appName: string, status: string
   }) as unknown as Notice;
 
 const source = (status: string, lastRefreshedAt: string | null): MonitoringSource =>
-  ({id: status + lastRefreshedAt, name: 'x', monitors: 'y', status, lastRefreshedAt, url: 'https://x.test'}) as MonitoringSource;
+  ({id: status + lastRefreshedAt, name: 'x', monitors: 'y', status, lastRefreshedAt, appNames: ['Portal'], url: 'https://x.test'}) as MonitoringSource;
 
 describe('overview', () => {
   it('key numbers: open notices (critical, in review, snoozed apart), notice deadlines in 30 days and passed ones, sources out of date', () => {
@@ -56,11 +56,12 @@ describe('overview', () => {
     ]);
   });
 
-  it('the portfolio summary names apps that nothing monitors instead of counting them healthy; last check is the latest answer', () => {
+  it('the portfolio summary names apps that nothing monitors instead of counting them healthy; last check is the latest answer, even from a source failing now', () => {
     const apps = [app('Scored', {health: {score: 90} as App['health']}), app('Unscored')];
     expect(portfolioSummary(apps, [notice('A', NOTICE_SEVERITY.high, 'Scored')])).toEqual({total: 2, monitored: 1, notMonitored: 1, withOpenNotices: 1});
     expect(lastSuccessfulCheck([source(MONITORING_SOURCE_STATUS.reachable, '2026-11-27T05:00:00Z'), source(MONITORING_SOURCE_STATUS.reachable, '2026-11-28T05:00:00Z')])).toBe('2026-11-28T05:00:00Z');
-    expect(lastSuccessfulCheck([source(MONITORING_SOURCE_STATUS.unavailable, '2026-11-28T05:00:00Z')])).toBeNull();
+    expect(lastSuccessfulCheck([source(MONITORING_SOURCE_STATUS.unavailable, '2026-11-28T05:00:00Z')])).toBe('2026-11-28T05:00:00Z');
+    expect(lastSuccessfulCheck([source(MONITORING_SOURCE_STATUS.unavailable, null), source(MONITORING_SOURCE_STATUS.configured, null)])).toBeNull();
   });
 
   it('a history line says which notice on which app (or which app was archived) and the new status; the header never shows a failed run as a success', () => {

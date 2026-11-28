@@ -329,7 +329,7 @@ describe('review regressions: hosting health', () => {
 
   it('score maths: one incident on several rows counts once at its heaviest, floor 0, 79/80 and 94/95, null when nothing is checked (kept as a guard)', () => {
     const outage = {title: 'Down', impact: INCIDENT_IMPACT.major, scope: INCIDENT_SCOPE.service, url: null, startedAt: null};
-    const base = {provider: 'AWS', service: 'EC2', version: null, runtime: null, runtimeVersion: null, endOfSupportOn: null, healthCheckedAt: NOW, healthError: null};
+    const base = {provider: 'AWS', service: 'EC2', version: null, runtime: null, runtimeVersion: null, endOfSupportOn: null, lastGoodCheckAt: NOW, healthError: null};
     const row = (extra: object) => ({...base, incidents: [], ...extra}) as HostingFacts;
     const health = (hosting: HostingFacts[], dependencies: DependencyFacts[] = []) => appHealth({hosting, dependencies, today: '2026-11-23'});
     expect(health([row({incidents: [outage]}), row({incidents: [{...outage, scope: INCIDENT_SCOPE.provider}]}), row({incidents: [outage, outage]})])).toMatchObject({score: 92, status: 'attention'});
@@ -341,8 +341,10 @@ describe('review regressions: hosting health', () => {
     expect(health([row({incidents: [outage]}), row({endOfSupportOn: '2027-01-01'})])).toMatchObject({score: 80, status: 'attention'});
     expect(health([row({incidents: [{...outage, scope: INCIDENT_SCOPE.provider}]}), row({incidents: [{...outage, title: 'b', impact: INCIDENT_IMPACT.minor}]})])).toMatchObject({score: 94, status: 'attention'});
     expect(health(Array.from({length: 6}, () => row({endOfSupportOn: '2020-01-01'})))).toMatchObject({score: 0, status: 'critical'});
-    expect(health([row({healthCheckedAt: null})])).toMatchObject({score: null, status: 'na'});
-    expect(health([row({healthError: 'AWS Health could not be reached'})])).toMatchObject({score: null, status: 'na'});
+    expect(health([row({lastGoodCheckAt: null})])).toMatchObject({score: null, status: 'na'});
+    // [31] A failed latest check keeps the last good reading, labelled stale (never ok); with no good reading there is no score.
+    expect(health([row({healthError: 'AWS Health could not be reached'})])).toMatchObject({score: 100, status: 'stale'});
+    expect(health([row({lastGoodCheckAt: null, healthError: 'AWS Health could not be reached'})])).toMatchObject({score: null, status: 'na', hasFailedCheck: true});
     expect(health([])).toMatchObject({score: null, status: 'na'});
   });
 

@@ -92,11 +92,9 @@ export function portfolioNote(summary: PortfolioSummary): string {
     : `All ${summary.monitored} have a health score.`;
 }
 
-/** The latest time any source answered, or null when none has yet. */
+/** The latest time any source answered, or null when none has yet; known even while every source is failing now. */
 export function lastSuccessfulCheck(sources: MonitoringSource[]): string | null {
-  const times = sources
-    .filter((source) => source.status === MONITORING_SOURCE_STATUS.reachable && source.lastRefreshedAt)
-    .map((source) => source.lastRefreshedAt as string);
+  const times = sources.flatMap((source) => source.lastRefreshedAt ?? []);
   return times.length ? times.sort().at(-1)! : null;
 }
 

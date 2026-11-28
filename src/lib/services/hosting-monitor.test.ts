@@ -293,7 +293,8 @@ describe('hosting check', () => {
 
     for (const edit of edits) {
       const [checked] = await check();
-      expect(checked.healthCheckedAt, JSON.stringify(edit)).not.toBeNull();
+      // The check ran: it either answered (a check time) or failed (an error, when this provider's feed is not faked).
+      expect(checked.healthCheckedAt ?? checked.healthError, JSON.stringify(edit)).not.toBeNull();
       const after = await updateHosting(t.db, t.workspaceId, appId, worker.id, edit);
       expect(after, JSON.stringify(edit)).toMatchObject({incidents: [], healthCheckedAt: null, healthError: null, status: HEALTH_STATUS.na});
     }
@@ -364,7 +365,9 @@ describe('hosting check', () => {
 
     const [failed] = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText: down.fetchText});
     expect(failed).toMatchObject({status: HEALTH_STATUS.na, healthError: 'Vercel status could not be reached (HTTP 503)', incidents: []});
+    // [31] The check ran (healthCheckedAt), but no check has fully answered yet (lastGoodCheckAt).
     expect(failed.healthCheckedAt).not.toBeNull();
+    expect(failed.lastGoodCheckAt).toBeNull();
 
     const [read] = await refreshHostingHealth(t.db, t.workspaceId, appId, {fetchText: fakeFeeds({[FEED_URL.vercel]: ALL_CLEAR}).fetchText});
     expect(read).toMatchObject({status: HEALTH_STATUS.ok, healthError: null});

@@ -7,6 +7,7 @@ import {
   DATE_KIND,
   FILTER_ALL,
   HEALTH_ATTENTION_BELOW,
+  HEALTH_STATUS,
   NOTICE_SEVERITIES,
   type AppCriticality,
   type AppListSort,
@@ -167,14 +168,15 @@ function byDate(a: NextDate | null, b: NextDate | null): number {
   return a.date.localeCompare(b.date);
 }
 
-/** Needs attention is a score below 95, healthy 95 or more; not monitored is no score. */
+/** Needs attention is a score below 95 or a stale one, healthy 95 or more and current; not monitored is no score. */
 function matchesHealth(app: App, filter: string): boolean {
   const {score} = app.health;
   switch (filter) {
     case APP_HEALTH_FILTER.attention:
-      return score !== null && score < HEALTH_ATTENTION_BELOW;
+      // A stale score is not trusted as healthy, so it needs attention.
+      return score !== null && (score < HEALTH_ATTENTION_BELOW || app.health.status === HEALTH_STATUS.stale);
     case APP_HEALTH_FILTER.healthy:
-      return score !== null && score >= HEALTH_ATTENTION_BELOW;
+      return score !== null && score >= HEALTH_ATTENTION_BELOW && app.health.status !== HEALTH_STATUS.stale;
     case APP_HEALTH_FILTER.notMonitored:
       return score === null;
     default:

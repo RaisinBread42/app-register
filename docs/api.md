@@ -81,7 +81,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 | POST | `/api/notice-alerts/:id/acknowledge` | Mark seen; first time wins; never changes the app |
 | GET / POST | `/api/api-keys` | List keys / create a Settings-scoped key (`expiresOn` date or null); full key only on create |
 | POST | `/api/api-keys/:id/revoke` | Revoke an active key |
-| GET | `/api/settings/monitoring-sources` | Monitoring data sources in use (npm, OSV, endoflife.date, provider status feeds) |
+| GET | `/api/settings/monitoring-sources` | Monitoring data sources in use (npm, OSV, endoflife.date, provider status feeds): status (`reachable` when its latest attempt answered, `unavailable` when it failed, `configured` when never asked), `lastRefreshedAt` (last answer), `lastAttemptAt`, `lastError` and `appNames` (the active apps that rely on it) |
 | GET | `/api/openapi.json` | The spec (no key needed) |
 
 ## Business rules
@@ -155,8 +155,9 @@ The check (`src/lib/services/hosting-monitor.ts`) writes, per row:
 | --- | --- |
 | `endOfSupportOn`, `endOfSupportSource` | The date and who set it. `manual`: sent by a client, never overwritten. `endoflife.date`: looked up from the service's `version` and/or the `runtimeVersion` (the earlier of the two). `isVersionInexact` is `true` when a version matched more than one release (below). A looked-up date is cleared when the row's provider, service, version or runtime changes, and only then (see the date rule below). |
 | `incidents[]` | Open provider incidents and announced maintenance that reach the row (at most 20, outages on the row's own service first, so the cap never drops one for a lighter notice): `title`, `impact` (`major` / `minor` / `maintenance`), `scope` (`service` / `provider`), `url` (or `null`), `startedAt`. |
-| `healthCheckedAt` | When the check last ran for the row as it is now; `null` until then. |
+| `healthCheckedAt` | When the check last ran for the row as it is now, whether or not every source answered; `null` until then. |
 | `healthError` | Sources that could not be read last time, e.g. `Cloudflare status could not be reached (HTTP 503)`. What the row had from that source is kept. |
+| `lastGoodCheckAt` | ([31]) The last check every source answered: what the row shows was found then. `null` until a check fully answers. |
 
 **How a version is matched to a release on endoflife.date.** `12`, `v12` and `12.4` are release `12`; `2022` is SQL Server's release labelled `2022 'Dallas'`. When a version matches more than one release (MySQL `8` is both `8.0` and `8.4`), the **earliest** end-of-support date among them is used, the cautious answer, and the row carries `isVersionInexact: true`; the UI then shows "Version is not exact; using the earliest matching release". Record the exact version (`8.4`) to get that release's own date. One exception: a product released in service packs (SQL Server) by its bare year (`2016`) means the latest service pack of that year (`2016 SP3`), the one still supported, and is not flagged.
 
@@ -170,7 +171,7 @@ The check (`src/lib/services/hosting-monitor.ts`) writes, per row:
 
 The edit form leaves the field out unless the user changed it, so saving a row (to fix its region, say) never wipes a looked-up date. On `POST`, a date makes it `manual`; no date (or `null`) leaves it to the check.
 
-Each row also carries two read-only fields worked out when it is read: `isMonitored` (it has an end-of-support date, or its provider's status feed is watched) and its own `status`: `critical` past end of support or in an outage, `attention` for any other finding, `ok` only when the row is monitored and its last check read every source, otherwise `na`. **A row that was never checked, or whose last check failed, is never `ok`**: it is `na`, and `healthError` (or `healthCheckedAt: null`) says why. The Hosting tab shows that reason beside the status.
+Each row also carries two read-only fields worked out when it is read: `isMonitored` (it has an end-of-support date, or its provider's status feed is watched) and its own `status`: `critical` past end of support or in an outage, `attention` for any other finding, `ok` only when the row is monitored and its last check read every source. **A row whose last check failed is never `ok`**: with an earlier good check (`lastGoodCheckAt`) it keeps that reading as `stale`; never checked, or never fully answered, it is `na`. `healthError` (or `healthCheckedAt: null`) says why, and the Hosting tab shows that reason, with the date of the reading still shown, beside the status.
 
 Which incidents reach a row:
 
@@ -239,3 +240,11 @@ curl -X POST http://localhost:3000/api/apps \
   -H "Content-Type: application/json" \
   -d '{"name":"Contoso CRM","kind":"saas","criticality":"high","ownerId":"…","backupOwnerId":"…","noticeDeadline":"2027-09-30"}'
 ```
+
+## Source freshness and stale findings ([31])
+
+- Every check records, per source and workspace, when it was asked, when it last answered and why it last failed (`source_checks`).
+- A source counts as answering a run only when every request to it answered: a partial outage (2 of 3 packages, one endoflife.date product, an answer in a format we cannot read) records the error. A workspace run records once for all its apps, and a run that started before the one already recorded changes nothing.
+- A dependency whose latest check failed after a good one (`checkedAt` kept), and a hosting row whose latest check failed after a good one (`lastGoodCheckAt` kept), keep their last reading. A clean reading becomes `stale`, never `ok`; a critical or attention reading keeps its status. The app's health then has `staleSince` (when the oldest reading still shown was taken) and `hasFailedCheck: true`, and `status: "stale"` when its score would otherwise be healthy; the score is the last good reading.
+- Migration 0011 adds `app_hosting.last_good_check_at` and copies `health_checked_at` into it for rows whose last check had no error; `health_checked_at` keeps its meaning (the last run).
+

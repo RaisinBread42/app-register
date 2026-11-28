@@ -22,7 +22,7 @@ describe('[29] adversarial: header "Last checked" (source freshness, spec §8)',
   it('ADV-U2: a stale hosting check (58 days old) is hidden behind a fresh dependency check', () => {
     const mixed = app({
       dependencies: [{checkedAt: TODAY_CHECK}] as AppDetail['dependencies'],
-      hosting: [{healthCheckedAt: OLD_CHECK, healthError: null}] as AppDetail['hosting'],
+      hosting: [{healthCheckedAt: OLD_CHECK, lastGoodCheckAt: OLD_CHECK, healthError: null}] as AppDetail['hosting'],
     });
     // Each source is shown with its own time, so the old hosting check is visible.
     expect(checkTimes(mixed), 'freshness should not hide the stalest source').toEqual({dependencies: TODAY_CHECK, hosting: OLD_CHECK});

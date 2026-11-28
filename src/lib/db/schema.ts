@@ -27,6 +27,7 @@ import {
   DEPENDENCY_SOURCE,
   DEPENDENCY_SOURCES,
   END_OF_SUPPORT_SOURCE,
+  HOSTING_CHECK_ERROR_MAX_LENGTH,
   END_OF_SUPPORT_SOURCES,
   INCIDENT_IMPACTS,
   INCIDENT_SCOPES,
@@ -472,9 +473,12 @@ export const appHosting = pgTable(
     endOfSupportSource: text('end_of_support_source').$type<EndOfSupportSource>(),
     /** The version matched more than one release, so the date is the earliest among them. Only ever true for a looked-up date. */
     isVersionInexact: boolean('is_version_inexact').notNull().default(false),
+    /** When the check last ran, whether or not every source answered. */
     healthCheckedAt: timestamp('health_checked_at', {withTimezone: true}),
     /** Which sources could not be read on the last check; null when all answered. */
     healthError: text('health_error'),
+    /** [31] The last check every source answered: the reading shown is from then. Null until one does. */
+    lastGoodCheckAt: timestamp('last_good_check_at', {withTimezone: true}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -674,6 +678,30 @@ export const auditEvents = pgTable(
     index('audit_events_workspace_seq_idx').on(t.workspaceId, t.seq),
     index('audit_events_subject_idx').on(t.subjectId, t.seq),
     index('audit_events_app_idx').on(t.appId, t.seq),
+  ],
+);
+
+/**
+ * [31] What each outside source did on its last check, per workspace: when it was
+ * last asked, when it last answered, and the last error. A source that has never
+ * been asked has no row. Findings from a source whose last attempt failed are
+ * stale: the last good reading is kept and labelled, never shown as healthy.
+ */
+export const sourceChecks = pgTable(
+  'source_checks',
+  {
+    workspaceId: workspaceId(),
+    /** A monitoring source id: npm_registry, osv, endoflife_date, or status_<kind>_<feed>. */
+    sourceId: text('source_id').notNull(),
+    lastAttemptAt: timestamp('last_attempt_at', {withTimezone: true}).notNull(),
+    lastSuccessAt: timestamp('last_success_at', {withTimezone: true}),
+    /** Why the last attempt failed; null when it answered. */
+    lastError: text('last_error'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({name: 'source_checks_pk', columns: [t.workspaceId, t.sourceId]}),
+    check('source_checks_error_length', sql`char_length(${t.lastError}) <= ${sql.raw(String(HOSTING_CHECK_ERROR_MAX_LENGTH))}`),
   ],
 );
 

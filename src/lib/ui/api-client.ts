@@ -75,6 +75,10 @@ export type Health = {
   score: number | null;
   status: HealthStatus;
   dimensions: Record<HealthDimension, DimensionHealth | null>;
+  /** When the oldest reading still shown was taken, if a later check of its source failed (status `stale`). */
+  staleSince: string | null;
+  /** A check of some source failed on its latest attempt. */
+  hasFailedCheck: boolean;
 };
 
 export type App = AppFields & {
@@ -156,6 +160,8 @@ type HostingCheckFields = {
   incidents: HostingIncident[];
   healthCheckedAt: string | null;
   healthError: string | null;
+  /** The last check every source answered; the reading shown is from then. */
+  lastGoodCheckAt: string | null;
   isMonitored: boolean;
   status: HealthStatus;
 };
@@ -221,6 +227,9 @@ export type MonitoringSource = {
   monitors: string;
   status: MonitoringSourceStatus;
   lastRefreshedAt: string | null;
+  lastAttemptAt: string | null;
+  lastError: string | null;
+  appNames: string[];
   url: string;
 };
 

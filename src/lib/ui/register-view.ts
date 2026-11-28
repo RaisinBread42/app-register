@@ -1,5 +1,6 @@
 import {
   ADVISORY_SEVERITIES,
+  DEPENDENCY_CHECK_ERROR,
   END_OF_SUPPORT_SOON_DAYS,
   HEALTH_DIMENSIONS,
   HEALTH_STATUS,
@@ -16,7 +17,7 @@ import type {
   Hosting,
   HostingIncident,
 } from "./api-client";
-import { CHECK_ERROR_LABEL, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED } from "./copy";
+import { CHECK_ERROR_LABEL, CHECK_FAILED, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED, healthVerdict } from "./copy";
 
 /**
  * Display-only shaping of data the pages already loaded: dates, statuses,
@@ -197,16 +198,17 @@ function incidentKind(incident: HostingIncident): IncidentRow["kind"] {
 }
 
 /**
- * Why a hosting row has no status, or null when it has one: its last check
- * failed (the sources are named), it has not been checked yet, or nothing
- * about it is monitored.
+ * What a hosting row's status rests on, or null when it is current: the date of the
+ * reading still shown when a later check failed (the banner names the sources), a
+ * failed check with nothing found (the sources are named), not checked yet, or
+ * nothing about it is monitored.
  */
 export function hostingStatusReason(hosting: Hosting): string | null {
+  if (hosting.healthError) {
+    return hosting.lastGoodCheckAt ? `Found on ${formatDate(hosting.lastGoodCheckAt)}; the latest check failed` : `Check failed: ${hosting.healthError}`;
+  }
   if (hosting.status !== HEALTH_STATUS.na) {
     return null;
-  }
-  if (hosting.healthError) {
-    return `Check failed: ${hosting.healthError}`;
   }
   return hosting.isMonitored ? NOT_CHECKED_YET : NOT_MONITORED;
 }
@@ -235,24 +237,29 @@ export type CheckTimes = {dependencies: string | null; hosting: string | null};
 
 /**
  * When each source last answered for this app, as ISO times, or null: dependencies
- * (a complete registry and advisory check) and hosting (a run with no error). A
- * failed run never counts as a check, and each source is shown on its own so an old
+ * (a complete registry and advisory check) and hosting (a run every source answered).
+ * A failed run never counts as a check, and each source is shown on its own so an old
  * one is not hidden behind a fresh one (spec §8).
  */
 export function checkTimes(app: Pick<AppDetail, 'dependencies' | 'hosting'>): CheckTimes {
   const latest = (times: string[]) => times.sort().at(-1) ?? null;
   return {
     dependencies: latest(app.dependencies.flatMap((dependency) => dependency.checkedAt ?? [])),
-    hosting: latest(app.hosting.flatMap((row) => (row.healthError === null && row.healthCheckedAt ? [row.healthCheckedAt] : []))),
+    hosting: latest(app.hosting.flatMap((row) => row.lastGoodCheckAt ?? [])),
   };
 }
 
-/** "Dependencies 28 Nov 2026 · Hosting not checked yet", for what the app has recorded; "Not checked yet" when nothing is. */
+/**
+ * "Dependencies 28 Nov 2026 · Hosting not checked yet", for what the app has recorded;
+ * "check failed" for one whose checks have only failed; "Not checked yet" when nothing is recorded.
+ */
 export function checkTimesLine(app: Pick<AppDetail, 'dependencies' | 'hosting'>): string {
   const times = checkTimes(app);
+  const word = (time: string | null, hasFailed: boolean) => (time ? formatDate(time) : (hasFailed ? CHECK_FAILED : NOT_CHECKED_YET).toLowerCase());
+  const dependenciesFailed = app.dependencies.some((dependency) => dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable);
   const parts = [
-    ...(app.dependencies.length ? [`Dependencies ${times.dependencies ? formatDate(times.dependencies) : NOT_CHECKED_YET.toLowerCase()}`] : []),
-    ...(app.hosting.length ? [`Hosting ${times.hosting ? formatDate(times.hosting) : NOT_CHECKED_YET.toLowerCase()}`] : []),
+    ...(app.dependencies.length ? [`Dependencies ${word(times.dependencies, dependenciesFailed)}`] : []),
+    ...(app.hosting.length ? [`Hosting ${word(times.hosting, app.hosting.some((row) => row.healthError !== null))}`] : []),
   ];
   return parts.join(' · ') || NOT_CHECKED_YET;
 }
@@ -275,3 +282,20 @@ export function scoreBasis(health: Health): string {
 
 const listWords = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
 const capitalise = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * The word beside a score ([31]): "Stale since 1 Oct 2026" when a source behind it
+ * failed on its latest check (never "Healthy"), "Check failed" when a check failed with
+ * no good reading before it, "Not monitored" when nothing is checked, else the verdict.
+ */
+export function healthWord(health: Health): string {
+  if (health.score === null) {
+    return health.hasFailedCheck ? CHECK_FAILED : NOT_MONITORED;
+  }
+  if (health.staleSince) {
+    // A clean reading says only that it is stale; a worse one keeps its verdict as well.
+    const stale = `stale since ${formatDate(health.staleSince)}`;
+    return health.status === HEALTH_STATUS.stale ? capitalise(stale) : `${healthVerdict(health.score)}, ${stale}`;
+  }
+  return healthVerdict(health.score);
+}

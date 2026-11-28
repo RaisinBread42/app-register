@@ -56,3 +56,6 @@ UI uses Meta Astryx components only (Obsidian theme in `src/themes/obsidian/`, e
 - Apps are soft-deleted (`archived_at`); active-app queries share one filter in `src/lib/services/apps.ts`.
 - Schema change: edit `src/lib/db/schema.ts`, `npm run db:generate`, write the inverse in `drizzle/rollback/`, call it out in the PR.
 - Unit tests use `createTestDb()` (`src/lib/db/test-db.ts`): a fresh in-memory PGlite built from the real migrations.
+
+Source freshness ([31], spec §8): `src/lib/services/source-checks.ts` stores each source's last attempt, last success and last error (`source_checks`, one row per workspace and source) from every dependency and hosting check. `listMonitoringSources` reads them (status, last answer, last error, the apps that rely on each source). Health sets `staleSince` when a source behind a dimension failed after a good reading (dependency `checkedAt`, hosting `lastGoodCheckAt`), so the last valid reading is kept; a clean one reads `stale` and is never shown as healthy, a worse one keeps its red or amber.
+

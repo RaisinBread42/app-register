@@ -260,12 +260,18 @@ const hostingCheckFields = {
   healthCheckedAt: {
     ...nullable('string', {format: 'date-time'}),
     description:
-      'When the hosting check last ran for this row as it is now. null until then; ' +
+      'When the hosting check last ran for this row as it is now, whether or not every source answered. null until then; ' +
       'changing the provider, service, region, version or runtime sets it back to null.',
   },
   healthError: {
     ...nullable('string'),
     description: 'Sources that could not be read on the last check; what earlier checks found from them is kept',
+  },
+  lastGoodCheckAt: {
+    ...nullable('string', {format: 'date-time'}),
+    description:
+      'The last check every source answered: what the row shows was found then. When healthError is set as well, ' +
+      'that reading is out of date and status is stale (or worse). null until a check fully answers; reset with healthCheckedAt.',
   },
   isMonitored: {
     type: 'boolean',
@@ -345,7 +351,7 @@ const schemas = {
   DimensionHealth: strict({
     status: {
       ...healthStatus,
-      description: 'From the points this dimension lost. na: the app records nothing for it, or none of it is monitored and checked',
+      description: 'From the points this dimension lost. na: the app records nothing for it, or none of it is monitored and checked. stale: a source behind it failed on its latest check (the last good reading is kept)',
     },
     deductions: {type: 'array', items: ref('Deduction'), description: 'Largest first'},
   }),
@@ -366,6 +372,11 @@ const schemas = {
           ]),
         ),
       ),
+      staleSince: {
+        ...nullable('string', {format: 'date-time'}),
+        description: 'When the oldest reading still shown was taken, if a later check of its source failed; status is then stale, never ok',
+      },
+      hasFailedCheck: {type: 'boolean', description: 'A check of some source failed on its latest attempt, even with no good reading before it'},
     }),
     description:
       `Starts at ${HEALTH_MAX_SCORE} and loses the points of every deduction (floor 0). ` +
@@ -461,8 +472,11 @@ const schemas = {
     id: text,
     name: text,
     monitors: text,
-    status: {type: 'string', enum: [...MONITORING_SOURCE_STATUSES]},
-    lastRefreshedAt: nullable('string', {format: 'date-time'}),
+    status: {type: 'string', enum: [...MONITORING_SOURCE_STATUSES], description: 'reachable: its latest attempt answered; unavailable: it failed; configured: never asked'},
+    lastRefreshedAt: {...nullable('string', {format: 'date-time'}), description: 'When it last answered'},
+    lastAttemptAt: {...nullable('string', {format: 'date-time'}), description: 'When it was last asked (null before checks were recorded)'},
+    lastError: {...nullable('string'), description: 'Why the latest attempt failed; null when it answered'},
+    appNames: {type: 'array', items: text, description: 'The active apps whose findings come from it'},
     url: text,
   }),
   NoticeMatch: strict({

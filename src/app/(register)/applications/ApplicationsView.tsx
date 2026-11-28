@@ -25,15 +25,13 @@ import {
   HEALTH_FILTER_OPTIONS,
   KIND_LABEL,
   KIND_OPTIONS,
-  NOT_MONITORED,
   NOTICE_SEVERITY_LABEL,
   NOTICE_SEVERITY_VARIANT,
-  healthVerdict,
 } from '@/lib/ui/copy';
 import {appListQuery, appListViewFrom} from '@/lib/ui/list-filters';
 import {rememberListQuery} from '@/lib/ui/list-memory';
 import {DEFAULT_INBOX_VIEW, inboxQuery} from '@/lib/ui/notice-inbox';
-import {formatDate} from '@/lib/ui/register-view';
+import {formatDate, healthWord} from '@/lib/ui/register-view';
 import {unarchiveAppAction} from '../actions';
 import {AppCell} from '../_components/AppIdentity';
 import {ScorePill} from '../_components/Health';
@@ -255,23 +253,22 @@ export function ApplicationsView({apps, issues: issueRecord, archivedApps, unarc
 
 /** The score with a word ("Healthy", "Needs attention"), or "Not monitored" when nothing has been checked. */
 function HealthCell({app}: {app: App}) {
-  const {score} = app.health;
   return (
     <HStack gap={2} vAlign="center" wrap="wrap">
       <ScorePill health={app.health} />
       <Text size="sm" color="secondary">
-        {score === null ? NOT_MONITORED : healthVerdict(score)}
+        {healthWord(app.health)}
       </Text>
     </HStack>
   );
 }
 
-/** The most severe open notice, linked to it in the inbox; otherwise what is known about issues. */
+/** The most severe open notice, linked to it in the inbox; otherwise what is known about issues (never an all-clear after a failed check). */
 function IssueCell({app, issue}: {app: App; issue: IssueSummary | undefined}) {
   if (!issue) {
     return (
       <Text size="sm" color="secondary">
-        {app.health.score === null ? NOT_MONITORED : 'No active issues'}
+        {app.health.score === null ? healthWord(app.health) : app.health.hasFailedCheck ? 'None known: last check failed' : 'No active issues'}
       </Text>
     );
   }

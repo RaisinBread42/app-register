@@ -17,9 +17,10 @@ import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
 import {END_OF_SUPPORT_SOURCE} from '@/lib/constants';
 import type {AppDetail, Hosting, HostingCatalog} from '@/lib/ui/api-client';
-import {NOT_CHECKED_YET, NOT_SET, VERSION_NOT_EXACT, orDash} from '@/lib/ui/copy';
+import {CHECK_FAILED, NOT_CHECKED_YET, NOT_SET, VERSION_NOT_EXACT, orDash} from '@/lib/ui/copy';
 import {
   checkErrors,
+  checkTimes,
   endOfSupportNote,
   formatDate,
   formatDateTime,
@@ -65,6 +66,7 @@ export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: 
   const confirm = useImperativeAlertDialog();
   const incidents = openIncidents(app.hosting);
   const checkedAt = hostingLastChecked(app.hosting);
+  const lastGood = checkTimes(app).hosting;
   const errors = checkErrors(app.hosting);
 
   function open(hosting: Hosting | null) {
@@ -116,7 +118,7 @@ export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: 
             <Banner
               status="warning"
               title="Some sources could not be read on the last check"
-              description={`${errors.join('. ')}. What earlier checks found is still shown; a row with nothing found shows no status until its next check.`}
+              description={`${errors.join('. ')}. What the last good check found is still shown, marked with its date; a row never checked successfully shows no status.`}
               collapsible={false}
             />
           )}
@@ -151,6 +153,7 @@ export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: 
               {label: 'Infrastructure status', value: <DimensionPill dimension={app.health.dimensions.hosting} />},
               {label: 'Monitoring sources', value: 'endoflife.date · provider status feeds'},
               {label: 'Last checked', value: checkedAt ? formatDateTime(checkedAt) : NOT_CHECKED_YET},
+              ...(errors.length > 0 ? [{label: 'Last good check', value: lastGood ? formatDateTime(lastGood) : CHECK_FAILED}] : []),
             ]}
           />
           <FootNote>
@@ -161,7 +164,7 @@ export function HostingTab({app, catalog, today, addKey, editKeys, isReadOnly}: 
 
       {app.hosting.length > 0 && (
         <PanelCard title="Active incidents" subtitle="Open provider incidents and announced maintenance that reach this application">
-          <IncidentList incidents={incidents} />
+          <IncidentList incidents={incidents} isFeedUnread={errors.length > 0} />
         </PanelCard>
       )}
 
@@ -221,9 +224,14 @@ function EndOfSupport({hosting, today}: {hosting: Hosting; today: string}) {
   );
 }
 
-function IncidentList({incidents}: {incidents: IncidentRow[]}) {
+function IncidentList({incidents, isFeedUnread}: {incidents: IncidentRow[]; isFeedUnread: boolean}) {
   if (incidents.length === 0) {
-    return <EmptyState title="No open incidents" description="Nothing on the providers’ status pages reaches this application’s services or regions." isCompact />;
+    // Never an all-clear built on a check that failed (spec §8).
+    return isFeedUnread ? (
+      <EmptyState title="No open incidents known" description="The last check could not read every source, so an incident may be missing until the next check answers." isCompact />
+    ) : (
+      <EmptyState title="No open incidents" description="Nothing on the providers’ status pages reaches this application’s services or regions." isCompact />
+    );
   }
   return (
     <VStack gap={0}>

@@ -1,4 +1,4 @@
-import {eq} from 'drizzle-orm';
+import {and, eq, isNull} from 'drizzle-orm';
 import {
   DEPENDENCY_CHECK_ERROR,
   END_OF_SUPPORT_SOURCE,
@@ -9,15 +9,23 @@ import {
   type MonitoringSourceStatus,
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
-import {appDependencies, appHosting} from '@/lib/db/schema';
-import {HOSTING_CATALOG, type StatusFeed} from '@/lib/hosting-catalog';
+import {appDependencies, appHosting, apps} from '@/lib/db/schema';
+import {HOSTING_CATALOG, feedSourceId, findProvider, type StatusFeed} from '@/lib/hosting-catalog';
+import {usesEndOfLife} from './hosting-monitor';
+import {listSourceChecks, type SourceCheck} from './source-checks';
 
 export type MonitoringSource = {
   id: string;
   name: string;
   monitors: string;
   status: MonitoringSourceStatus;
+  /** When it last answered. */
   lastRefreshedAt: string | null;
+  /** [31] When it was last asked, and why that attempt failed (null when it answered or was never asked). */
+  lastAttemptAt: string | null;
+  lastError: string | null;
+  /** The active apps whose findings come from it. */
+  appNames: string[];
   url: string;
 };
 
@@ -35,26 +43,36 @@ export async function listMonitoringSources(
 ): Promise<MonitoringSource[]> {
   const deps = await db
     .select({
+      appName: apps.name,
       latestVersion: appDependencies.latestVersion,
       checkedAt: appDependencies.checkedAt,
       checkError: appDependencies.checkError,
     })
     .from(appDependencies)
-    .where(eq(appDependencies.workspaceId, workspaceId));
+    .innerJoin(apps, eq(apps.id, appDependencies.appId))
+    .where(and(eq(appDependencies.workspaceId, workspaceId), isNull(apps.archivedAt)));
 
   const hosting = await db
     .select({
+      appName: apps.name,
       provider: appHosting.provider,
+      service: appHosting.service,
+      version: appHosting.version,
+      runtime: appHosting.runtime,
+      runtimeVersion: appHosting.runtimeVersion,
       endOfSupportSource: appHosting.endOfSupportSource,
-      healthCheckedAt: appHosting.healthCheckedAt,
       healthError: appHosting.healthError,
+      lastGoodCheckAt: appHosting.lastGoodCheckAt,
     })
     .from(appHosting)
-    .where(eq(appHosting.workspaceId, workspaceId));
+    .innerJoin(apps, eq(apps.id, appHosting.appId))
+    .where(and(eq(appHosting.workspaceId, workspaceId), isNull(apps.archivedAt)));
+  const checks = await listSourceChecks(db, workspaceId);
+  const names = (rows: {appName: string}[]) => [...new Set(rows.map((row) => row.appName))].sort();
 
+  // When each source last answered, as the rows tell it: checkedAt and lastGoodCheckAt are only written when every source asked answered.
   const dependencyLast = maxIso(deps.map((row) => row.checkedAt));
-  // A hosting run that failed still writes healthCheckedAt, so only clean rows count as an answer.
-  const hostingLast = maxIso(hosting.filter((row) => row.healthError === null).map((row) => row.healthCheckedAt));
+  const endOfLifeRows = hosting.filter(usesEndOfLife);
 
   const npmAnswered = deps.some((row) => row.latestVersion !== null || row.checkedAt !== null);
   const npmFailed = deps.some(
@@ -79,6 +97,8 @@ export async function listMonitoringSources(
       monitors: 'Latest package versions for application dependencies',
       status: statusOf(npmAnswered, npmFailed && !npmAnswered),
       lastRefreshedAt: dependencyLast,
+      ...NOT_RECORDED,
+      appNames: names(deps),
       url: NPM_REGISTRY_URL,
     },
     {
@@ -87,6 +107,8 @@ export async function listMonitoringSources(
       monitors: 'Known advisories for package versions',
       status: statusOf(osvSucceeded, osvFailed && !osvSucceeded),
       lastRefreshedAt: dependencyLast,
+      ...NOT_RECORDED,
+      appNames: names(deps),
       url: OSV_API_URL,
     },
     {
@@ -94,37 +116,55 @@ export async function listMonitoringSources(
       name: END_OF_SUPPORT_SOURCE.endOfLifeDate,
       monitors: 'End-of-support dates for hosting services and runtimes',
       status: statusOf(eolAnswered, eolFailed && !eolAnswered),
-      lastRefreshedAt: hostingLast,
+      lastRefreshedAt: maxIso(endOfLifeRows.map((row) => row.lastGoodCheckAt)),
+      ...NOT_RECORDED,
+      appNames: names(endOfLifeRows),
       url: 'https://endoflife.date',
     },
   ];
 
   for (const feed of uniqueStatusFeeds()) {
     const provider = providerNameFor(feed);
-    const feedFailed = hosting.some(
-      (row) => row.healthError !== null && feedErrorMentions(row.healthError, feed, provider),
-    );
-    // A clean health check is evidence the provider's feed answered; we do not
-    // store which feed ran, so only mark this feed reachable when the row's
-    // provider matches and there was no health error.
-    const feedOk = hosting.some(
-      (row) =>
-        row.healthCheckedAt !== null &&
-        row.healthError === null &&
-        providerMatchesRow(row.provider ?? '', provider),
-    );
+    // Rows checked against this feed: their provider, or any name the catalog knows it by, uses it.
+    const feedRows = hosting.filter((row) => findProvider(row.provider ?? '')?.statusFeed?.url === feed.url);
+    const feedFailed = feedRows.some((row) => row.healthError !== null && feedErrorMentions(row.healthError, feed, provider));
+    const feedOk = feedRows.some((row) => row.lastGoodCheckAt !== null && row.healthError === null);
     sources.push({
-      id: `status_${feed.kind}_${slug(feed.name)}`,
+      id: feedSourceId(feed),
       name: feed.name,
       monitors: `Open incidents and maintenance for ${provider}`,
       status: statusOf(feedOk && !feedFailed, feedFailed),
-      lastRefreshedAt: hostingLast,
+      lastRefreshedAt: maxIso(feedRows.map((row) => row.lastGoodCheckAt)),
+      ...NOT_RECORDED,
+      appNames: names(feedRows),
       url: feed.page,
     });
   }
 
-  return sources;
+  return sources.map((source) => withStoredCheck(source, checks.get(source.id)));
 }
+
+/**
+ * The source as its stored check tells it ([31]): reachable when its latest attempt
+ * answered, unavailable when it failed. A source never recorded keeps what the
+ * findings suggest, and so does its last answer time until a recorded check answers
+ * (readings taken before checks were stored still count).
+ */
+function withStoredCheck(source: MonitoringSource, check: SourceCheck | undefined): MonitoringSource {
+  if (!check) {
+    return source;
+  }
+  const lastFailed = check.lastError !== null && (!check.lastSuccessAt || check.lastAttemptAt > check.lastSuccessAt);
+  return {
+    ...source,
+    status: lastFailed ? MONITORING_SOURCE_STATUS.unavailable : MONITORING_SOURCE_STATUS.reachable,
+    lastRefreshedAt: check.lastSuccessAt?.toISOString() ?? source.lastRefreshedAt,
+    lastAttemptAt: check.lastAttemptAt.toISOString(),
+    lastError: lastFailed ? check.lastError : null,
+  };
+}
+
+const NOT_RECORDED = {lastAttemptAt: null, lastError: null};
 
 function statusOf(succeeded: boolean, failedOnly: boolean): MonitoringSourceStatus {
   if (succeeded) {
@@ -139,10 +179,6 @@ function statusOf(succeeded: boolean, failedOnly: boolean): MonitoringSourceStat
 function feedErrorMentions(healthError: string, feed: StatusFeed, provider: string): boolean {
   const haystack = healthError.toLowerCase();
   return haystack.includes(feed.name.toLowerCase()) || haystack.includes(provider.toLowerCase());
-}
-
-function providerMatchesRow(rowProvider: string, catalogProvider: string): boolean {
-  return rowProvider.toLowerCase() === catalogProvider.toLowerCase();
 }
 
 function uniqueStatusFeeds(): StatusFeed[] {
@@ -173,6 +209,3 @@ function maxIso(values: (Date | null)[]): string | null {
   return latest ? latest.toISOString() : null;
 }
 
-function slug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-}

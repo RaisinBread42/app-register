@@ -1,9 +1,9 @@
 import {and, eq, inArray, isNull, type SQL} from 'drizzle-orm';
 import type {AnyPgColumn} from 'drizzle-orm/pg-core';
-import {END_OF_SUPPORT_SOURCE, HOSTING_CHECK_ERROR_MAX_LENGTH, MONITORING_FOLLOW_UP_BUDGET_MS} from '@/lib/constants';
+import {END_OF_SUPPORT_SOURCE, HOSTING_CHECK_ERROR_MAX_LENGTH, MONITORING_FOLLOW_UP_BUDGET_MS, MONITORING_SOURCE_ID} from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {appHosting, apps} from '@/lib/db/schema';
-import {findProvider, findRuntime, findService, type StatusFeed} from '@/lib/hosting-catalog';
+import {feedSourceId, findProvider, findRuntime, findService, type StatusFeed} from '@/lib/hosting-catalog';
 import {endOfLifeUrl, endOfSupport as readEndOfSupport} from '@/lib/monitoring/end-of-life';
 import {cleanText} from '@/lib/monitoring/feed-values';
 import {createFetchText, type FetchText} from '@/lib/monitoring/http';
@@ -14,6 +14,7 @@ import {isOutage} from './hosting-health';
 import {loadHosting, normaliseIncidents, replaceIncidents, type HostingIncident, type HostingRecord} from './hosting-incidents';
 import {syncAppNoticesSafely} from './notices';
 import {mapWithLimit} from './package-sources';
+import {recordSourceOutcomes, type SourceOutcome} from './source-checks';
 
 /**
  * The hosting check: asks endoflife.date when each row's version or runtime
@@ -109,6 +110,8 @@ async function checkRows(
     feeds.map((feed) => [feed.url, read(answers.get(feed.url), feed.name, (body) => parseStatusFeed(feed, body))]),
   );
 
+  await recordSourceOutcomes(db, workspaceId, hostingOutcomes(rows, answers, openByFeed), now);
+
   const stored: HostingRecord[] = [];
   const failed = new Set<string>();
   // Rows whose sources were all asked in time; the rest are left as they were.
@@ -119,6 +122,8 @@ async function checkRows(
       incidents: incidents(row, openByFeed, errors),
       healthCheckedAt: now,
       healthError: errors.length > 0 ? cleanText(errors.join('; '), HOSTING_CHECK_ERROR_MAX_LENGTH) : null,
+      // A failed run keeps the last good check's time, so what it found shows as stale, never as current.
+      lastGoodCheckAt: errors.length > 0 ? row.lastGoodCheckAt : now,
     };
     if (await store(db, workspaceId, row, found)) {
       stored.push(row);
@@ -130,7 +135,7 @@ async function checkRows(
 
 type EndOfSupportFound = Pick<HostingRecord, 'endOfSupportOn' | 'endOfSupportSource' | 'isVersionInexact'>;
 
-type Found = EndOfSupportFound & Pick<HostingRecord, 'healthCheckedAt' | 'healthError'> & {
+type Found = EndOfSupportFound & Pick<HostingRecord, 'healthCheckedAt' | 'healthError' | 'lastGoodCheckAt'> & {
   /** Null when the provider's feed could not be read: the incidents the row had are kept. */
   incidents: HostingIncident[] | null;
 };
@@ -180,6 +185,23 @@ function stillAsChecked(row: HostingRecord): SQL[] {
 /** The workspace's active apps, read again inside each write: an app archived mid-run gets nothing stored. */
 function activeAppIds(db: AppDatabase, workspaceId: string) {
   return db.select({id: apps.id}).from(apps).where(activeAppsIn(workspaceId));
+}
+
+/** What this run learnt about each source it asked: each provider feed, and endoflife.date (failed if any lookup failed). */
+function hostingOutcomes(rows: HostingRecord[], answers: Map<string, Answer>, openByFeed: Map<string, Result<unknown>>): SourceOutcome[] {
+  const feeds: SourceOutcome[] = [...openByFeed].flatMap(([url, result]) => {
+    const feed = uniqueByUrl(rows.flatMap(statusFeed)).find((candidate) => candidate.url === url);
+    return feed && answers.has(url) ? [{sourceId: feedSourceId(feed), error: isFailure(result) ? result.error : null}] : [];
+  });
+  // An answer in a format we cannot read is a failure too: the row's date is then not current.
+  const endOfLife: SourceOutcome[] = rows
+    .flatMap(endOfLifeLookups)
+    .filter(({product}) => answers.has(endOfLifeUrl(product)))
+    .map(({product, version}) => {
+      const found = read(answers.get(endOfLifeUrl(product)), END_OF_SUPPORT_SOURCE.endOfLifeDate, (body) => readEndOfSupport(body, version));
+      return {sourceId: MONITORING_SOURCE_ID.endOfLifeDate, error: isFailure(found) ? found.error : null};
+    });
+  return [...feeds, ...endOfLife];
 }
 
 function uniqueByUrl(feeds: StatusFeed[]): StatusFeed[] {
@@ -233,8 +255,13 @@ function sourceUrls(row: HostingRecord): string[] {
   return [...statusFeed(row).map((feed) => feed.url), ...endOfLifeLookups(row).map(({product}) => endOfLifeUrl(product))];
 }
 
+/** Whether endoflife.date is asked about a row (its service or runtime is in the catalog with a version). */
+export function usesEndOfLife(row: Pick<HostingRecord, 'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion'>): boolean {
+  return endOfLifeLookups(row).length > 0;
+}
+
 /** What to ask endoflife.date for a row: its service's version and its runtime's version, when the catalog knows them. */
-function endOfLifeLookups(row: HostingRecord): Lookup[] {
+function endOfLifeLookups(row: Pick<HostingRecord, 'provider' | 'service' | 'version' | 'runtime' | 'runtimeVersion'>): Lookup[] {
   const lookups: Lookup[] = [];
   const serviceProduct = findService(row.provider, row.service)?.eolProduct;
   if (serviceProduct && row.version) {

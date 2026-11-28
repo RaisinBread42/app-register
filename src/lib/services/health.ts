@@ -1,4 +1,5 @@
 import {
+  DEPENDENCY_CHECK_ERROR,
   HEALTH_ATTENTION_BELOW,
   HEALTH_CRITICAL_BELOW,
   HEALTH_DIMENSION,
@@ -30,8 +31,17 @@ export type DimensionHealth = {status: HealthStatus; deductions: Deduction[]};
 export type AppHealth = {
   /** 0–100, or null when no dimension has anything to check. */
   score: number | null;
+  /**
+   * `stale` when a source behind an otherwise clean score failed on its latest check
+   * (the score is the last good reading, never green). A critical or attention score
+   * keeps its status; `staleSince` says it is out of date too.
+   */
   status: HealthStatus;
   dimensions: Record<HealthDimension, DimensionHealth | null>;
+  /** [31] When the oldest reading still shown was taken, if a later check of its source failed; else null. */
+  staleSince: string | null;
+  /** True when a check of any source failed on its latest attempt, even with no good reading before it. */
+  hasFailedCheck: boolean;
 };
 
 /** What the reporters read about one app. A new dimension adds its own field here. `today` is a UTC date (YYYY-MM-DD). */
@@ -39,6 +49,19 @@ export type HealthFacts = {dependencies: DependencyFacts[]; hosting: HostingFact
 
 /** An app's deductions for one dimension, or null when the app records nothing for it. */
 type Reporter = (facts: HealthFacts) => Deduction[] | null;
+
+/** When a dimension's oldest reading still shown was taken, if a later check of its source failed. */
+const STALE_SINCE: Partial<Record<HealthDimension, (facts: HealthFacts) => Date | null>> = {
+  [HEALTH_DIMENSION.dependencies]: (facts) =>
+    oldest(facts.dependencies.filter((dependency) => dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable).map((dependency) => dependency.checkedAt)),
+  [HEALTH_DIMENSION.hosting]: (facts) => oldest(facts.hosting.filter((row) => row.healthError !== null).map((row) => row.lastGoodCheckAt)),
+};
+
+function oldest(times: (Date | null)[]): Date | null {
+  // A stored time that is not a real moment (infinity, garbage) is ignored, never a crash.
+  const known = times.filter((time): time is Date => time !== null).map((time) => time.getTime()).filter(Number.isFinite);
+  return known.length ? new Date(Math.min(...known)) : null;
+}
 
 /** To monitor another dimension, add its reporter here. */
 const REPORTERS: Partial<Record<HealthDimension, Reporter>> = {
@@ -62,23 +85,37 @@ export function statusForScore(score: number): HealthStatus {
 export function appHealth(facts: HealthFacts): AppHealth {
   const dimensions = {} as AppHealth['dimensions'];
   const all: Deduction[] = [];
+  const staleTimes: Date[] = [];
   let isChecked = false;
 
   for (const dimension of HEALTH_DIMENSIONS) {
     const reporter = REPORTERS[dimension];
     const deductions = reporter ? reporter(facts) : undefined;
+    const staleSince = STALE_SINCE[dimension]?.(facts) ?? null;
     if (deductions === undefined) {
       dimensions[dimension] = null;
     } else if (deductions === null) {
       dimensions[dimension] = {status: HEALTH_STATUS.na, deductions: []};
     } else {
       const worstFirst = [...deductions].sort((a, b) => b.points - a.points);
-      dimensions[dimension] = {status: computeHealth(worstFirst).status, deductions: worstFirst};
+      dimensions[dimension] = {status: staleUnlessWorse(computeHealth(worstFirst).status, staleSince), deductions: worstFirst};
       all.push(...worstFirst);
       isChecked = true;
+      if (staleSince) staleTimes.push(staleSince);
     }
   }
-  return isChecked
-    ? {...computeHealth(all), dimensions}
-    : {score: null, status: HEALTH_STATUS.na, dimensions};
+  const staleSince = oldest(staleTimes);
+  const hasFailedCheck =
+    facts.dependencies.some((dependency) => dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable) ||
+    facts.hosting.some((row) => row.healthError !== null);
+  if (!isChecked) {
+    return {score: null, status: HEALTH_STATUS.na, dimensions, staleSince: null, hasFailedCheck};
+  }
+  const health = computeHealth(all);
+  return {...health, status: staleUnlessWorse(health.status, staleSince), dimensions, staleSince: staleSince?.toISOString() ?? null, hasFailedCheck};
+}
+
+/** A clean reading whose source then failed reads `stale`, never ok; a worse one keeps its red or amber. */
+function staleUnlessWorse(status: HealthStatus, staleSince: Date | null): HealthStatus {
+  return staleSince && status === HEALTH_STATUS.ok ? HEALTH_STATUS.stale : status;
 }

@@ -282,7 +282,7 @@ async function addCheckedHosting(db: AppDatabase, workspaceId: string, appId: st
   const {incident, ...input} = seed;
   const row = await addHosting(db, workspaceId, appId, input);
   await db.transaction(async (tx) => {
-    await tx.update(appHosting).set({healthCheckedAt: new Date(), healthError: null}).where(eq(appHosting.id, row.id));
+    await tx.update(appHosting).set({healthCheckedAt: new Date(), healthError: null, lastGoodCheckAt: new Date()}).where(eq(appHosting.id, row.id));
     if (incident) {
       const startedAt = new Date(Date.now() - incident.startedDaysAgo * 86_400_000).toISOString();
       await replaceIncidents(tx, {id: row.id, workspaceId}, [

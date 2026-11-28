@@ -62,6 +62,7 @@ const ALL_TABLES = [
   'people',
   'review_cycles',
   'review_items',
+  'source_checks',
   'workspaces',
 ];
 
@@ -80,6 +81,8 @@ const COLUMNS_0006 = ['expires_at', 'last_used_at'];
 const TABLES_0007 = ['app_environments'];
 const TABLES_0008 = ['app_notice_matches', 'notices'];
 const TABLES_0009 = ['audit_events'];
+const TABLES_0011 = ['source_checks'];
+const COLUMNS_0011 = ['last_good_check_at'];
 const COLUMNS_0007 = ['criticality', 'repository_url'];
 
 /**
@@ -87,6 +90,7 @@ const COLUMNS_0007 = ['criticality', 'repository_url'];
  * applies migrations newer than the last one recorded, so an older one rolled
  * back alone would never come back.
  */
+const ROLLBACK_0011 = '0011_source_checks.down.sql';
 const ROLLBACK_0010 = '0010_app_unarchive_audit.down.sql';
 const ROLLBACK_0009 = '0009_notice_actions_audit.down.sql';
 const ROLLBACK_0008 = '0008_notices.down.sql';
@@ -104,7 +108,7 @@ function rollbackSql(file: string): string {
 
 /** Runs the rollbacks down to and including `oldest`, newest first. */
 async function rollBackThrough(t: TestDb, oldest: string) {
-  const newestFirst = [ROLLBACK_0010, ROLLBACK_0009, ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
+  const newestFirst = [ROLLBACK_0011, ROLLBACK_0010, ROLLBACK_0009, ROLLBACK_0008, ROLLBACK_0007, ROLLBACK_0006, ROLLBACK_0005, ROLLBACK_0004, ROLLBACK_0003, ROLLBACK_0002, ROLLBACK_0001];
   for (const file of newestFirst.slice(0, newestFirst.indexOf(oldest) + 1)) {
     await t.client.exec(rollbackSql(file));
   }
@@ -421,9 +425,9 @@ describe('database schema', () => {
     const before = await columns();
 
     await rollBackThrough(t, ROLLBACK_0005);
-    expect(await columns()).toEqual(before.filter((name) => !COLUMNS_0005.includes(name)));
+    expect(await columns()).toEqual(before.filter((name) => ![...COLUMNS_0005, ...COLUMNS_0011].includes(name)));
     expect(await tables()).toEqual(
-      ALL_TABLES.filter((name) => ![...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009].includes(name)),
+      ALL_TABLES.filter((name) => ![...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(name)),
     );
     const kept = await t.client.query<{end_of_support_on: string}>(`select end_of_support_on::text from app_hosting`);
     expect(kept.rows).toEqual([{end_of_support_on: '2027-02-04'}]);
@@ -546,7 +550,7 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(after.rows.map((r) => r.table_name)).toEqual(
-      ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003, ...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009].includes(n)),
+      ALL_TABLES.filter((n) => ![...TABLES_0001, ...TABLES_0003, ...TABLES_0005, ...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(n)),
     );
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
@@ -554,6 +558,32 @@ describe('database schema', () => {
       `select table_name from information_schema.tables where table_schema = 'public' order by 1`,
     );
     expect(restored.rows.map((r) => r.table_name)).toEqual(ALL_TABLES);
+  });
+
+  it('migration 0011 copies each clean hosting check time into last_good_check_at and leaves failed checks without one; its rollback keeps health_checked_at', async () => {
+    const w = await seedWorkspace(t, t.workspaceId);
+    await rollBackThrough(t, ROLLBACK_0011);
+    const insert = (service: string, error: string | null) =>
+      t.client.query(
+        `insert into app_hosting (id, workspace_id, app_id, provider, service, health_checked_at, health_error) values ($1, $2, $3, 'Azure', $4, '2026-11-01T06:00:00Z', $5)`,
+        [newId(), t.workspaceId, w.appId, service, error],
+      );
+    await insert('Clean', null);
+    await insert('Failed', 'Azure status could not be reached (HTTP 503)');
+
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
+    const rows = await t.client.query<{service: string; checked: string; good: string | null}>(
+      `select service, health_checked_at::text as checked, last_good_check_at::text as good from app_hosting where service in ('Clean', 'Failed') order by service`,
+    );
+    expect(rows.rows.map((row) => [row.service, row.good === row.checked, row.good])).toEqual([
+      ['Clean', true, rows.rows[0].checked],
+      ['Failed', false, null],
+    ]);
+
+    await rollBackThrough(t, ROLLBACK_0011);
+    const kept = await t.client.query<{n: number}>(`select count(*)::int as n from app_hosting where health_checked_at is not null and service in ('Clean', 'Failed')`);
+    expect(kept.rows[0].n).toBe(2);
+    await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
   });
 
   it('migration 0010 only widens the audit actions (app.unarchived); its rollback keeps every event and refuses new unarchive events', async () => {
@@ -584,7 +614,7 @@ describe('database schema', () => {
       ).rows.map((r) => r.table_name);
     const before = await tables();
     await rollBackThrough(t, ROLLBACK_0008);
-    expect(await tables()).toEqual(before.filter((name) => ![...TABLES_0008, ...TABLES_0009].includes(name)));
+    expect(await tables()).toEqual(before.filter((name) => ![...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(name)));
     expect((await t.client.query<{id: string}>(`select id from apps`)).rows).toEqual([{id: w.appId}]);
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     expect(await tables()).toEqual(before);
@@ -607,7 +637,7 @@ describe('database schema', () => {
 
     await rollBackThrough(t, ROLLBACK_0007);
     expect(await columns()).toEqual(beforeColumns.filter((name) => !COLUMNS_0007.includes(name)));
-    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0007, ...TABLES_0008, ...TABLES_0009].includes(name)));
+    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0007, ...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(name)));
     const kept = await t.client.query<{id: string}>(`select id from apps`);
     expect(kept.rows).toEqual([{id: w.appId}]);
 
@@ -632,7 +662,7 @@ describe('database schema', () => {
 
     await rollBackThrough(t, ROLLBACK_0006);
     expect(await columns()).toEqual(beforeColumns.filter((name) => !COLUMNS_0006.includes(name)));
-    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009].includes(name)));
+    expect(await tables()).toEqual(beforeTables.filter((name) => ![...TABLES_0006, ...TABLES_0007, ...TABLES_0008, ...TABLES_0009, ...TABLES_0011].includes(name)));
 
     await migrate(drizzle(t.client), {migrationsFolder: MIGRATIONS_FOLDER});
     expect(await columns()).toEqual(beforeColumns);

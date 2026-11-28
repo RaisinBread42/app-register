@@ -137,6 +137,9 @@ const NEEDS_ATTENTION = "Needs attention";
 /** Nothing can be checked yet: a hosting row with no status (and no failed check), or an app with no health score. */
 export const NOT_MONITORED = "Not monitored";
 
+/** An app with no score because its checks failed before any answered (never "Not monitored"). */
+export const CHECK_FAILED = "Check failed";
+
 export const HEALTH_FILTER_OPTIONS = [
   { value: FILTER_ALL, label: "All health" },
   { value: APP_HEALTH_FILTER.attention, label: NEEDS_ATTENTION },
@@ -161,6 +164,7 @@ export const HEALTH_STATUS_VARIANT: Record<HealthStatus, StatusVariant> = {
   [HEALTH_STATUS.attention]: "yellow",
   [HEALTH_STATUS.critical]: "red",
   [HEALTH_STATUS.na]: "neutral",
+  [HEALTH_STATUS.stale]: "neutral",
 };
 
 /** The prototype's check pills: "✓ OK", "! Attention", "! Critical". */
@@ -169,6 +173,7 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
   [HEALTH_STATUS.attention]: "! Attention",
   [HEALTH_STATUS.critical]: "! Critical",
   [HEALTH_STATUS.na]: "—",
+  [HEALTH_STATUS.stale]: "! Stale",
 };
 
 /** The badge under the big score on an application's page. */

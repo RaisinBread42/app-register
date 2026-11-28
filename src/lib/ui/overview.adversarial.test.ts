@@ -52,7 +52,7 @@ describe('[28] Overview adversarial — pure rules', () => {
   });
 
   it('ADV5 AC1.2: data last refreshed 88 days ago raises the stale-data indicator', () => {
-    const stale = [{id: 's', name: 'OSV.dev', monitors: 'x', status: 'reachable', lastRefreshedAt: '2026-09-01T05:00:00.000Z', url: 'https://osv.dev'}] as never;
+    const stale = [{id: 's', name: 'OSV.dev', monitors: 'x', status: 'reachable', lastRefreshedAt: '2026-09-01T05:00:00.000Z', appNames: ['Portal'], url: 'https://osv.dev'}] as never;
     const numbers = keyNumbers([], [app('Portal', {health: {score: 100} as App['health']})], stale, TODAY);
     expect(numbers.staleSources, 'an 88-day-old last check is flagged as out of date').toBeGreaterThan(0);
   });
