@@ -2,10 +2,15 @@
 
 Obsidian Software product: a flat-priced register of the SaaS a company buys and the apps its staff build in-house, for lean IT teams of 1–5 people.
 
-> The renewal and ownership register for a one-to-five-person IT team: flat price, live in an afternoon from your spreadsheet, and no notice deadline missed because someone left.
+> **Know what your applications depend on — and what needs attention.**
+>
+> Monitor app health, dependencies, software support, vendor notices, hosting changes, and renewal deadlines in one calm workspace.
+
+App Register is an application health and lifecycle monitoring service for lean IT teams (1–5 people) in organisations of about 30–500 staff. It tracks bought SaaS and internally built apps, ties relevant changes to the apps they affect, and surfaces the next useful action ([spec v1.0](docs/product/spec-v1.md) §1.1).
 
 ## Docs
 
+- [Spec v1.0 (source of truth)](docs/product/spec-v1.md) · [Governance Board addition](docs/product/governance-board.md) · [Gap analysis and decisions](docs/product/gap-analysis.md)
 - [Product brief](docs/product/brief.md)
 - [MVP scope](docs/product/mvp.md)
 - [Stack ADR](docs/adr/0001-stack.md)

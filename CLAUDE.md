@@ -2,7 +2,7 @@
 
 Flat-priced register of bought SaaS and in-house apps for lean IT teams (Obsidian Software).
 
-Stack: Next.js App Router, React 19, Meta Astryx (pinned), TypeScript, SQLite via Drizzle, Vitest. More detail: [docs/architecture.md](docs/architecture.md), [docs/environments.md](docs/environments.md), [docs/adr/0001-stack.md](docs/adr/0001-stack.md).
+Stack: Next.js App Router, React 19, Meta Astryx (pinned), TypeScript, Postgres 18 via Drizzle (PGlite in tests), Vitest. More detail: [docs/architecture.md](docs/architecture.md), [docs/environments.md](docs/environments.md), [docs/adr/0001-stack.md](docs/adr/0001-stack.md).
 
 ## How we write code (KISS)
 
@@ -14,7 +14,7 @@ Stack: Next.js App Router, React 19, Meta Astryx (pinned), TypeScript, SQLite vi
 
 ## Where things live
 
-See [docs/architecture.md](docs/architecture.md). Product intent: [docs/product/brief.md](docs/product/brief.md), [docs/product/mvp.md](docs/product/mvp.md).
+See [docs/architecture.md](docs/architecture.md). Product intent: [docs/product/spec-v1.md](docs/product/spec-v1.md) (source of truth) and [docs/product/governance-board.md](docs/product/governance-board.md); decisions in [docs/product/gap-analysis.md](docs/product/gap-analysis.md); history in [docs/product/brief.md](docs/product/brief.md), [docs/product/mvp.md](docs/product/mvp.md).
 
 ## Naming
 

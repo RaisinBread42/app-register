@@ -14,9 +14,13 @@ Lean IT teams (1–5 people) at companies of about 30–500 staff track bought S
 - Primary: IT manager or sole admin on a 1–5 person IT team supporting 30–500 staff.
 - Secondary: a backup owner named on each app; later, MSP operators without a PSA (out of MVP focus).
 
-## Positioning
+## Positioning (spec v1.0, 2026-11-28)
 
-> The renewal and ownership register for a one-to-five-person IT team: flat price, live in an afternoon from your spreadsheet, and no notice deadline missed because someone left.
+> **Know what your applications depend on — and what needs attention.**
+>
+> Monitor app health, dependencies, software support, vendor notices, hosting changes, and renewal deadlines in one calm workspace.
+
+App Register is an application health and lifecycle monitoring service for lean IT teams (1–5 people) in organisations of about 30–500 staff. It tracks bought SaaS and internally built apps, ties relevant changes to the apps they affect, and surfaces the next useful action ([spec v1.0](spec-v1.md) §1.1).
 
 ## What we sell
 

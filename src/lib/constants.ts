@@ -3,7 +3,7 @@
 export const PRODUCT_NAME = 'App Register';
 
 export const PRODUCT_TAGLINE =
-  'The renewal and ownership register for a one-to-five-person IT team.';
+  'Know what your applications depend on — and what needs attention.';
 
 export const ROUTES = {
   home: '/',

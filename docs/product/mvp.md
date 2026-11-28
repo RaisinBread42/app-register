@@ -1,5 +1,7 @@
 # MVP scope — App Register
 
+> **Superseded for the next iteration** by [spec v1.0](spec-v1.md) and the [Governance Board](governance-board.md) addition; the plan and decisions are in [gap-analysis.md](gap-analysis.md). This page records the first MVP.
+
 Evidence-based must-haves from [validation research](../research/saas-app-register-validation-2026-11-21.md). Keep it stupid simple: no custom fields, no roles matrix, no analytics in v1.
 
 ## In scope
