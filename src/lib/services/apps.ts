@@ -6,6 +6,7 @@ import {
   APP_KINDS,
   APP_SORT,
   APP_SORTS,
+  HTTPS_PROTOCOL,
   NOTICE_WINDOW_MAX_DAYS,
   REPOSITORY_URL_MAX_LENGTH,
   type AppCriticality,
@@ -278,7 +279,9 @@ export async function updateApp(
       if (!current) {
         throw new NotFoundError('App not found');
       }
-      const values = validateCreateAppInput({...current, ...patch});
+      // A key sent as undefined means "leave it": only null clears a value.
+      const defined = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+      const values = validateCreateAppInput({...current, ...defined});
       // Only newly assigned people must be active; an edit to an app whose owner has
       // left still works (reassignment belongs to the leaver flow).
       const newlyAssigned = assignedPeople(values).filter(
@@ -390,9 +393,12 @@ function optionalCriticality(value: unknown): AppCriticality | null {
   return value as AppCriticality;
 }
 
-/** An https URL only: it is shown as a link, so no other scheme gets through. */
+/**
+ * An https URL only, stored exactly as typed (trimmed): it is shown as a link, so no other
+ * scheme gets through, and a user name or token in it is refused rather than shown on the page.
+ */
 function optionalRepositoryUrl(value: unknown): string | null {
-  const text = optionalText(value, 'repository URL');
+  const text = optionalText(value, 'repository URL')?.trim() || null;
   if (text === null) {
     return null;
   }
@@ -402,10 +408,13 @@ function optionalRepositoryUrl(value: unknown): string | null {
   } catch {
     throw new ValidationError('Repository URL must be a full https:// address');
   }
-  if (url.protocol !== 'https:' || text.length > REPOSITORY_URL_MAX_LENGTH) {
+  if (url.protocol !== HTTPS_PROTOCOL || text.length > REPOSITORY_URL_MAX_LENGTH) {
     throw new ValidationError(`Repository URL must be an https:// address of at most ${REPOSITORY_URL_MAX_LENGTH} characters`);
   }
-  return url.href;
+  if (url.username || url.password) {
+    throw new ValidationError('Repository URL must not contain a user name, password or token');
+  }
+  return text;
 }
 
 /** The people an app names: its owner, and its backup owner when it has one. */

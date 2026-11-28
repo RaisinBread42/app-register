@@ -245,8 +245,6 @@ export type AppEnvironment = (typeof APP_ENVIRONMENTS)[number];
 /** Longest repository URL accepted. */
 export const REPOSITORY_URL_MAX_LENGTH = 500;
 
-/** Kinds that must record where they run, the data and keys they touch, and what breaks if they stop. */
-export const RUNTIME_DETAIL_KINDS: readonly AppKind[] = [APP_KIND.inHouse, APP_KIND.citizenBuilt];
 
 /** The one workspace every request uses until sign-in exists. */
 export const DEFAULT_WORKSPACE_SLUG = 'default';

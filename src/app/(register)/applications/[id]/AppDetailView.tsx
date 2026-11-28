@@ -347,7 +347,7 @@ function LicenceTab({app}: {app: AppDetail}) {
       <VStack gap={3}>
         <KeyValueRows
           rows={[
-            {label: 'Vendor', value: orDash(app.vendor)},
+            {label: 'Supplier', value: orDash(app.vendor)},
             {label: 'Renewal date', value: dateOrDash(app.renewalDate)},
             {label: 'Notice deadline', value: dateOrDash(app.noticeDeadline)},
             {label: 'Billing cycle', value: orDash(app.billingCycle)},

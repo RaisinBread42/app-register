@@ -1,4 +1,4 @@
-import {and, eq, inArray, isNull, notInArray, or, sql} from 'drizzle-orm';
+import {and, eq, inArray, isNotNull, isNull, notInArray, or} from 'drizzle-orm';
 import {
   ADVISORY_SEVERITY,
   ADVISORY_SOURCE,
@@ -162,9 +162,10 @@ export async function seedDemoData(db: AppDatabase, workspaceId: string, today =
 }
 
 /**
- * Real data is anything the seed did not make: a person without a demo email,
- * or an app (archived or not) owned or backed up by someone who is not a demo person.
- * A real app that happens to share a demo app's name is still refused.
+ * Real data is a person without a demo email, or an app (archived or not) owned or backed up
+ * by someone who is not a demo person. Apps owned by demo people (example.test, a reserved
+ * domain) are test data, so an e2e run can seed a database earlier runs added apps to.
+ * A real app that happens to share a demo app's name is still refused: its owner is real.
  */
 async function assertOnlyDemoData(db: AppDatabase, workspaceId: string): Promise<void> {
   const demoEmails = DEMO_PEOPLE.map((person) => person.email);
@@ -180,11 +181,7 @@ async function assertOnlyDemoData(db: AppDatabase, workspaceId: string): Promise
     .where(
       and(
         eq(apps.workspaceId, workspaceId),
-        or(
-          notInArray(sql`lower(${apps.name})`, DEMO_APP_NAMES.map((name) => name.toLowerCase())),
-          notInArray(apps.ownerId, demoIds),
-          notInArray(apps.backupOwnerId, demoIds),
-        ),
+        or(notInArray(apps.ownerId, demoIds), and(isNotNull(apps.backupOwnerId), notInArray(apps.backupOwnerId, demoIds))),
       ),
     )
     .limit(1);
