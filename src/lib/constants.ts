@@ -10,6 +10,7 @@ export const ROUTES = {
   home: '/',
   applications: '/applications',
   notices: '/notices',
+  governance: '/governance',
   settings: '/settings',
 } as const;
 
@@ -388,6 +389,13 @@ export const AUDIT_PAGE_MAX = 200;
 export const AUDIT_PAGE_DEFAULT = 50;
 
 /** The kinds of date the Overview lists. */
+/** Governance Board ([49]): how far back "handled recently" looks, and the windows for upcoming dates. */
+export const GOVERNANCE_HANDLED_DAYS = 30;
+export const GOVERNANCE_UPCOMING_DAYS = [30, 60, 90] as const;
+/** An app's state on the board: its score's status, or insufficient data when nothing could check it. */
+export const BOARD_HEALTH_STATE = {healthy: 'healthy', attention: 'attention', critical: 'critical', stale: 'stale', insufficient: 'insufficient'} as const;
+export type BoardHealthState = (typeof BOARD_HEALTH_STATE)[keyof typeof BOARD_HEALTH_STATE];
+
 /** Overview (spec §4.1): how far ahead the key number and the date list look, how far back a passed notice deadline stays, and list lengths. */
 export const OVERVIEW_DEADLINE_DAYS = 30;
 export const OVERVIEW_DATES_DAYS = 90;
