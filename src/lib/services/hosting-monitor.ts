@@ -12,6 +12,7 @@ import {activeAppsIn, assertActiveApp} from './app-scope';
 import {listHosting, type HostingView} from './hosting';
 import {isOutage} from './hosting-health';
 import {loadHosting, normaliseIncidents, replaceIncidents, type HostingIncident, type HostingRecord} from './hosting-incidents';
+import {syncAppNoticesSafely} from './notices';
 import {mapWithLimit} from './package-sources';
 
 /**
@@ -54,6 +55,7 @@ export async function refreshHostingHealth(
   }
   const rows = await loadHosting(db, and(...filters));
   await checkRows(db, workspaceId, rows, options);
+  await syncAppNoticesSafely(db, workspaceId, appId, options.now);
   return listHosting(db, workspaceId, appId);
 }
 
@@ -77,7 +79,11 @@ export async function refreshWorkspaceHostingHealth(
 ): Promise<RefreshSummary> {
   const rows = await loadHosting(db, and(eq(appHosting.workspaceId, workspaceId), inArray(appHosting.appId, activeAppIds(db, workspaceId))));
   const {stored, failedSources} = await checkRows(db, workspaceId, rows, options);
-  return {apps: new Set(stored.map((row) => row.appId)).size, hosting: stored.length, failedSources};
+  const appIds = [...new Set(stored.map((row) => row.appId))];
+  for (const appId of appIds) {
+    await syncAppNoticesSafely(db, workspaceId, appId, options.now);
+  }
+  return {apps: appIds.length, hosting: stored.length, failedSources};
 }
 
 type Failure = {error: string};

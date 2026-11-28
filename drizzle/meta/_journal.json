@@ -57,6 +57,13 @@
       "when": 1795852865347,
       "tag": "0007_app_criticality_environments",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795854637249,
+      "tag": "0008_notices",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,7 @@ import {replaceAdvisories} from '@/lib/services/dependency-advisories';
 import {ValidationError} from '@/lib/services/errors';
 import {addHosting} from '@/lib/services/hosting';
 import {replaceIncidents} from '@/lib/services/hosting-incidents';
+import {syncAppNotices} from '@/lib/services/notices';
 import {createPerson, updatePerson} from '@/lib/services/people';
 
 /**
@@ -256,6 +257,7 @@ async function createDemoApp(
   for (const hosting of app.hosting) {
     await addCheckedHosting(db, workspaceId, created.id, hosting);
   }
+  await syncAppNotices(db, workspaceId, created.id, new Date(), today);
 }
 
 /** A dependency as if the check had already run: latest version and advisories stored. */

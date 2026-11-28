@@ -13,6 +13,7 @@ import {assertActiveApp} from './app-scope';
 import {clearFoundAdvisories, loadDependencies, replaceManualAdvisories, type DependencyRecord} from './dependency-advisories';
 import {dependencyStatus, UNCHECKED} from './dependency-health';
 import {isUniqueViolation, NotFoundError, ValidationError} from './errors';
+import {syncAppNoticesSafely} from './notices';
 import {atMost, optionalText, requiredText} from './validation';
 
 export type DependencyInput = {
@@ -112,6 +113,8 @@ export async function removeDependency(
   await assertActiveApp(db, workspaceId, appId);
   const current = await findDependency(db, workspaceId, appId, id);
   await db.delete(appDependencies).where(eq(appDependencies.id, current.id));
+  // Its notices no longer apply to this app: they are marked resolved, never deleted.
+  await syncAppNoticesSafely(db, workspaceId, appId);
 }
 
 async function findDependency(

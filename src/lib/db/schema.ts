@@ -30,6 +30,11 @@ import {
   END_OF_SUPPORT_SOURCES,
   INCIDENT_IMPACTS,
   INCIDENT_SCOPES,
+  MATCH_CONFIDENCES,
+  NOTICE_CATEGORIES,
+  NOTICE_ORIGINS,
+  NOTICE_SEVERITIES,
+  NOTICE_SOURCES,
   NOTICE_ALERT_STATUS,
   NOTICE_ALERT_STATUSES,
   OWNERSHIP_CHANGE_REASONS,
@@ -526,6 +531,92 @@ export const hostingIncidents = pgTable(
   ],
 );
 
+/**
+ * A notice: something that changed or is due (an advisory, an end-of-support date, a provider
+ * incident). One row per thing, however many apps it affects; `dedupe_key` makes a repeat check
+ * update the row instead of adding another. Rows are never deleted by a check: when the source
+ * stops reporting it, `resolved_upstream_at` is set and the history stays (spec §8).
+ */
+export const notices = pgTable(
+  'notices',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    dedupeKey: text('dedupe_key').notNull(),
+    category: text('category').notNull(),
+    severity: text('severity').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary').notNull().default(''),
+    /** Where it came from, as a key, plus the name shown to people (e.g. "Azure status"). */
+    source: text('source').notNull(),
+    sourceName: text('source_name').notNull(),
+    sourceUrl: text('source_url'),
+    /** The source's own id: an advisory id, or null when the source gives none. */
+    externalId: text('external_id'),
+    origin: text('origin').notNull(),
+    publishedAt: timestamp('published_at', {withTimezone: true}),
+    /** For deadline and end-of-support notices: the date it is about. */
+    dueOn: date('due_on', {mode: 'string'}),
+    firstSeenAt: timestamp('first_seen_at', {withTimezone: true}).notNull(),
+    lastSeenAt: timestamp('last_seen_at', {withTimezone: true}).notNull(),
+    resolvedUpstreamAt: timestamp('resolved_upstream_at', {withTimezone: true}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique('notices_id_workspace_unique').on(t.id, t.workspaceId),
+    unique('notices_workspace_dedupe_unique').on(t.workspaceId, t.dedupeKey),
+    check('notices_category_allowed', oneOf(t.category, NOTICE_CATEGORIES)),
+    check('notices_severity_allowed', oneOf(t.severity, NOTICE_SEVERITIES)),
+    check('notices_source_allowed', oneOf(t.source, NOTICE_SOURCES)),
+    check('notices_origin_allowed', oneOf(t.origin, NOTICE_ORIGINS)),
+    check('notices_title_not_blank', sql`btrim(${t.title}) <> ''`),
+    index('notices_workspace_severity_idx').on(t.workspaceId, t.severity),
+  ],
+);
+
+/**
+ * Why a notice concerns an app: the component, version, service or region of that app it
+ * matched on, the reason in words, and how sure the match is. `resolved_at` is set when the
+ * app no longer has what was matched or the source stopped reporting it.
+ */
+export const appNoticeMatches = pgTable(
+  'app_notice_matches',
+  {
+    id: id(),
+    workspaceId: workspaceId(),
+    noticeId: uuid('notice_id').notNull(),
+    appId: uuid('app_id').notNull(),
+    /** What on the app matched: a dependency name, or a hosting service such as "Azure App Service". */
+    component: text('component').notNull(),
+    version: text('version'),
+    region: text('region'),
+    matchReason: text('match_reason').notNull(),
+    confidence: text('confidence').notNull(),
+    firstSeenAt: timestamp('first_seen_at', {withTimezone: true}).notNull(),
+    lastSeenAt: timestamp('last_seen_at', {withTimezone: true}).notNull(),
+    resolvedAt: timestamp('resolved_at', {withTimezone: true}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique('app_notice_matches_id_workspace_unique').on(t.id, t.workspaceId),
+    unique('app_notice_matches_notice_app_component_unique').on(t.noticeId, t.appId, t.component),
+    foreignKey({
+      name: 'app_notice_matches_notice_fk',
+      columns: [t.noticeId, t.workspaceId],
+      foreignColumns: [notices.id, notices.workspaceId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'app_notice_matches_app_fk',
+      columns: [t.appId, t.workspaceId],
+      foreignColumns: [apps.id, apps.workspaceId],
+    }).onDelete('cascade'),
+    check('app_notice_matches_confidence_allowed', oneOf(t.confidence, MATCH_CONFIDENCES)),
+    index('app_notice_matches_app_idx').on(t.appId),
+  ],
+);
+
 /** Bearer API keys. Only the SHA-256 hash is stored; the key is shown once at creation. */
 export const apiKeys = pgTable(
   'api_keys',
@@ -614,3 +705,5 @@ export type AppRow = typeof apps.$inferSelect;
 export type NoticeAlertRow = typeof noticeAlerts.$inferSelect;
 export type AppDependencyRow = typeof appDependencies.$inferSelect;
 export type AppHostingRow = typeof appHosting.$inferSelect;
+export type NoticeRow = typeof notices.$inferSelect;
+export type AppNoticeMatchRow = typeof appNoticeMatches.$inferSelect;

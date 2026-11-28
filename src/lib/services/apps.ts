@@ -30,6 +30,7 @@ import {
   scheduleAlerts,
   type NoticeAlertView,
 } from './notice-alerts';
+import {syncAppNoticesSafely} from './notices';
 import {assertActivePeople} from './people';
 import {optionalDate, optionalText} from './validation';
 
@@ -319,6 +320,8 @@ export async function archiveApp(
       .where(and(activeAppsIn(workspaceId), eq(apps.id, id)));
     await removeScheduledAlerts(tx, workspaceId, id);
   });
+  // An archived app is no longer affected by anything: its notice matches resolve.
+  await syncAppNoticesSafely(db, workspaceId, id);
 }
 
 export function validateCreateAppInput(input: CreateAppInput) {

@@ -200,6 +200,10 @@ The daily job is one request, safe to repeat:
 curl -fsS -X POST "$APP_REGISTER_URL/api/monitoring/refresh" -H "Authorization: Bearer $APP_REGISTER_API_KEY"
 ```
 
+## Notices
+
+`GET /api/notices` lists notices that concern active apps, most severe first, then the soonest date. Filters: `appId`, `severity`, `category`, `state` (`open`, the default; `resolved`; `all`). `GET /api/notices/:id` returns one. Each notice has its source (`source`, `sourceName`, `sourceUrl`, `externalId`), its `origin` (`external`, an outside claim, or `person`, entered by a person), when it was first and last seen, `resolvedUpstreamAt`, and `matches`: one per affected app with the `component`, `version` and `region` it matched on, the `matchReason` and the `confidence` (`high`, `medium`, `low`). Notices are derived from what the dependency and hosting checks store, so there is no endpoint to create one; licensing and pricing notices entered by a person come with [36]. Keys created in Settings (scoped to the applications register) get 403 here.
+
 ## Health score
 
 Every app carries `health: { score, status, dimensions }`. It is the one place health lives: there is no separate hosting field.
