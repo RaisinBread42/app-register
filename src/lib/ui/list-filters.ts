@@ -5,6 +5,7 @@ import {
   APP_LIST_SORTS,
   APP_TAB,
   APP_TABS,
+  CRITICALITY_FILTER_NOT_SET,
   FILTER_ALL,
   SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -51,7 +52,7 @@ export function appListViewFrom(params: SearchParams): AppListView {
   return {
     query: textParam(params, UI_QUERY.search),
     kind: oneOf(APP_KINDS, first(params[UI_QUERY.kind])) ?? FILTER_ALL,
-    criticality: oneOf(APP_CRITICALITIES, first(params[UI_QUERY.criticality])) ?? FILTER_ALL,
+    criticality: oneOf([...APP_CRITICALITIES, CRITICALITY_FILTER_NOT_SET], first(params[UI_QUERY.criticality])) ?? FILTER_ALL,
     owner: textParam(params, UI_QUERY.owner) || FILTER_ALL,
     health: oneOf(APP_HEALTH_FILTERS, first(params[UI_QUERY.health])) ?? FILTER_ALL,
     openNotices: first(params[UI_QUERY.openNotices]) === UI_QUERY_ON,

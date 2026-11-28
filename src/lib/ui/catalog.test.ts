@@ -51,16 +51,18 @@ describe('applications catalog', () => {
     expect(names(apps, {}, notices)).toEqual(['High issue, critical', 'High issue, low criticality', 'Low issue', 'Quiet', 'Snoozed critical']);
   });
 
-  it('AC2: the other sorts are name A–Z, lowest health (no score last) and the next date ahead (passed dates ignored, undated last)', () => {
+  it('AC2: the other sorts are name A–Z, lowest health (no score last) and the next date (a deadline passed over 30 days ago is ignored, undated last)', () => {
     const apps = [
-      app('Bravo', {...score(70), renewalDate: '2027-02-01', noticeDeadline: '2026-11-01'}),
+      app('Bravo', {...score(70), renewalDate: '2027-02-01', noticeDeadline: '2026-09-01'}),
       app('Alpha', {...score(null), noticeDeadline: '2026-12-15'}),
       app('Charlie', score(90)),
     ];
     expect(names(apps, {sort: APP_LIST_SORT.name})).toEqual(['Alpha', 'Bravo', 'Charlie']);
     expect(names(apps, {sort: APP_LIST_SORT.health})).toEqual(['Bravo', 'Charlie', 'Alpha']);
     expect(names(apps, {sort: APP_LIST_SORT.deadline})).toEqual(['Alpha', 'Bravo', 'Charlie']);
-    expect(nextDate(apps[0], TODAY)).toEqual({date: '2027-02-01', kind: DATE_KIND.renewal});
+    expect(nextDate(apps[0], TODAY)).toEqual({date: '2027-02-01', kind: DATE_KIND.renewal, isOverdue: false});
+    // A notice deadline that passed in the last 30 days stays first and is marked (spec Journey D).
+    expect(nextDate(app('Delta', {noticeDeadline: '2026-11-20', renewalDate: '2026-12-20'}), TODAY)).toEqual({date: '2026-11-20', kind: DATE_KIND.notice, isOverdue: true});
   });
 
   it('AC3: filters narrow by criticality, owner, health state (not monitored is its own state) and open notices', () => {
@@ -80,7 +82,7 @@ describe('applications catalog', () => {
 
   it('each app shows its most severe open notice; an app with none has no entry', () => {
     const issues = topIssues([notice('Medium', NOTICE_SEVERITY.medium, 'Wiki'), notice('Critical', NOTICE_SEVERITY.critical, 'Wiki')]);
-    expect(issues.get('Wiki-id')?.notice.title).toBe('Critical');
+    expect(issues.get('Wiki-id')?.title).toBe('Critical');
     expect(issues.has('Ledger-id')).toBe(false);
   });
 

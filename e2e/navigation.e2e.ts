@@ -1,6 +1,6 @@
 import {expect, test, type Page} from '@playwright/test';
 
-const listSearch = (page: Page) => page.getByRole('textbox', {name: 'Search applications'}).last();
+const listSearch = (page: Page) => page.getByRole('textbox', {name: 'Filter applications by name'});
 const topbarSearch = (page: Page) => page.getByRole('searchbox', {name: 'Search applications'}).first();
 
 test('primary navigation is Overview, Applications, Notices and Settings, reachable by keyboard with the current page marked', async ({page}) => {

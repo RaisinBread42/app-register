@@ -1,8 +1,9 @@
 'use client';
 
-import {useEffect, useRef, useState} from 'react';
+import {useDeferredValue, useEffect, useMemo, useRef, useState} from 'react';
 import {useSearchParams} from 'next/navigation';
 import {Badge} from '@astryxdesign/core/Badge';
+import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {Card} from '@astryxdesign/core/Card';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
@@ -13,9 +14,9 @@ import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
-import {APP_CRITICALITIES, APP_LIST_SORTS, DATE_KIND, FILTER_ALL, ROUTES, UI_QUERY_ON, type AppListSort} from '@/lib/constants';
-import type {App, Notice} from '@/lib/ui/api-client';
-import {applyAppListView, catalogOwners, DEFAULT_APP_LIST_VIEW, isFiltered, nextDate, topIssues, type AppListView} from '@/lib/ui/catalog';
+import {APP_CRITICALITIES, APP_LIST_SORTS, CRITICALITY_FILTER_NOT_SET, DATE_KIND, FILTER_ALL, ROUTES, UI_QUERY_ON, type AppListSort} from '@/lib/constants';
+import type {App} from '@/lib/ui/api-client';
+import {applyAppListView, catalogOwners, DEFAULT_APP_LIST_VIEW, isFiltered, nextDate, type AppListView, type IssueSummary} from '@/lib/ui/catalog';
 import {
   APP_LIST_SORT_LABEL,
   CRITICALITY_LABEL,
@@ -30,7 +31,7 @@ import {
 } from '@/lib/ui/copy';
 import {appListQuery, appListViewFrom} from '@/lib/ui/list-filters';
 import {rememberListQuery} from '@/lib/ui/list-memory';
-import {DEFAULT_INBOX_VIEW, inboxQuery, type InboxRow} from '@/lib/ui/notice-inbox';
+import {DEFAULT_INBOX_VIEW, inboxQuery} from '@/lib/ui/notice-inbox';
 import {formatDate} from '@/lib/ui/register-view';
 import {AppCell} from '../_components/AppIdentity';
 import {ScorePill} from '../_components/Health';
@@ -39,31 +40,52 @@ import {PageHeader} from '../_components/PageHeader';
 import {AddApplicationDialog} from './AddApplicationDialog';
 import type {PersonOption} from './AppForm';
 
-const column = (share: number) => proportional(share, {minWidth: 96});
+/** Narrow enough floors that every column fits a 1280 px screen beside the side nav. */
+const column = (share: number) => proportional(share, {minWidth: 80});
 
 const TYPE_FILTERS = [{value: FILTER_ALL, label: 'All types'}, ...KIND_OPTIONS];
-const CRITICALITY_FILTERS = [{value: FILTER_ALL, label: 'All criticality'}, ...APP_CRITICALITIES.map((value) => ({value, label: CRITICALITY_LABEL[value]}))];
+const CRITICALITY_FILTERS = [
+  {value: FILTER_ALL, label: 'All criticality'},
+  ...APP_CRITICALITIES.map((value) => ({value, label: CRITICALITY_LABEL[value]})),
+  {value: CRITICALITY_FILTER_NOT_SET, label: CRITICALITY_NOT_SET},
+];
 const NOTICE_FILTERS = [
   {value: FILTER_ALL, label: 'Any notices'},
   {value: UI_QUERY_ON, label: 'Open notices'},
 ];
 const SORT_OPTIONS = APP_LIST_SORTS.map((sort) => ({value: sort, label: APP_LIST_SORT_LABEL[sort]}));
 
-type Props = {apps: App[]; notices: Notice[]; people: PersonOption[]; addKey: string; initialView: AppListView; isAddOpen: boolean; today: string};
+type Props = {
+  apps: App[];
+  /** Each app's most severe open notice, worked out on the server; null when the notices could not be read. */
+  issues: Record<string, IssueSummary> | null;
+  people: PersonOption[];
+  addKey: string;
+  initialView: AppListView;
+  isAddOpen: boolean;
+  today: string;
+};
 
 /**
  * The applications catalog (spec §4): one dense row per app with its highest active
  * issue, the apps that need attention first, and search, filters and sort in the URL.
  */
-export function ApplicationsView({apps, notices, people, addKey, initialView, isAddOpen, today}: Props) {
+export function ApplicationsView({apps, issues: issueRecord, people, addKey, initialView, isAddOpen, today}: Props) {
   const searchParams = useSearchParams();
   const [view, setView] = useState<AppListView>(initialView);
   const [isAdding, setIsAdding] = useState(isAddOpen);
   /** The query string this view last wrote, so its own URL updates are not read back as outside changes. */
   const written = useRef(appListQuery(initialView));
-  const issues = topIssues(notices);
-  const shown = applyAppListView(apps, view, issues, today);
-  const owners = [{value: FILTER_ALL, label: 'All owners'}, ...catalogOwners(apps)];
+  const issues = useMemo(() => new Map(Object.entries(issueRecord ?? {})), [issueRecord]);
+  // Typing stays quick on a long list: the table follows the search a moment later.
+  const deferredView = useDeferredValue(view);
+  const shown = useMemo(() => applyAppListView(apps, deferredView, issues, today), [apps, deferredView, issues, today]);
+  const owners = useMemo(() => {
+    const listed = catalogOwners(apps);
+    // A shared link can name an owner who owns nothing now: say so instead of showing an unnamed filter.
+    const isUnlisted = view.owner !== FILTER_ALL && !listed.some((owner) => owner.value === view.owner);
+    return [{value: FILTER_ALL, label: 'All owners'}, ...listed, ...(isUnlisted ? [{value: view.owner, label: 'Owner with no applications'}] : [])];
+  }, [apps, view.owner]);
 
   // The URL is the source of truth: when it changes from outside (topbar search, the side nav,
   // Back and Forward), the list follows it.
@@ -90,7 +112,19 @@ export function ApplicationsView({apps, notices, people, addKey, initialView, is
 
   return (
     <PageFrame crumbs={[{label: 'Applications'}]}>
-      <PageHeader title="Applications" description="Every application your company buys or builds, the ones that need attention first." actions={addButton} />
+      <PageHeader
+        title="Applications"
+        description="Every application your company buys or builds, the ones that need attention first."
+        actions={apps.length > 0 ? addButton : undefined}
+      />
+      {issueRecord === null && apps.length > 0 && (
+        <Banner
+          status="warning"
+          title="Notices could not be loaded"
+          description="The highest active issue is missing for now, so the order may not show what needs attention first. Reload to try again."
+          collapsible={false}
+        />
+      )}
       {apps.length === 0 ? (
         <Card>
           <EmptyState
@@ -104,9 +138,9 @@ export function ApplicationsView({apps, notices, people, addKey, initialView, is
           <VStack gap={0}>
             <HStack gap={2} padding={4} vAlign="center" wrap="wrap">
               <TextInput
-                label="Search applications"
+                label="Filter applications by name"
                 isLabelHidden
-                placeholder="Search applications…"
+                placeholder="Filter by name…"
                 value={view.query}
                 onChange={(value) => update({query: value ?? ''})}
                 width={288}
@@ -140,6 +174,7 @@ export function ApplicationsView({apps, notices, people, addKey, initialView, is
               />
             </HStack>
             <Table
+              aria-label="Applications"
               data={shown}
               idKey="id"
               hasHover
@@ -152,8 +187,8 @@ export function ApplicationsView({apps, notices, people, addKey, initialView, is
                 />
               }
               columns={[
-                {key: 'name', header: 'Application', width: proportional(2, {minWidth: 200}), renderCell: (app: App) => <AppCell app={app} />},
-                {key: 'kind', header: 'Type', width: proportional(1.2, {minWidth: 136}), renderCell: (app: App) => <Badge label={KIND_LABEL[app.kind]} variant="purple" />},
+                {key: 'name', header: 'Application', width: proportional(2, {minWidth: 170}), renderCell: (app: App) => <AppCell app={app} />},
+                {key: 'kind', header: 'Type', width: proportional(1.2, {minWidth: 120}), renderCell: (app: App) => <Badge label={KIND_LABEL[app.kind]} variant="purple" />},
                 {key: 'owner', header: 'Owner', width: column(1.1), renderCell: (app: App) => app.owner.name},
                 {
                   key: 'criticality',
@@ -165,15 +200,15 @@ export function ApplicationsView({apps, notices, people, addKey, initialView, is
                 {
                   key: 'issue',
                   header: 'Highest active issue',
-                  width: proportional(2, {minWidth: 200}),
+                  width: proportional(2, {minWidth: 170}),
                   renderCell: (app: App) => <IssueCell app={app} issue={issues.get(app.id)} />,
                 },
                 {key: 'next', header: 'Next date', width: column(1), renderCell: (app: App) => <NextDateCell app={app} today={today} />},
               ]}
             />
-            <HStack paddingInline={4} paddingBlock={4}>
+            <HStack paddingInline={4} paddingBlock={4} role="status">
               <Text type="supporting" color="secondary">
-                {`Showing ${shown.length} of ${apps.length} applications${isFiltered(view) ? ' (filtered)' : ''}`}
+                {`Showing ${shown.length} of ${apps.length} applications${isFiltered(deferredView) ? ' (filtered)' : ''}`}
               </Text>
             </HStack>
           </VStack>
@@ -198,7 +233,7 @@ function HealthCell({app}: {app: App}) {
 }
 
 /** The most severe open notice, linked to it in the inbox; otherwise what is known about issues. */
-function IssueCell({app, issue}: {app: App; issue: InboxRow | undefined}) {
+function IssueCell({app, issue}: {app: App; issue: IssueSummary | undefined}) {
   if (!issue) {
     return (
       <Text size="sm" color="secondary">
@@ -209,10 +244,10 @@ function IssueCell({app, issue}: {app: App; issue: InboxRow | undefined}) {
   return (
     <HStack gap={2} vAlign="center">
       <HStack style={{flex: 'none'}}>
-        <Badge label={NOTICE_SEVERITY_LABEL[issue.notice.severity]} variant={NOTICE_SEVERITY_VARIANT[issue.notice.severity]} />
+        <Badge label={NOTICE_SEVERITY_LABEL[issue.severity]} variant={NOTICE_SEVERITY_VARIANT[issue.severity]} />
       </HStack>
-      <Link href={`${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, notice: issue.match.id})}`} size="sm" maxLines={2}>
-        {issue.notice.title}
+      <Link href={`${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, notice: issue.matchId})}`} size="sm" maxLines={2}>
+        {issue.title}
       </Link>
     </HStack>
   );
@@ -228,11 +263,15 @@ function NextDateCell({app, today}: {app: App; today: string}) {
     );
   }
   return (
-    <VStack gap={0}>
+    <VStack gap={0.5}>
       <Text size="sm">{formatDate(next.date)}</Text>
-      <Text type="supporting" color="secondary">
-        {next.kind === DATE_KIND.notice ? 'Notice deadline' : 'Renewal'}
-      </Text>
+      {next.isOverdue ? (
+        <Badge label="Notice deadline passed" variant="red" />
+      ) : (
+        <Text type="supporting" color="secondary">
+          {next.kind === DATE_KIND.notice ? 'Notice deadline' : 'Renewal'}
+        </Text>
+      )}
     </VStack>
   );
 }

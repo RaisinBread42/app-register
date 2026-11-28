@@ -257,6 +257,8 @@ export const APP_CRITICALITY = {
   critical: 'critical',
 } as const;
 export const APP_CRITICALITIES = Object.values(APP_CRITICALITY);
+/** The catalog's criticality filter value for apps whose criticality is not set yet, so they can be found and set. */
+export const CRITICALITY_FILTER_NOT_SET = 'not_set';
 export type AppCriticality = (typeof APP_CRITICALITIES)[number];
 
 /** Environments an app runs in; production exposure feeds health scoring later ([32]). */
