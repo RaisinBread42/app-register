@@ -4,6 +4,10 @@ import {AXE_TAGS, E2E, VIEWPORTS} from './e2e-config';
 
 /** Fails the test on any WCAG 2.2 A/AA violation, listing each rule and where it hit. */
 export async function expectNoAxeViolations(page: Page): Promise<void> {
+  // Contrast is checked once dialogs and drawers have finished fading in (endless ones, like spinners, aside).
+  await page.waitForFunction(() =>
+    document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity),
+  );
   // @axe-core/playwright types its Page from its own playwright-core copy; the object is the same.
   const axePage = page as unknown as ConstructorParameters<typeof AxeBuilder>[0]['page'];
   const results = await new AxeBuilder({page: axePage}).withTags(AXE_TAGS).analyze();

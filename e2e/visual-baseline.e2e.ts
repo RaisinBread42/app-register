@@ -18,8 +18,6 @@ async function checkDialog(page: Page, opener: ReturnType<Page['getByRole']>, ti
   await expect(heading).toBeVisible();
   // The close control sits in the shared header, beside the title (not some other "Close" button further down).
   await expect(dialog.locator('.astryx-dialog-header').getByRole('button')).toHaveCount(1);
-  // Check contrast once the dialog has finished fading in, not halfway through.
-  await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== 'running'));
   await expectNoAxeViolations(page);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
