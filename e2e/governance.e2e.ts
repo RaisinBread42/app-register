@@ -27,14 +27,14 @@ test('a figure drills down to the filtered list in one click (open security noti
 test('a severity figure and an owner drill down to the filtered lists', async ({page}) => {
   await page.goto('/governance');
   const severities = page.getByRole('heading', {name: 'Open notices by severity'}).locator('xpath=..');
-  const critical = severities.getByRole('link', {name: /^\d+ Critical$/});
+  const critical = severities.getByRole('link', {name: /^\d+ open notices: Critical$/});
   const count = Number(await critical.innerText());
   await critical.click();
   await expect(page).toHaveURL(/\/notices\?severity=critical/);
   await expect(page.locator('a[data-inbox-row]')).toHaveCount(count);
 
   await page.goto('/governance');
-  const owners = page.getByRole('heading', {name: 'Open items by owner'}).locator('xpath=..');
+  const owners = page.getByRole('heading', {name: /^Open notices by owner/}).locator('xpath=..');
   const owner = owners.getByRole('link').first();
   const name = await owner.innerText();
   await owner.click();

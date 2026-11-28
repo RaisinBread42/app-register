@@ -143,6 +143,8 @@ export const CHECK_FAILED = "Check failed";
 export const HEALTH_FILTER_OPTIONS = [
   { value: FILTER_ALL, label: "All health" },
   { value: APP_HEALTH_FILTER.attention, label: NEEDS_ATTENTION },
+  { value: APP_HEALTH_FILTER.critical, label: "Critical" },
+  { value: APP_HEALTH_FILTER.stale, label: "Data out of date" },
   { value: APP_HEALTH_FILTER.healthy, label: HEALTHY },
   { value: APP_HEALTH_FILTER.notMonitored, label: NOT_MONITORED },
 ];

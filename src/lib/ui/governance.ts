@@ -1,181 +1,161 @@
 import {
   APP_HEALTH_FILTER,
-  DATE_KIND,
-  GOVERNANCE_HANDLED_DAYS,
   GOVERNANCE_UPCOMING_DAYS,
-  BOARD_HEALTH_STATE as HEALTH_STATE,
-  HEALTH_STATUS,
-  type BoardHealthState as HealthState,
   MATCH_STATUS,
-  OVERVIEW_OVERDUE_DAYS,
   NOTICE_CATEGORIES,
   NOTICE_SEVERITIES,
   NOTICE_SEVERITY,
-  PERSON_STATUS,
   ROUTES,
-  type DateKind,
+  appRoute,
   type NoticeCategory,
   type NoticeSeverity,
 } from '@/lib/constants';
 import {addDaysIso} from '@/lib/notice-alerts';
-import type {App, Notice, NoticeMatch, Person} from './api-client';
+import type {App, Notice, NoticeMatch} from './api-client';
+import {DEFAULT_APP_LIST_VIEW, matchesHealth} from './catalog';
 import {appListQuery} from './list-filters';
-import {DEFAULT_APP_LIST_VIEW} from './catalog';
-import {DEFAULT_INBOX_VIEW, INBOX_STATUS, inboxQuery, inboxRows} from './notice-inbox';
+import {DEFAULT_INBOX_VIEW, INBOX_STATUS, inboxQuery, inboxRows, type InboxView} from './notice-inbox';
 import {isOverdue} from './overview';
 
 /**
- * The Governance Board's figures ([49], spec governance-board.md): a light reporting
- * layer over data the register already holds. Nothing here is monitored or entered;
- * every figure is worked out from apps, notices, people and their dates, and carries
- * the link to the existing list that shows the items behind it. Pure, so each figure
- * is tested without a page.
+ * The Governance Board's figures ([49], docs/product/governance-board.md): a light
+ * reporting layer over data the register already holds. Nothing here is monitored or
+ * entered. Every figure is counted with the very filter of the Applications or Notices
+ * list it links to, so the drill-down always shows exactly that many. Pure, so each
+ * figure is tested without a page.
  */
 
 /** A number with the list it drills down to. */
 export type Figure = {count: number; href: string};
 
-const appsHref = (view: Partial<typeof DEFAULT_APP_LIST_VIEW>) => `${ROUTES.applications}${appListQuery({...DEFAULT_APP_LIST_VIEW, ...view})}`;
-const noticesHref = (view: Partial<typeof DEFAULT_INBOX_VIEW>) => `${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, ...view})}`;
+/** One item in a list on the board, linked to the app or notice it is about. */
+export type NamedLink = {label: string; detail: string; href: string};
 
-/**
- * One app's state on the board: a score's status, or insufficient data when nothing
- * could check it. A clean reading whose source then failed is stale; a critical or
- * attention one keeps that state (and counts in `outOfDate` too).
- */
-export function healthState(app: App): HealthState {
-  if (app.health.score === null) return HEALTH_STATE.insufficient;
-  if (app.health.status === HEALTH_STATUS.stale) return HEALTH_STATE.stale;
-  if (app.health.status === HEALTH_STATUS.critical) return HEALTH_STATE.critical;
-  if (app.health.status === HEALTH_STATUS.attention) return HEALTH_STATE.attention;
-  return HEALTH_STATE.healthy;
+const appsHref = (view: Partial<typeof DEFAULT_APP_LIST_VIEW>) => `${ROUTES.applications}${appListQuery({...DEFAULT_APP_LIST_VIEW, ...view})}`;
+const noticesHref = (view: Partial<InboxView>) => `${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, ...view})}`;
+const appLink = (app: Pick<App, 'id' | 'name'>, detail: string): NamedLink => ({label: app.name, detail, href: appRoute(app.id)});
+const matchLink = (notice: Notice, match: NoticeMatch): NamedLink => ({label: notice.title, detail: match.app.name, href: noticesHref({notice: match.id})});
+
+/** The portfolio figures, in the order the board shows them. Critical and out-of-date are among those needing attention. */
+export const PORTFOLIO_FIGURES = [
+  APP_HEALTH_FILTER.attention,
+  APP_HEALTH_FILTER.critical,
+  APP_HEALTH_FILTER.stale,
+  APP_HEALTH_FILTER.notMonitored,
+  APP_HEALTH_FILTER.healthy,
+] as const;
+export type PortfolioFigure = (typeof PORTFOLIO_FIGURES)[number];
+
+export type PortfolioHealth = {total: number; figures: Record<PortfolioFigure, Figure>; coverage: {checked: number; total: number}};
+
+/** Apps by health, each figure counted with the Applications list's own health filter, and how many have a score (coverage). */
+export function portfolioHealth(apps: App[]): PortfolioHealth {
+  const figures = Object.fromEntries(
+    PORTFOLIO_FIGURES.map((filter) => [filter, {count: apps.filter((app) => matchesHealth(app, filter)).length, href: appsHref({health: filter})}]),
+  ) as Record<PortfolioFigure, Figure>;
+  return {total: apps.length, figures, coverage: {checked: apps.length - figures[APP_HEALTH_FILTER.notMonitored].count, total: apps.length}};
 }
 
-export type PortfolioHealth = {
-  total: number;
-  byState: Record<HealthState, Figure>;
-  coverage: {checked: number; total: number};
-  /** Apps whose score rests on a reading a later check could not refresh, whatever their state. */
-  outOfDate: number;
-};
+/** A figure for an inbox view: counted with the rows that view shows. */
+function noticeFigure(notices: Notice[], view: Partial<InboxView>, today: string): Figure {
+  return {count: inboxRows(notices, {...DEFAULT_INBOX_VIEW, ...view}, today).length, href: noticesHref(view)};
+}
 
-/** Apps by health state, and how many something has checked (coverage). */
-export function portfolioHealth(apps: App[]): PortfolioHealth {
-  const count = (state: HealthState) => apps.filter((app) => healthState(app) === state).length;
-  return {
-    total: apps.length,
-    byState: {
-      [HEALTH_STATE.healthy]: {count: count(HEALTH_STATE.healthy), href: appsHref({health: APP_HEALTH_FILTER.healthy})},
-      [HEALTH_STATE.attention]: {count: count(HEALTH_STATE.attention), href: appsHref({health: APP_HEALTH_FILTER.attention})},
-      [HEALTH_STATE.critical]: {count: count(HEALTH_STATE.critical), href: appsHref({health: APP_HEALTH_FILTER.attention})},
-      [HEALTH_STATE.stale]: {count: count(HEALTH_STATE.stale), href: appsHref({health: APP_HEALTH_FILTER.attention})},
-      [HEALTH_STATE.insufficient]: {count: count(HEALTH_STATE.insufficient), href: appsHref({health: APP_HEALTH_FILTER.notMonitored})},
-    },
-    coverage: {checked: apps.length - count(HEALTH_STATE.insufficient), total: apps.length},
-    outOfDate: apps.filter((app) => app.health.staleSince !== null).length,
-  };
+/** Open notices on active apps by severity, most severe first. */
+export function openBySeverity(notices: Notice[], today: string): {severity: NoticeSeverity; open: Figure}[] {
+  return NOTICE_SEVERITIES.map((severity) => ({severity, open: noticeFigure(notices, {severity}, today)}));
 }
 
 export type CategoryRisk = {
   category: NoticeCategory;
   open: Figure;
   critical: Figure;
-  /** Remediation: open ones split by status, snoozed, and handled in the last GOVERNANCE_HANDLED_DAYS days. */
+  /** Remediation: the open ones split into new and in review, then snoozed, and handled in the last 30 days. */
   newCount: number;
   reviewing: number;
   snoozed: Figure;
   handledRecently: Figure;
 };
 
-/** Open notices on active apps by severity, most severe first; each links to the inbox filtered to it. */
-export function openBySeverity(notices: Notice[]): {severity: NoticeSeverity; open: Figure}[] {
-  const open = inboxRows(notices, DEFAULT_INBOX_VIEW);
-  return NOTICE_SEVERITIES.map((severity) => ({
-    severity,
-    open: {count: open.filter((row) => row.notice.severity === severity).length, href: noticesHref({severity})},
-  }));
-}
-
 /** Notices on active apps by kind: how many are open (and critical), and where remediation stands. */
 export function outstandingRisk(notices: Notice[], today: string): CategoryRisk[] {
-  const all = inboxRows(notices, {...DEFAULT_INBOX_VIEW, status: INBOX_STATUS.all});
-  const since = addDaysIso(today, -GOVERNANCE_HANDLED_DAYS);
   return NOTICE_CATEGORIES.map((category) => {
-    const rows = all.filter((row) => row.notice.category === category);
-    const open = rows.filter((row) => row.match.status === MATCH_STATUS.new || row.match.status === MATCH_STATUS.reviewing);
+    const open = inboxRows(notices, {...DEFAULT_INBOX_VIEW, category}, today);
     return {
       category,
-      open: {count: open.length, href: noticesHref({category})},
-      critical: {count: open.filter((row) => row.notice.severity === NOTICE_SEVERITY.critical).length, href: noticesHref({category, severity: NOTICE_SEVERITY.critical})},
+      open: noticeFigure(notices, {category}, today),
+      critical: noticeFigure(notices, {category, severity: NOTICE_SEVERITY.critical}, today),
       newCount: open.filter((row) => row.match.status === MATCH_STATUS.new).length,
       reviewing: open.filter((row) => row.match.status === MATCH_STATUS.reviewing).length,
-      snoozed: {count: rows.filter((row) => row.match.status === MATCH_STATUS.snoozed).length, href: noticesHref({category, status: INBOX_STATUS.snoozed})},
-      handledRecently: {
-        count: rows.filter((row) => row.match.status === MATCH_STATUS.handled && (row.match.statusChangedAt ?? '').slice(0, 10) >= since).length,
-        href: noticesHref({category, status: INBOX_STATUS.handled}),
-      },
+      snoozed: noticeFigure(notices, {category, status: INBOX_STATUS.snoozed}, today),
+      handledRecently: noticeFigure(notices, {category, status: INBOX_STATUS.handledRecently}, today),
     };
   });
 }
 
-export type NamedLink = {label: string; detail: string; href: string};
-
 export type Accountability = {
-  noBackupOwner: NamedLink[];
+  noActiveBackup: NamedLink[];
   ownerLeft: NamedLink[];
-  unassigned: Figure & {items: NamedLink[]};
+  /** Every open notice nobody is assigned to, each linked to the notice (the inbox has no assignee filter). */
+  unassigned: NamedLink[];
   byOwner: {owner: string; open: number; apps: number; href: string}[];
 };
 
-const appLink = (app: Pick<App, 'id' | 'name'>, detail: string): NamedLink => ({label: app.name, detail, href: `${ROUTES.applications}/${encodeURIComponent(app.id)}`});
-const matchLink = (notice: Notice, match: NoticeMatch): NamedLink => ({label: notice.title, detail: match.app.name, href: noticesHref({notice: match.id})});
-
-/** Who is accountable: apps with no backup owner or a departed owner, open notices nobody owns, and each owner's open items. */
-export function accountability(apps: App[], people: Person[], notices: Notice[]): Accountability {
-  const left = new Set(people.filter((person) => person.status !== PERSON_STATUS.active).map((person) => person.id));
-  const open = inboxRows(notices, DEFAULT_INBOX_VIEW);
-  const unassigned = open.filter((row) => row.match.assignee === null);
+/**
+ * Who is accountable. `activePersonIds` are the people still active (GET /api/people
+ * lists only those), so an owner or backup owner not among them is no longer active.
+ */
+export function accountability(apps: App[], activePersonIds: string[], notices: Notice[], today: string): Accountability {
+  const active = new Set(activePersonIds);
+  const open = inboxRows(notices, DEFAULT_INBOX_VIEW, today);
   const owners = new Map<string, Accountability['byOwner'][number]>();
   for (const app of apps) {
-    const entry = owners.get(app.owner.id) ?? {owner: app.owner.name, open: 0, apps: 0, href: appsHref({owner: app.owner.id})};
+    const owner = active.has(app.owner.id) ? app.owner.name : `${app.owner.name} (no longer active)`;
+    const entry = owners.get(app.owner.id) ?? {owner, open: 0, apps: 0, href: appsHref({owner: app.owner.id})};
     entry.apps += 1;
     entry.open += open.filter((row) => row.match.app.id === app.id).length;
     owners.set(app.owner.id, entry);
   }
   return {
-    noBackupOwner: apps.filter((app) => app.backupOwner === null).map((app) => appLink(app, `Owner: ${app.owner.name}`)),
-    ownerLeft: apps.filter((app) => left.has(app.owner.id)).map((app) => appLink(app, `${app.owner.name} has left`)),
-    unassigned: {count: unassigned.length, href: noticesHref({}), items: unassigned.map((row) => matchLink(row.notice, row.match))},
+    noActiveBackup: apps.flatMap((app) => {
+      if (app.backupOwner === null) {
+        return [appLink(app, 'No backup owner')];
+      }
+      return active.has(app.backupOwner.id) ? [] : [appLink(app, `Backup owner ${app.backupOwner.name} is no longer active`)];
+    }),
+    ownerLeft: apps.filter((app) => !active.has(app.owner.id)).map((app) => appLink(app, `${app.owner.name} is no longer active`)),
+    unassigned: open.filter((row) => row.match.assignee === null).map((row) => matchLink(row.notice, row.match)),
     byOwner: [...owners.values()].sort((a, b) => b.open - a.open || a.owner.localeCompare(b.owner)),
   };
 }
 
-export type DatedItem = {appId: string; label: string; date: string; kind: DateKind; href: string};
+export type DatedItem = NamedLink & {date: string};
 
 export type Deadlines = {
+  /** Notice deadlines passed in the last 30 days (as on the Overview), and open notices whose date has passed. */
   overdue: DatedItem[];
-  snoozesEnded: NamedLink[];
-  /** Notice deadlines and renewals ahead, by window (30, 60, 90 days); each date counts in the first window it falls in. */
-  upcoming: {days: number; items: DatedItem[]}[];
+  /** Open notices back in the queue and not picked up yet: a snooze that ended, or one the source reported again. */
+  reopened: NamedLink[];
+  /** Dates ahead by window: the first 30 days, then days 31–60, then 61–90. */
+  upcoming: {fromDays: number; toDays: number; items: DatedItem[]}[];
 };
 
-/** What is late (passed notice deadlines with no decision recorded, snoozes past their end) and what comes in 30, 60 and 90 days. */
+/** What is late, what came back, and what comes in the next 30, 60 and 90 days: notice deadlines, renewals and open notices' dates. */
 export function deadlines(apps: App[], notices: Notice[], today: string): Deadlines {
-  const dated: DatedItem[] = apps.flatMap((app) => [
-    ...(app.noticeDeadline ? [{appId: app.id, label: `${app.name} notice deadline`, date: app.noticeDeadline, kind: DATE_KIND.notice, href: `${ROUTES.applications}/${encodeURIComponent(app.id)}`}] : []),
-    ...(app.renewalDate ? [{appId: app.id, label: `${app.name} renewal`, date: app.renewalDate, kind: DATE_KIND.renewal, href: `${ROUTES.applications}/${encodeURIComponent(app.id)}`}] : []),
-  ]);
-  const snoozed = inboxRows(notices, {...DEFAULT_INBOX_VIEW, status: INBOX_STATUS.snoozed});
-  let from = today;
-  const upcoming = GOVERNANCE_UPCOMING_DAYS.map((days) => {
-    const until = addDaysIso(today, days);
-    const items = dated.filter((item) => item.date >= from && item.date <= until).sort((a, b) => a.date.localeCompare(b.date));
-    from = addDaysIso(until, 1);
-    return {days, items};
+  const open = inboxRows(notices, DEFAULT_INBOX_VIEW, today);
+  const noticeDeadlines: DatedItem[] = apps.flatMap((app) => (app.noticeDeadline ? [{...appLink(app, 'Notice deadline'), date: app.noticeDeadline}] : []));
+  const renewals: DatedItem[] = apps.flatMap((app) => (app.renewalDate ? [{...appLink(app, 'Renewal'), date: app.renewalDate}] : []));
+  const noticeDates: DatedItem[] = open.flatMap((row) => (row.notice.dueOn ? [{...matchLink(row.notice, row.match), date: row.notice.dueOn}] : []));
+  const ahead = [...noticeDeadlines, ...renewals, ...noticeDates];
+  const byDate = (a: DatedItem, b: DatedItem) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label);
+  const upcoming = GOVERNANCE_UPCOMING_DAYS.map((toDays, index) => {
+    const fromDays = index === 0 ? 0 : GOVERNANCE_UPCOMING_DAYS[index - 1] + 1;
+    const items = ahead.filter((item) => item.date >= addDaysIso(today, fromDays) && item.date <= addDaysIso(today, toDays)).sort(byDate);
+    return {fromDays, toDays, items};
   });
   return {
-    overdue: dated.filter((item) => item.kind === DATE_KIND.notice && isOverdue(item.date, today)).sort((a, b) => a.date.localeCompare(b.date)),
-    snoozesEnded: snoozed.filter((row) => row.match.snoozedUntil !== null && row.match.snoozedUntil <= today).map((row) => matchLink(row.notice, row.match)),
+    overdue: [...noticeDeadlines.filter((item) => isOverdue(item.date, today)), ...noticeDates.filter((item) => item.date < today)].sort(byDate),
+    reopened: open.filter((row) => row.match.status === MATCH_STATUS.new && row.match.statusChangedAt !== null).map((row) => matchLink(row.notice, row.match)),
     upcoming,
   };
 }
@@ -187,34 +167,47 @@ const sentence = (clauses: string[]) => {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 };
 
+/** What the summary reads that is not a figure on the board: how many sources an active app relies on are out of date. */
+export type SummaryContext = {staleSources: number};
+
 /**
- * Four or five plain sentences from the figures, most urgent first: notices, health,
- * out-of-date data (only when there is some), dates, ownership. Never says "all is well"
- * when nothing is registered.
+ * Four or five plain sentences, using the same numbers as the figures below them:
+ * notices, health (out of the apps with a score), out-of-date data (only when there is
+ * some), dates, ownership. Never says all is well when nothing is registered or checked.
  */
-export function executiveSummary(health: PortfolioHealth, risk: CategoryRisk[], people: Accountability, dates: Deadlines): string[] {
+export function executiveSummary(health: PortfolioHealth, risk: CategoryRisk[], people: Accountability, dates: Deadlines, context: SummaryContext): string[] {
   if (health.total === 0) {
-    return ['No applications are registered yet, so nothing is being watched.'];
+    return ['No applications are registered yet.', 'Nothing is being watched, so nothing can be called healthy.', 'Add the first application on Applications to start.'];
   }
+  const {figures, coverage} = health;
   const open = risk.reduce((sum, row) => sum + row.open.count, 0);
   const critical = risk.reduce((sum, row) => sum + row.critical.count, 0);
-  const affected = health.byState.critical.count + health.byState.attention.count;
-  const stale = health.outOfDate;
+  const attention = figures[APP_HEALTH_FILTER.attention].count;
+  const staleApps = figures[APP_HEALTH_FILTER.stale].count;
+  const unscored = coverage.total - coverage.checked;
   const [nearest] = dates.upcoming;
   const soon = nearest.items.length;
-  const gaps = people.noBackupOwner.length + people.ownerLeft.length;
-  return [
-    open === 0 ? 'No notices are open.' : `${plural(open, 'notice')} ${verb(open, 'is', 'are')} open${critical ? `, ${critical} of them critical` : ''}.`,
-    `${plural(affected, 'application')} ${verb(affected, 'needs', 'need')} attention out of ${health.total}; ${health.coverage.checked} of ${health.total} ${verb(health.coverage.checked, 'has', 'have')} been checked.`,
-    ...(stale > 0 ? [`${plural(stale, 'application')} ${verb(stale, 'has', 'have')} out-of-date data, so ${verb(stale, 'its', 'their')} score may be wrong.`] : []),
-    sentence([
-      ...(dates.overdue.length > 0 ? [`${plural(dates.overdue.length, 'notice deadline')} ${verb(dates.overdue.length, 'has', 'have')} passed in the last ${OVERVIEW_OVERDUE_DAYS} days`] : []),
-      soon === 0
-        ? `no deadline or renewal falls in the next ${nearest.days} days`
-        : `${plural(soon, 'deadline or renewal', 'deadlines or renewals')} ${verb(soon, 'falls', 'fall')} in the next ${nearest.days} days`,
-    ]),
-    gaps === 0
-      ? 'Every application has an active owner and a backup owner.'
-      : `${plural(gaps, 'ownership gap')}: ${people.noBackupOwner.length} with no backup owner, ${people.ownerLeft.length} whose owner has left.`,
+  const gaps = people.noActiveBackup.length + people.ownerLeft.length;
+  const notices =
+    open === 0 ? 'No notices are open.' : open === 1 ? `1 notice is open${critical ? ', and it is critical' : ''}.` : `${open} notices are open${critical ? `, ${critical} of them critical` : ''}.`;
+  const scores =
+    coverage.checked === 0
+      ? `None of the ${plural(coverage.total, 'application')} has a health score yet, so none can be called healthy.`
+      : sentence([
+          `${plural(attention, 'application')} ${verb(attention, 'needs', 'need')} attention out of the ${coverage.checked} with a score`,
+          ...(unscored > 0 ? [`${unscored} more ${verb(unscored, 'has', 'have')} no score yet (insufficient data)`] : []),
+        ]);
+  const outOfDate = [
+    ...(staleApps > 0 ? [`${plural(staleApps, 'application')} ${verb(staleApps, 'rests', 'rest')} on out-of-date data`] : []),
+    ...(context.staleSources > 0 ? [`${plural(context.staleSources, 'monitoring source')} ${verb(context.staleSources, 'is', 'are')} out of date`] : []),
   ];
+  const due = sentence([
+    ...(dates.overdue.length > 0 ? [`${plural(dates.overdue.length, 'date')} ${verb(dates.overdue.length, 'has', 'have')} passed with the item still open`] : []),
+    soon === 0 ? `nothing falls due in the next ${nearest.toDays} days` : `${plural(soon, 'date')} ${verb(soon, 'falls', 'fall')} due in the next ${nearest.toDays} days`,
+  ]);
+  const ownership =
+    gaps === 0
+      ? 'Every application has an active owner and an active backup owner.'
+      : `${plural(gaps, 'ownership gap')}: ${people.noActiveBackup.length} without an active backup owner, ${people.ownerLeft.length} whose owner is no longer active.`;
+  return [notices, scores, ...(outOfDate.length ? [sentence(outOfDate)] : []), due, ownership];
 }

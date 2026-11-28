@@ -1,5 +1,6 @@
 import {
   FILTER_ALL,
+  HANDLED_RECENTLY_DAYS,
   MATCH_STATUS,
   NOTICE_CATEGORIES,
   NOTICE_CATEGORY,
@@ -10,6 +11,7 @@ import {
   type NoticeCategory,
   type NoticeSeverity,
 } from '@/lib/constants';
+import {addDaysIso, todayIso} from '@/lib/notice-alerts';
 import type {Notice, NoticeMatch} from './api-client';
 import {NOTICE_CATEGORY_LABEL} from './copy';
 import type {SearchParams} from './list-filters';
@@ -24,7 +26,7 @@ import {formatDate} from './register-view';
 export type InboxRow = {notice: Notice; match: NoticeMatch};
 
 /** Status groups the inbox filters on: open needs attention (new or reviewing). */
-export const INBOX_STATUS = {open: 'open', snoozed: 'snoozed', handled: 'handled', all: FILTER_ALL} as const;
+export const INBOX_STATUS = {open: 'open', snoozed: 'snoozed', handled: 'handled', handledRecently: 'handled_recently', all: FILTER_ALL} as const;
 export const INBOX_STATUSES = Object.values(INBOX_STATUS);
 export type InboxStatus = (typeof INBOX_STATUSES)[number];
 
@@ -96,24 +98,27 @@ export function inboxQuery(view: InboxView): string {
   return text ? `?${text}` : '';
 }
 
-function matchesStatus(match: NoticeMatch, status: InboxStatus): boolean {
+function matchesStatus(match: NoticeMatch, status: InboxStatus, today: string): boolean {
   if (status === INBOX_STATUS.all) {
     return true;
   }
   if (status === INBOX_STATUS.open) {
     return OPEN_MATCH_STATUSES.includes(match.status);
   }
+  if (status === INBOX_STATUS.handledRecently) {
+    return match.status === MATCH_STATUS.handled && (match.statusChangedAt ?? '').slice(0, 10) >= addDaysIso(today, -HANDLED_RECENTLY_DAYS);
+  }
   return match.status === status;
 }
 
-/** The rows a view shows, most severe first (or by application), then the soonest date. */
-export function inboxRows(notices: Notice[], view: InboxView): InboxRow[] {
+/** The rows a view shows, most severe first (or by application), then the soonest date. `today` is a UTC date. */
+export function inboxRows(notices: Notice[], view: InboxView, today = todayIso()): InboxRow[] {
   const rows = notices.flatMap((notice) =>
     notice.matches.filter((match) => match.resolvedAt === null).map((match) => ({notice, match})),
   );
   const shown = rows.filter(
     ({notice, match}) =>
-      matchesStatus(match, view.status) &&
+      matchesStatus(match, view.status, today) &&
       (view.severity === FILTER_ALL || notice.severity === view.severity) &&
       (view.category === FILTER_ALL || notice.category === view.category) &&
       (view.app === FILTER_ALL || match.app.id === view.app),
