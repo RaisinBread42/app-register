@@ -10,6 +10,7 @@ export const ROUTES = {
   home: '/',
   applications: '/applications',
   notices: '/notices',
+  governance: '/governance',
   settings: '/settings',
 } as const;
 
@@ -79,7 +80,11 @@ export type AppTab = (typeof APP_TABS)[number];
 
 /** Health filter of the applications list. */
 export const APP_HEALTH_FILTER = {
+  /** Any score below healthy, or resting on out-of-date data. */
   attention: 'attention',
+  /** Of those, the critical ones, and the ones whose score rests on out-of-date data. */
+  critical: 'critical',
+  stale: 'stale',
   healthy: 'healthy',
   /** Nothing recorded to check, so no score: never counted as healthy. */
   notMonitored: 'not_monitored',
@@ -387,7 +392,11 @@ export const ACTION_NOTE_MAX_LENGTH = 1000;
 export const AUDIT_PAGE_MAX = 200;
 export const AUDIT_PAGE_DEFAULT = 50;
 
-/** The kinds of date the Overview lists. */
+/** How far back "handled recently" looks (the inbox view and the Governance Board). */
+export const HANDLED_RECENTLY_DAYS = 30;
+/** Governance Board ([49]): the windows for upcoming dates, each listing the days after the one before. */
+export const GOVERNANCE_UPCOMING_DAYS = [30, 60, 90] as const;
+
 /** Overview (spec §4.1): how far ahead the key number and the date list look, how far back a passed notice deadline stays, and list lengths. */
 export const OVERVIEW_DEADLINE_DAYS = 30;
 export const OVERVIEW_DATES_DAYS = 90;
@@ -395,6 +404,7 @@ export const OVERVIEW_OVERDUE_DAYS = 30;
 export const OVERVIEW_QUEUE_LIMIT = 5;
 export const OVERVIEW_ACTIVITY_LIMIT = 5;
 
+/** The kinds of date the Overview lists. */
 export const DATE_KIND = {notice: 'notice', renewal: 'renewal'} as const;
 export type DateKind = (typeof DATE_KIND)[keyof typeof DATE_KIND];
 

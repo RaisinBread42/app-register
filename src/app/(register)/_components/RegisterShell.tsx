@@ -6,7 +6,7 @@ import {AppShell} from '@astryxdesign/core/AppShell';
 import {Badge} from '@astryxdesign/core/Badge';
 import {SideNav, SideNavHeading, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 import {PRODUCT_NAME, ROUTES} from '@/lib/constants';
-import {AppsIcon, NoticesIcon, OverviewIcon, SettingsIcon} from '@/lib/ui/icons';
+import {AppsIcon, GovernanceIcon, NoticesIcon, OverviewIcon, SettingsIcon} from '@/lib/ui/icons';
 import {BrandMark, SidebarRule, WorkspaceCard} from './Brand';
 
 type SvgIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -38,6 +38,7 @@ export function RegisterShell({children, openNotices}: {children: React.ReactNod
             {item('Overview', ROUTES.home, OverviewIcon)}
             {item('Applications', ROUTES.applications, AppsIcon)}
             {item('Notices', ROUTES.notices, NoticesIcon, noticeCount)}
+            {item('Governance', ROUTES.governance, GovernanceIcon)}
           </SideNavSection>
           <SidebarRule />
           <SideNavSection title="Admin" isHeaderHidden>

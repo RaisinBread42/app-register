@@ -16,7 +16,7 @@ import {Table, proportional} from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {useToast} from '@astryxdesign/core/Toast';
 import {VStack} from '@astryxdesign/core/VStack';
-import {AUDIT_ACTION, FILTER_ALL, MATCH_STATUS, NOTICE_CATEGORIES, NOTICE_SEVERITIES, ROUTES, SOURCE_FRESH_HOURS, UI_QUERY} from '@/lib/constants';
+import {AUDIT_ACTION, FILTER_ALL, HANDLED_RECENTLY_DAYS, MATCH_STATUS, NOTICE_CATEGORIES, NOTICE_SEVERITIES, ROUTES, SOURCE_FRESH_HOURS, UI_QUERY} from '@/lib/constants';
 import type {Notice} from '@/lib/ui/api-client';
 import {
   MATCH_STATUS_LABEL,
@@ -47,6 +47,7 @@ const STATUS_OPTIONS = [
   {value: INBOX_STATUS.open, label: 'Needs attention'},
   {value: INBOX_STATUS.snoozed, label: 'Snoozed'},
   {value: INBOX_STATUS.handled, label: 'Handled'},
+  {value: INBOX_STATUS.handledRecently, label: `Handled in the last ${HANDLED_RECENTLY_DAYS} days`},
   {value: INBOX_STATUS.all, label: 'All statuses'},
 ];
 const SEVERITY_OPTIONS = [{value: FILTER_ALL, label: 'All severities'}, ...NOTICE_SEVERITIES.map((value) => ({value, label: NOTICE_SEVERITY_LABEL[value]}))];

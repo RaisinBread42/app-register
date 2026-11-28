@@ -169,12 +169,17 @@ function byDate(a: NextDate | null, b: NextDate | null): number {
 }
 
 /** Needs attention is a score below 95 or a stale one, healthy 95 or more and current; not monitored is no score. */
-function matchesHealth(app: App, filter: string): boolean {
+/** Whether an app is in a health filter; the Governance Board counts with this too, so its figures match the list. */
+export function matchesHealth(app: App, filter: string): boolean {
   const {score} = app.health;
   switch (filter) {
     case APP_HEALTH_FILTER.attention:
       // A stale score is not trusted as healthy, so it needs attention.
       return score !== null && (score < HEALTH_ATTENTION_BELOW || app.health.status === HEALTH_STATUS.stale);
+    case APP_HEALTH_FILTER.critical:
+      return score !== null && app.health.status === HEALTH_STATUS.critical;
+    case APP_HEALTH_FILTER.stale:
+      return score !== null && app.health.staleSince !== null;
     case APP_HEALTH_FILTER.healthy:
       return score !== null && score >= HEALTH_ATTENTION_BELOW && app.health.status !== HEALTH_STATUS.stale;
     case APP_HEALTH_FILTER.notMonitored:

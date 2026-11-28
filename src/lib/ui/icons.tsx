@@ -54,6 +54,14 @@ export const NoticesIcon = (props: IconProps) => (
   </LineIcon>
 );
 
+export const GovernanceIcon = (props: IconProps) => (
+  <LineIcon {...props}>
+    <path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z" />
+    <path d="M16 5h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2" />
+    <path d="m9 13 2 2 4-4" />
+  </LineIcon>
+);
+
 export const SettingsIcon = (props: IconProps) => (
   <LineIcon {...props}>
     <circle cx="12" cy="12" r="3" />
