@@ -81,7 +81,7 @@ How it works: the key is claimed inside the same database transaction as the wri
 | POST | `/api/notice-alerts/:id/acknowledge` | Mark seen; first time wins; never changes the app |
 | GET / POST | `/api/api-keys` | List keys / create a Settings-scoped key (`expiresOn` date or null); full key only on create |
 | POST | `/api/api-keys/:id/revoke` | Revoke an active key |
-| GET | `/api/settings/monitoring-sources` | Monitoring data sources in use (npm, OSV, endoflife.date, provider status feeds) |
+| GET | `/api/settings/monitoring-sources` | Monitoring data sources in use (npm, OSV, endoflife.date, provider status feeds): status (`reachable` when its latest attempt answered, `unavailable` when it failed, `configured` when never asked), `lastRefreshedAt` (last answer), `lastAttemptAt`, `lastError` and `appNames` (the active apps that rely on it) |
 | GET | `/api/openapi.json` | The spec (no key needed) |
 
 ## Business rules
@@ -239,3 +239,9 @@ curl -X POST http://localhost:3000/api/apps \
   -H "Content-Type: application/json" \
   -d '{"name":"Contoso CRM","kind":"saas","criticality":"high","ownerId":"…","backupOwnerId":"…","noticeDeadline":"2027-09-30"}'
 ```
+
+## Source freshness and stale findings ([31])
+
+- Every check records, per source and workspace, when it was asked, when it last answered and why it last failed (`source_checks`).
+- A dependency whose latest check failed after a good one, and a hosting row whose latest check failed after a good one, keep their last reading with status `stale`, never `ok`. An app's health then has `status: "stale"`, `staleSince` (when the oldest reading still shown was taken) and `hasFailedCheck: true`; the score is the last good reading. `hosting.healthCheckedAt` is the time of the last check every source answered.
+

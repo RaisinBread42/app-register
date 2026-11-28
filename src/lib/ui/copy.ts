@@ -161,6 +161,7 @@ export const HEALTH_STATUS_VARIANT: Record<HealthStatus, StatusVariant> = {
   [HEALTH_STATUS.attention]: "yellow",
   [HEALTH_STATUS.critical]: "red",
   [HEALTH_STATUS.na]: "neutral",
+  [HEALTH_STATUS.stale]: "neutral",
 };
 
 /** The prototype's check pills: "✓ OK", "! Attention", "! Critical". */
@@ -169,6 +170,7 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
   [HEALTH_STATUS.attention]: "! Attention",
   [HEALTH_STATUS.critical]: "! Critical",
   [HEALTH_STATUS.na]: "—",
+  [HEALTH_STATUS.stale]: "! Stale",
 };
 
 /** The badge under the big score on an application's page. */

@@ -5,6 +5,7 @@ import {
   ADVISORY_SOURCE,
   DEPENDENCY_CHECK_ERROR,
   MONITORING_FOLLOW_UP_BUDGET_MS,
+  MONITORING_SOURCE_ID,
   HEALTH_DIMENSION,
   HEALTH_STATUS,
   MAJOR_BEHIND_POINTS,
@@ -25,6 +26,7 @@ import type {Deduction} from './health';
 import {syncAppNoticesSafely} from './notices';
 import {createPackageSources, isNpmPackageName, mapWithLimit, type PackageSources} from './package-sources';
 import {isExactVersion, versionLag} from './package-versions';
+import {recordSourceOutcomes, type SourceOutcome} from './source-checks';
 
 /**
  * Dependency monitoring: what the npm registry and OSV know about each
@@ -141,7 +143,11 @@ export function dependencyStatus(dependency: DependencyFacts): HealthStatus {
   if (deductionsFor(dependency).length > 0) {
     return HEALTH_STATUS.attention;
   }
-  return dependency.checkedAt ? HEALTH_STATUS.ok : HEALTH_STATUS.na;
+  if (!dependency.checkedAt) {
+    return HEALTH_STATUS.na;
+  }
+  // The sources did not answer this time: the last good answer is kept, labelled stale, never ok (spec §8 check 23).
+  return dependency.checkError === DEPENDENCY_CHECK_ERROR.unavailable ? HEALTH_STATUS.stale : HEALTH_STATUS.ok;
 }
 
 type CheckResult = {
@@ -183,9 +189,10 @@ export async function refreshDependencyHealth(
   }
   const rows = await db.select().from(appDependencies).where(and(...filters)).orderBy(asc(appDependencies.name));
   const outOfTime = options.budgetMs === undefined ? undefined : AbortSignal.timeout(options.budgetMs);
-  const results = await checkPackages(rows, options.sources ?? createPackageSources(), outOfTime);
+  const {results, outcomes} = await checkPackages(rows, options.sources ?? createPackageSources(), outOfTime);
 
   const now = new Date();
+  await recordSourceOutcomes(db, workspaceId, outcomes, now);
   for (const result of results) {
     await db.transaction((tx) => storeResult(tx, workspaceId, result, now));
   }
@@ -284,10 +291,24 @@ function toStore(result: CheckResult, now: Date): Partial<MonitoringResults> {
   };
 }
 
-/** The results for every row that was checked. Rows not reached before `outOfTime` aborts are left out. */
-async function checkPackages(rows: AppDependencyRow[], sources: PackageSources, outOfTime?: AbortSignal): Promise<CheckResult[]> {
+const REGISTRY_FAILED = 'npm registry did not answer';
+const ADVISORIES_FAILED = 'OSV.dev did not answer';
+
+/**
+ * The results for every row that was checked, and what the run learnt about the npm
+ * registry and OSV. Rows not reached before `outOfTime` aborts are left out.
+ */
+async function checkPackages(
+  rows: AppDependencyRow[],
+  sources: PackageSources,
+  outOfTime?: AbortSignal,
+): Promise<{results: CheckResult[]; outcomes: SourceOutcome[]}> {
   const looked = await mapWithLimit(rows, (row) => checkRegistry(row, sources, outOfTime));
   const results = looked.filter((result) => result !== null);
+  const asked = results.filter((result) => isNpmPackageName(result.name));
+  const outcomes: SourceOutcome[] = asked.length
+    ? [{sourceId: MONITORING_SOURCE_ID.npmRegistry, error: asked.some((result) => result.checkError !== DEPENDENCY_CHECK_ERROR.unavailable) ? null : REGISTRY_FAILED}]
+    : [];
 
   // Advisories only for packages the registry knows, and only at an exact version.
   const known = results.filter((result) => result.checkError === null);
@@ -296,7 +317,7 @@ async function checkPackages(rows: AppDependencyRow[], sources: PackageSources, 
     result.checkError = DEPENDENCY_CHECK_ERROR.invalidVersion;
   }
   if (exact.length === 0) {
-    return results;
+    return {results, outcomes};
   }
   try {
     outOfTime?.throwIfAborted();
@@ -304,15 +325,17 @@ async function checkPackages(rows: AppDependencyRow[], sources: PackageSources, 
     exact.forEach((result, index) => {
       result.advisories = advisories[index];
     });
+    outcomes.push({sourceId: MONITORING_SOURCE_ID.osv, error: null});
   } catch {
     if (outOfTime?.aborted) {
-      return results.filter((result) => !exact.includes(result));
+      return {results: results.filter((result) => !exact.includes(result)), outcomes};
     }
     for (const result of exact) {
       result.checkError = DEPENDENCY_CHECK_ERROR.unavailable;
     }
+    outcomes.push({sourceId: MONITORING_SOURCE_ID.osv, error: ADVISORIES_FAILED});
   }
-  return results;
+  return {results, outcomes};
 }
 
 /** What the registry says about one row, or null when there was no time left to ask. */

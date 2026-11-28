@@ -298,3 +298,12 @@ export function hostingCatalogView(): HostingCatalogView {
     runtimes: HOSTING_RUNTIMES.map((runtime) => ({name: runtime.name})),
   };
 }
+
+/** A provider status feed's source id, as source checks and the sources list name it ([31]). */
+export function feedSourceId(feed: StatusFeed): string {
+  return `status_${feed.kind}_${slug(feed.name)}`;
+}
+
+function slug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}

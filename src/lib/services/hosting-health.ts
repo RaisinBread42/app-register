@@ -45,8 +45,9 @@ export function hostingDeductions(rows: HostingFacts[], today: string): Deductio
 /**
  * One hosting row's own status: `critical` when it is past end of support or in
  * an outage, `attention` for any other finding. Otherwise `ok`, but only when
- * the row is monitored and its last check read every source; a row that is not
- * monitored, was never checked, or whose last check failed is `na`.
+ * the row is monitored and its last check read every source. A row whose latest
+ * check failed after an earlier good one is `stale`; a row that is not monitored
+ * or never had a good check is `na`.
  */
 export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
   const {incidents} = row;
@@ -57,7 +58,11 @@ export function hostingStatus(row: HostingFacts, today: string): HealthStatus {
   if (endOfSupport || incidents.length > 0) {
     return HEALTH_STATUS.attention;
   }
-  return isMonitored(row) && row.healthCheckedAt && !row.healthError ? HEALTH_STATUS.ok : HEALTH_STATUS.na;
+  if (!isMonitored(row) || !row.healthCheckedAt) {
+    return HEALTH_STATUS.na;
+  }
+  // The latest check failed: what the last good one read is kept, labelled stale, never ok (spec §8 check 23).
+  return row.healthError ? HEALTH_STATUS.stale : HEALTH_STATUS.ok;
 }
 
 /** Monitored: the row has an end-of-support date, or its provider's status feed is watched. */

@@ -342,7 +342,9 @@ describe('review regressions: hosting health', () => {
     expect(health([row({incidents: [{...outage, scope: INCIDENT_SCOPE.provider}]}), row({incidents: [{...outage, title: 'b', impact: INCIDENT_IMPACT.minor}]})])).toMatchObject({score: 94, status: 'attention'});
     expect(health(Array.from({length: 6}, () => row({endOfSupportOn: '2020-01-01'})))).toMatchObject({score: 0, status: 'critical'});
     expect(health([row({healthCheckedAt: null})])).toMatchObject({score: null, status: 'na'});
-    expect(health([row({healthError: 'AWS Health could not be reached'})])).toMatchObject({score: null, status: 'na'});
+    // [31] A failed latest check keeps the last good reading, labelled stale (never ok); with no good reading there is no score.
+    expect(health([row({healthError: 'AWS Health could not be reached'})])).toMatchObject({score: 100, status: 'stale'});
+    expect(health([row({healthCheckedAt: null, healthError: 'AWS Health could not be reached'})])).toMatchObject({score: null, status: 'na', hasFailedCheck: true});
     expect(health([])).toMatchObject({score: null, status: 'na'});
   });
 

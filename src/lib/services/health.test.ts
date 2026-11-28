@@ -68,6 +68,8 @@ describe('health score', () => {
         licence: null,
         pricing: null,
       },
+      staleSince: null,
+      hasFailedCheck: false,
     });
     expect(scoreOf([dependency('tally-ui')])).toMatchObject({score: 100, status: HEALTH_STATUS.ok});
   });

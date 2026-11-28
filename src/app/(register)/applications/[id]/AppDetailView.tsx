@@ -43,7 +43,7 @@ import {appTab} from '@/lib/ui/list-filters';
 import {useRememberedListHref} from '@/lib/ui/list-memory';
 import {DEFAULT_INBOX_VIEW, inboxQuery, inboxRows} from '@/lib/ui/notice-inbox';
 import {activitySummary} from '@/lib/ui/activity';
-import {allDeductions, checkTimesLine, formatDate, formatDateTime, primaryHosting, scoreBasis} from '@/lib/ui/register-view';
+import {CHECK_FAILED, allDeductions, checkTimesLine, formatDate, formatDateTime, healthWord, primaryHosting, scoreBasis} from '@/lib/ui/register-view';
 import {isSetupIncomplete, setupChecklist} from '@/lib/ui/setup-checklist';
 import {archiveAppAction, unarchiveAppAction} from '../../actions';
 import {AppIcon, PendingPill} from '../../_components/AppIdentity';
@@ -263,7 +263,7 @@ function HeroScore({health}: {health: Health}) {
           </Text>
         )}
       </HStack>
-      <Badge label={health.score === null ? NO_SCORE_TITLE : healthVerdict(health.score)} variant={variant} />
+      <Badge label={health.score === null ? (health.hasFailedCheck ? CHECK_FAILED : NO_SCORE_TITLE) : healthWord(health)} variant={variant} />
       <Text type="supporting" color="secondary">
         {scoreBasis(health)}
       </Text>

@@ -147,13 +147,14 @@ describe('hosting health', () => {
     expect(scored.dimensions.hosting).toEqual({status: HEALTH_STATUS.ok, deductions: []});
   });
 
-  it('a hosting row whose check never completed or last failed is na, never ok, and an app with only such rows has hosting status na', () => {
+  it('a hosting row never checked is na and one whose latest check failed after a good one is stale: never ok; the app keeps the last good score, labelled stale', () => {
     const neverChecked = row({healthCheckedAt: null});
     const failed = row({service: 'Storage', healthError: 'Azure status could not be reached (HTTP 503)'});
 
     expect(hostingStatus(neverChecked, TODAY)).toBe(HEALTH_STATUS.na);
-    expect(hostingStatus(failed, TODAY)).toBe(HEALTH_STATUS.na);
-    expect(health({hosting: [neverChecked, failed]})).toMatchObject({score: null, dimensions: {hosting: {status: HEALTH_STATUS.na, deductions: []}}});
+    expect(hostingStatus(failed, TODAY)).toBe(HEALTH_STATUS.stale);
+    expect(health({hosting: [neverChecked, failed]})).toMatchObject({score: 100, status: HEALTH_STATUS.stale, dimensions: {hosting: {status: HEALTH_STATUS.stale, deductions: []}}});
+    expect(health({hosting: [neverChecked]})).toMatchObject({score: null, dimensions: {hosting: {status: HEALTH_STATUS.na, deductions: []}}});
     // What an earlier check found still counts while the latest one failed.
     const failedWithFinding = row({healthError: 'Azure status could not be reached (HTTP 503)', endOfSupportOn: '2026-07-31'});
     expect(hostingStatus(failedWithFinding, TODAY)).toBe(HEALTH_STATUS.critical);

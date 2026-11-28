@@ -640,7 +640,13 @@ describe('JSON API', () => {
     const unmonitored = {hosting: {status: HEALTH_STATUS.na, deductions: []}, licence: null, pricing: null};
 
     const empty = (await api('GET', '/api/apps')).body.apps[0].health;
-    expect(empty).toEqual({score: null, status: HEALTH_STATUS.na, dimensions: {dependencies: {status: HEALTH_STATUS.na, deductions: []}, ...unmonitored}});
+    expect(empty).toEqual({
+      score: null,
+      status: HEALTH_STATUS.na,
+      dimensions: {dependencies: {status: HEALTH_STATUS.na, deductions: []}, ...unmonitored},
+      staleSince: null,
+      hasFailedCheck: false,
+    });
 
     await api('POST', `/api/apps/${app.id}/dependencies/import`, {body: PACKAGE_JSON});
     const listed = (await api('GET', '/api/apps')).body.apps[0].health;
@@ -657,6 +663,8 @@ describe('JSON API', () => {
         },
         ...unmonitored,
       },
+      staleSince: null,
+      hasFailedCheck: false,
     });
     expect((await api('GET', `/api/apps/${app.id}`)).body.app.health).toEqual(listed);
   });

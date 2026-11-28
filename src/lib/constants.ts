@@ -663,6 +663,8 @@ export const HEALTH_STATUS = {
   critical: 'critical',
   /** Nothing recorded to check. */
   na: 'na',
+  /** [31] The last check failed: the last good reading is kept but never shown as healthy. */
+  stale: 'stale',
 } as const;
 export const HEALTH_STATUSES = Object.values(HEALTH_STATUS);
 export type HealthStatus = (typeof HEALTH_STATUSES)[number];

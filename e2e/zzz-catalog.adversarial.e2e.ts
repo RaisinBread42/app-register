@@ -1,6 +1,6 @@
 /**
  * Adversarial e2e for [23] Applications catalog, kept as regression tests. It runs last (zzz-): one test
- * adds 200 apps and another archives every app. The check-failed wording (ADV23-E7) comes with [31].
+ * archives every app.
  */
 import {randomUUID} from 'node:crypto';
 import {expect, test, type APIRequestContext, type Page} from '@playwright/test';
@@ -45,6 +45,7 @@ test('ADV23-E1 AC6: a long name that is cut to two lines still shows the full na
 test('ADV23-E2 AC6: at 360 px every filter control and every table column can be reached on screen', async ({page}) => {
   await page.setViewportSize({width: 360, height: 780});
   await page.goto('/applications');
+  await expect(page.getByRole('columnheader', {name: 'Next date'})).toBeAttached();
   const controls = await page.evaluate(() =>
     [...document.querySelectorAll('input, [role="combobox"]')]
       .filter((el) => el.getBoundingClientRect().width > 0)
@@ -130,6 +131,21 @@ test('ADV23-E6 AC5: the applications page streams a loading state first, then th
   const html = await (await page.request.get('/applications')).text();
   expect(html).toContain('Loading…');
   expect(html.indexOf('Loading…'), 'the fallback comes before the list in the stream').toBeLessThan(html.indexOf('Northwind Portal'));
+});
+
+test('ADV23-E7 AC1/AC7: an app whose dependencies are recorded but whose check failed is not called "Not monitored"', async ({page, request}) => {
+  const name = `Adv23 Checked But Failed ${Date.now()}`;
+  const id = await createApp(request, name);
+  const added = await request.post(`/api/apps/${id}/dependencies`, {headers: write(), data: {name: 'left-pad', currentVersion: '1.3.0'}});
+  expect(added.ok(), await added.text()).toBe(true);
+  const deps = (await (await request.get(`/api/apps/${id}/dependencies`, {headers: API})).json()) as {dependencies: {name: string; checkedAt: string | null; checkError: string | null; status: string}[]};
+  console.log('ADV23-E7 dependency as stored:', JSON.stringify(deps.dependencies));
+  await page.goto(`/applications?q=${encodeURIComponent(name)}`);
+  const row = rows(page).filter({hasText: name});
+  const text = (await row.innerText()).replace(/\s+/g, ' ');
+  console.log('ADV23-E7 catalog row:', text);
+  expect(text, 'a recorded dependency with a failed check is monitored, just not checked').not.toContain('Not monitored');
+  expect(text, '[31] it says the check failed').toContain('Check failed');
 });
 
 test('ADV23-E8 AC6: the table has an accessible name and exposes the active sort to screen readers', async ({page}) => {

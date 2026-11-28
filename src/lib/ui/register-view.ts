@@ -16,7 +16,7 @@ import type {
   Hosting,
   HostingIncident,
 } from "./api-client";
-import { CHECK_ERROR_LABEL, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED } from "./copy";
+import { CHECK_ERROR_LABEL, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED, healthVerdict } from "./copy";
 
 /**
  * Display-only shaping of data the pages already loaded: dates, statuses,
@@ -275,3 +275,20 @@ export function scoreBasis(health: Health): string {
 
 const listWords = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
 const capitalise = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * The word beside a score ([31]): "Stale since 1 Oct 2026" when a source behind it
+ * failed on its latest check (never "Healthy"), "Check failed" when a check failed with
+ * no good reading before it, "Not monitored" when nothing is checked, else the verdict.
+ */
+export function healthWord(health: Health): string {
+  if (health.score === null) {
+    return health.hasFailedCheck ? CHECK_FAILED : NOT_MONITORED;
+  }
+  if (health.status === HEALTH_STATUS.stale && health.staleSince) {
+    return `Stale since ${formatDate(health.staleSince)}`;
+  }
+  return healthVerdict(health.score);
+}
+
+export const CHECK_FAILED = "Check failed";

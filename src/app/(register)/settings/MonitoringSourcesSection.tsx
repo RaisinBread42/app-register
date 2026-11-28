@@ -16,7 +16,7 @@ import type {MonitoringSource} from '@/lib/ui/api-client';
 import {formatDateTime} from '@/lib/ui/register-view';
 
 const TONE = {ok: 'green', warn: 'yellow', bad: 'red'} as const;
-const NEVER_REFRESHED = 'Never refreshed';
+const NEVER_REFRESHED = 'Never answered';
 
 const SOURCE_STATUS_BADGE: Record<MonitoringSourceStatus, {label: string; variant: (typeof TONE)[keyof typeof TONE]}> = {
   [MONITORING_SOURCE_STATUS.reachable]: {label: 'Reachable', variant: TONE.ok},
@@ -33,7 +33,8 @@ const column = (share: number) => proportional(share, {minWidth: 96});
 
 /**
  * Settings › Monitoring sources: the Sources screen moved here (ADR 0003), showing the outside
- * sources the register really calls. Only implemented sources are listed; there is no
+ * sources the register really calls, when each last answered, its last error, and the apps
+ * that rely on it ([31]). Only implemented sources are listed; there is no
  * "connect a source" control until a source can be connected (spec §10 item 32).
  */
 export function MonitoringSourcesSection({sources}: {sources: MonitoringSource[]}) {
@@ -86,9 +87,28 @@ export function MonitoringSourcesSection({sources}: {sources: MonitoringSource[]
             },
             {
               key: 'lastRefreshedAt',
-              header: 'Last refreshed',
-              width: column(1.1),
-              renderCell: (source: MonitoringSource) => (source.lastRefreshedAt ? formatDateTime(source.lastRefreshedAt) : NEVER_REFRESHED),
+              header: 'Last answered',
+              width: column(1.3),
+              renderCell: (source: MonitoringSource) => (
+                <VStack gap={0.5}>
+                  <Text size="sm">{source.lastRefreshedAt ? formatDateTime(source.lastRefreshedAt) : NEVER_REFRESHED}</Text>
+                  {source.lastError && (
+                    <Text type="supporting" color="secondary">
+                      {`Last attempt ${source.lastAttemptAt ? formatDateTime(source.lastAttemptAt) : ''} failed: ${source.lastError}`}
+                    </Text>
+                  )}
+                </VStack>
+              ),
+            },
+            {
+              key: 'appNames',
+              header: 'Used by',
+              width: column(1.3),
+              renderCell: (source: MonitoringSource) => (
+                <Text size="sm" color={source.appNames.length ? undefined : 'secondary'}>
+                  {source.appNames.length ? source.appNames.join(', ') : 'No application yet'}
+                </Text>
+              ),
             },
           ]}
         />
