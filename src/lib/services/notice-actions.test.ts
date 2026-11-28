@@ -115,11 +115,24 @@ describe('notice actions and audit history', () => {
   it('undo restores the previous status (and a snooze still ahead) with a new event; the original event stays', async () => {
     await status({status: MATCH_STATUS.snoozed, snoozedUntil: '2099-12-15', note: 'Waiting'});
     await status({status: MATCH_STATUS.handled, note: 'Fixed'});
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, NOW, TODAY);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, NOW, TODAY);
     expect(await getMatch(t.db, t.workspaceId, matchId)).toMatchObject({status: MATCH_STATUS.snoozed, snoozedUntil: '2099-12-15'});
     const actions = (await listAuditEvents(t.db, t.workspaceId, {matchId})).map((event) => event.action);
     expect(actions).toEqual([AUDIT_ACTION.noticeStatusUndone, AUDIT_ACTION.noticeStatusChanged, AUDIT_ACTION.noticeStatusChanged]);
-    await expect(undoLastAction(t.db, t.workspaceId, matchId, ACTOR, NOW, TODAY)).rejects.toThrow(/nothing to undo/);
+    await expect(undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, NOW, TODAY)).rejects.toThrow(/nothing to undo/);
+  });
+
+  it('an Undo that names its action reverses only that action (the owner stays), and is refused once a later status change has happened', async () => {
+    const reviewing = {action: AUDIT_ACTION.noticeStatusChanged, toValue: MATCH_STATUS.reviewing};
+    await status({status: MATCH_STATUS.reviewing});
+    await assignMatch(t.db, t.workspaceId, matchId, {assigneeId: ownerId}, ACTOR, NOW, TODAY);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, reviewing, NOW, TODAY);
+    expect(await getMatch(t.db, t.workspaceId, matchId)).toMatchObject({status: MATCH_STATUS.new, assignee: {id: ownerId}});
+
+    await status({status: MATCH_STATUS.reviewing});
+    await status({status: MATCH_STATUS.handled, note: 'Fixed'});
+    await expect(undoLastAction(t.db, t.workspaceId, matchId, ACTOR, reviewing, NOW, TODAY)).rejects.toThrow(/later change/);
+    expect((await getMatch(t.db, t.workspaceId, matchId)).status).toBe(MATCH_STATUS.handled);
   });
 
   it('a later check of the source never overwrites what people decided', async () => {

@@ -9,6 +9,7 @@ import {
   APP_ENVIRONMENTS,
   APP_KINDS,
   ACTION_NOTE_MAX_LENGTH,
+  AUDIT_ACTION,
   AUDIT_ACTIONS,
   AUDIT_PAGE_MAX,
   AUDIT_SUBJECTS,
@@ -487,6 +488,13 @@ const schemas = {
     ['status'],
   ),
   Assignment: input({assigneeId: {type: ['string', 'null'], format: 'uuid'}, note: {...nullable('string'), maxLength: ACTION_NOTE_MAX_LENGTH}}, ['assigneeId']),
+  UndoTarget: input(
+    {
+      action: {type: 'string', enum: [AUDIT_ACTION.noticeStatusChanged, AUDIT_ACTION.noticeAssigned], description: 'The action this Undo is for; refused if it is no longer the latest'},
+      toValue: {...nullable('string'), description: 'The value that action set (a status, or a person id or null)'},
+    },
+    [],
+  ),
   AuditEvent: strict({
     id,
     occurredAt: timestamp,
@@ -875,6 +883,7 @@ export const openApiSpec = {
       post: {
         summary: 'Undo the latest status change or assignment with a new audit event (the original stays)',
         parameters: [pathId('id', 'Notice match id'), idempotencyKey],
+        requestBody: {...body('UndoTarget'), required: false},
         responses: {200: json(strict({match: ref('NoticeMatch')}), 'Undone'), ...errors},
       },
     },

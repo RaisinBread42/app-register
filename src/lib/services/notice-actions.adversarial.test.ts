@@ -60,18 +60,18 @@ describe('adversarial: notice actions [26]', () => {
     expect((await getMatch(t.db, t.workspaceId, matchId)).status).toBe(MATCH_STATUS.new);
 
     // The latest change is the snooze ending; undoing it would bring back an ended snooze, so it must be refused.
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, LATER, LATER_DAY).catch(() => undefined);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, LATER, LATER_DAY).catch(() => undefined);
     expect((await getMatch(t.db, t.workspaceId, matchId)).status).toBe(MATCH_STATUS.new);
   });
 
   it('F2 undo restores the snooze date and reason that were in place, not ones a person already undid', async () => {
     await status({status: MATCH_STATUS.snoozed, snoozedUntil: '2026-12-10', note: 'Change freeze'});
     await status({status: MATCH_STATUS.snoozed, snoozedUntil: '2036-12-10', note: 'typo, wrong year'});
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, NOW, TODAY);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, NOW, TODAY);
     expect(await getMatch(t.db, t.workspaceId, matchId)).toMatchObject({snoozedUntil: '2026-12-10', statusNote: 'Change freeze'});
 
     await status({status: MATCH_STATUS.reviewing});
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, NOW, TODAY);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, NOW, TODAY);
     expect(await getMatch(t.db, t.workspaceId, matchId)).toMatchObject({
       status: MATCH_STATUS.snoozed,
       snoozedUntil: '2026-12-10',
@@ -87,7 +87,7 @@ describe('adversarial: notice actions [26]', () => {
     expect((await getMatch(t.db, t.workspaceId, matchId)).status).toBe(MATCH_STATUS.handled);
 
     // Undo of the latest action (handled) must go back to reviewing.
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, LATER, LATER_DAY);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, LATER, LATER_DAY);
     expect((await getMatch(t.db, t.workspaceId, matchId)).status).toBe(MATCH_STATUS.reviewing);
   });
 
@@ -109,7 +109,7 @@ describe('adversarial: notice actions [26]', () => {
     await assignMatch(t.db, t.workspaceId, matchId, {assigneeId: ownerId}, ACTOR, NOW);
     await updatePerson(t.db, t.workspaceId, leaver, {status: PERSON_STATUS.left, leftOn: TODAY});
 
-    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, LATER, LATER_DAY).catch(() => undefined);
+    await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, LATER, LATER_DAY).catch(() => undefined);
     expect((await getMatch(t.db, t.workspaceId, matchId)).assignee?.id).not.toBe(leaver);
   });
 
@@ -139,7 +139,7 @@ describe('adversarial: notice actions [26]', () => {
     await status({status: MATCH_STATUS.reviewing}, LATER, LATER_DAY);
     const [latest] = await listAuditEvents(t.db, t.workspaceId, {matchId});
     expect.soft(latest.fromValue, 'before value of the change').toBe(MATCH_STATUS.new);
-    const undone = await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, LATER, LATER_DAY).then(
+    const undone = await undoLastAction(t.db, t.workspaceId, matchId, ACTOR, {}, LATER, LATER_DAY).then(
       () => 'undone',
       (error: Error) => error.message,
     );

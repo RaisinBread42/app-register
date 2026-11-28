@@ -50,6 +50,13 @@ export const UI_QUERY = {
   sort: 'sort',
   /** Which Settings section is open. */
   section: 'section',
+  /** Notices inbox: filters, grouping and the open notice (a match id). */
+  status: 'status',
+  severity: 'severity',
+  category: 'category',
+  app: 'app',
+  group: 'group',
+  notice: 'notice',
 } as const;
 export const UI_QUERY_ON = '1';
 
@@ -108,6 +115,9 @@ export const API_ROUTES = {
 
 /** Path segments under `/api/apps/:id` and `/api/notice-alerts/:id`. */
 export const API_SUB_ROUTE = {
+  status: 'status',
+  assign: 'assign',
+  undo: 'undo',
   archive: 'archive',
   dependencies: 'dependencies',
   hosting: 'hosting',
@@ -199,6 +209,13 @@ export const END_OF_LIFE_MAX_RELEASES = 500;
 export const HTTPS_PROTOCOL = 'https:';
 
 export const MS_PER_DAY = 86_400_000;
+export const MS_PER_HOUR = 3_600_000;
+/**
+ * A source that last answered longer ago than this is treated as out of date, so no
+ * page says "nothing needs attention" from it. The checks run daily; this leaves a
+ * margin for one late run. Durable per-source health comes with [31].
+ */
+export const SOURCE_FRESH_HOURS = 36;
 
 /** What the UI's Basic auth check decides for a request. */
 export const BASIC_AUTH_VERDICT = {

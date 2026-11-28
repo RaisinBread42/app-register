@@ -5,6 +5,7 @@ import {
   API_QUERY,
   API_ROUTES,
   API_SUB_ROUTE,
+  AUDIT_ACTION,
   BEARER_PREFIX,
   ENV,
   HTTP_METHOD,
@@ -16,6 +17,13 @@ import {
   type AppCriticality,
   type AppEnvironment,
   type AppKind,
+  type AuditAction,
+  type MatchConfidence,
+  type MatchStatus,
+  type NoticeCategory,
+  type NoticeOrigin,
+  type NoticeSeverity,
+  type NoticeSource,
   type AppSort,
   type DependencyCheckError,
   type DependencySource,
@@ -38,6 +46,9 @@ import {
 // Response shapes (OpenAPI components/schemas).
 
 export type PersonRef = {id: string; name: string};
+
+/** The action an Undo is for (a status change or an assignment) and the value it set. */
+export type UndoTarget = {action: typeof AUDIT_ACTION.noticeStatusChanged | typeof AUDIT_ACTION.noticeAssigned; toValue: string | null};
 
 type AppFields = {
   name: string;
@@ -212,6 +223,61 @@ export type MonitoringSource = {
   url: string;
 };
 
+export type NoticeMatch = {
+  id: string;
+  app: PersonRef;
+  component: string;
+  version: string | null;
+  region: string | null;
+  matchReason: string;
+  confidence: MatchConfidence;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedAt: string | null;
+  status: MatchStatus;
+  statusNote: string | null;
+  snoozedUntil: string | null;
+  statusChangedAt: string | null;
+  assignee: PersonRef | null;
+};
+
+export type Notice = {
+  id: string;
+  category: NoticeCategory;
+  severity: NoticeSeverity;
+  title: string;
+  summary: string;
+  source: NoticeSource;
+  sourceName: string;
+  sourceUrl: string | null;
+  externalId: string | null;
+  origin: NoticeOrigin;
+  publishedAt: string | null;
+  dueOn: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedUpstreamAt: string | null;
+  matches: NoticeMatch[];
+};
+
+export type NoticeQuery = {appId?: string; severity?: string; category?: string; state?: string};
+export type StatusChangeInput = {status: string; note?: string | null; snoozedUntil?: string | null};
+
+export type AuditEvent = {
+  id: string;
+  occurredAt: string;
+  actor: string;
+  action: AuditAction;
+  subjectKind: string;
+  subjectId: string;
+  appId: string | null;
+  noticeId: string | null;
+  fromValue: string | null;
+  toValue: string | null;
+  snoozedUntil: string | null;
+  note: string | null;
+};
+
 /** A non-2xx answer from the API; `message` is the API's `{ error }` text. */
 export class ApiError extends Error {
   constructor(
@@ -367,6 +433,26 @@ export function createApiClient({baseUrl, apiKey, fetch: send = fetch}: ApiClien
     },
     async listMonitoringSources(): Promise<MonitoringSource[]> {
       return (await get<{sources: MonitoringSource[]}>(API_ROUTES.monitoringSources)).sources;
+    },
+    async listNotices(query: NoticeQuery = {}): Promise<Notice[]> {
+      const search = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => Boolean(entry[1])));
+      const suffix = search.size ? `?${search}` : '';
+      return (await get<{notices: Notice[]}>(`${API_ROUTES.notices}${suffix}`)).notices;
+    },
+    async changeMatchStatus(idempotencyKey: string, matchId: string, input: StatusChangeInput): Promise<NoticeMatch> {
+      return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.status}`, idempotencyKey, input)).match;
+    },
+    async assignMatch(idempotencyKey: string, matchId: string, assigneeId: string | null): Promise<NoticeMatch> {
+      return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.assign}`, idempotencyKey, {assigneeId})).match;
+    },
+    async undoMatch(idempotencyKey: string, matchId: string, target?: UndoTarget): Promise<NoticeMatch> {
+      return (await post<{match: NoticeMatch}>(`${API_ROUTES.noticeMatches}/${segment(matchId)}/${API_SUB_ROUTE.undo}`, idempotencyKey, target)).match;
+    },
+    async listAuditEvents(query: {appId?: string; matchId?: string; limit?: number}): Promise<AuditEvent[]> {
+      const search = new URLSearchParams(
+        Object.entries(query).filter((entry) => entry[1] !== undefined).map(([name, value]) => [name, String(value)]),
+      );
+      return (await get<{events: AuditEvent[]}>(`${API_ROUTES.auditEvents}?${search}`)).events;
     },
   };
 }

@@ -6,6 +6,10 @@ import {
   APP_HEALTH_FILTER,
   APP_KINDS,
   APP_LIST_SORT,
+  MATCH_CONFIDENCE,
+  MATCH_STATUS,
+  NOTICE_CATEGORY,
+  NOTICE_SEVERITY,
   CENTS_PER_UNIT,
   DEPENDENCY_CHECK_ERROR,
   FILTER_ALL,
@@ -16,6 +20,10 @@ import {
   type AppEnvironment,
   type AppKind,
   type AppListSort,
+  type MatchConfidence,
+  type MatchStatus,
+  type NoticeCategory,
+  type NoticeSeverity,
   type DependencyCheckError,
   type HealthDimension,
   type HealthStatus,
@@ -58,6 +66,45 @@ export const ENVIRONMENT_OPTIONS = APP_ENVIRONMENTS.map((environment) => ({
   value: environment,
   label: ENVIRONMENT_LABEL[environment],
 }));
+
+export const NOTICE_SEVERITY_LABEL: Record<NoticeSeverity, string> = {
+  [NOTICE_SEVERITY.critical]: "Critical",
+  [NOTICE_SEVERITY.high]: "High",
+  [NOTICE_SEVERITY.medium]: "Medium",
+  [NOTICE_SEVERITY.low]: "Low",
+  [NOTICE_SEVERITY.unknown]: "Unrated",
+};
+
+/** Badge colour per severity; the label always carries the meaning too (spec §6). */
+export const NOTICE_SEVERITY_VARIANT: Record<NoticeSeverity, "red" | "orange" | "yellow" | "gray" | "blue"> = {
+  [NOTICE_SEVERITY.critical]: "red",
+  [NOTICE_SEVERITY.high]: "orange",
+  [NOTICE_SEVERITY.medium]: "yellow",
+  [NOTICE_SEVERITY.low]: "blue",
+  [NOTICE_SEVERITY.unknown]: "gray",
+};
+
+export const MATCH_STATUS_LABEL: Record<MatchStatus, string> = {
+  [MATCH_STATUS.new]: "New",
+  [MATCH_STATUS.reviewing]: "Reviewing",
+  [MATCH_STATUS.snoozed]: "Snoozed",
+  [MATCH_STATUS.handled]: "Handled",
+};
+
+export const NOTICE_CATEGORY_LABEL: Record<NoticeCategory, string> = {
+  [NOTICE_CATEGORY.security]: "Security advisory",
+  [NOTICE_CATEGORY.lifecycle]: "End of support",
+  [NOTICE_CATEGORY.outage]: "Provider incident",
+  [NOTICE_CATEGORY.licensing]: "Licensing",
+  [NOTICE_CATEGORY.pricing]: "Pricing",
+  [NOTICE_CATEGORY.deadline]: "Deadline",
+};
+
+export const MATCH_CONFIDENCE_LABEL: Record<MatchConfidence, string> = {
+  [MATCH_CONFIDENCE.high]: "High confidence",
+  [MATCH_CONFIDENCE.medium]: "Medium confidence",
+  [MATCH_CONFIDENCE.low]: "Low confidence: may not affect this app",
+};
 
 export const NO_BACKUP_OWNER = "No backup owner";
 export const CRITICALITY_NOT_SET = "Not set";
