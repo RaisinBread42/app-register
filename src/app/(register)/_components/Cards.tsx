@@ -1,4 +1,3 @@
-import type {ComponentType, SVGProps} from 'react';
 import {Card} from '@astryxdesign/core/Card';
 import {Divider} from '@astryxdesign/core/Divider';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
@@ -9,53 +8,6 @@ import {Link} from '@astryxdesign/core/Link';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {ArrowIcon} from '@/lib/ui/icons';
-
-type SvgIcon = ComponentType<SVGProps<SVGSVGElement>>;
-
-/** Prototype tile tones: the brand purple, and the green / amber / red status palettes. */
-export type Tone = 'brand' | 'green' | 'amber' | 'red';
-const TONE_COLORS: Record<Tone, {background: string; color: string}> = {
-  brand: {background: 'var(--color-accent-muted)', color: 'var(--color-text-accent)'},
-  green: {background: 'var(--color-background-green)', color: 'var(--color-text-green)'},
-  amber: {background: 'var(--color-background-yellow)', color: 'var(--color-text-yellow)'},
-  red: {background: 'var(--color-background-red)', color: 'var(--color-text-red)'},
-};
-
-/** A rounded square holding an icon in one tone (metric tiles, list rows). */
-export function IconTile({icon, tone = 'brand', size = 37}: {icon: SvgIcon; tone?: Tone; size?: number}) {
-  return (
-    <HStack
-      width={size}
-      height={size}
-      hAlign="center"
-      vAlign="center"
-      style={{flex: 'none', borderRadius: 'var(--radius-element)', ...TONE_COLORS[tone]}}>
-      <Icon icon={icon} size="md" />
-    </HStack>
-  );
-}
-
-type MetricProps = {label: string; value: React.ReactNode; description: string; icon: SvgIcon; tone?: Tone};
-
-/** The prototype's metric card: label, big number, note, and an icon tile on the right. */
-export function MetricCard({label, value, description, icon, tone}: MetricProps) {
-  return (
-    <Card padding={5} minHeight={116}>
-      <HStack gap={2} hAlign="between" vAlign="start">
-        <VStack gap={2}>
-          <Text size="sm" weight="semibold" color="secondary">
-            {label}
-          </Text>
-          <Text type="display-3">{value}</Text>
-          <Text type="supporting" color="secondary">
-            {description}
-          </Text>
-        </VStack>
-        <IconTile icon={icon} tone={tone} />
-      </HStack>
-    </Card>
-  );
-}
 
 type PanelProps = {title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode; isFlush?: boolean};
 

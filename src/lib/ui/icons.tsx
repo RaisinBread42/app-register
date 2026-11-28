@@ -68,20 +68,6 @@ export const PeopleIcon = (props: IconProps) => (
   </LineIcon>
 );
 
-export const CalendarIcon = (props: IconProps) => (
-  <LineIcon {...props}>
-    <rect x="3" y="5" width="18" height="16" rx="2" />
-    <path d="M7 3v4M17 3v4M3 10h18" />
-  </LineIcon>
-);
-
-export const ShieldIcon = (props: IconProps) => (
-  <LineIcon {...props}>
-    <path d="m12 2 8 4v5c0 5-3 9-8 11-5-2-8-6-8-11V6l8-4Z" />
-    <path d="m9 12 2 2 4-4" />
-  </LineIcon>
-);
-
 export const CloudIcon = (props: IconProps) => (
   <LineIcon {...props}>
     <path d="M19 18H6a4 4 0 0 1-.6-8A6 6 0 0 1 17 8a5 5 0 0 1 2 10" />
@@ -103,12 +89,6 @@ export const ArrowIcon = (props: IconProps) => (
 export const BackArrowIcon = (props: IconProps) => (
   <LineIcon {...props}>
     <path d="M20 12H4m7-7-7 7 7 7" />
-  </LineIcon>
-);
-
-export const WarningIcon = (props: IconProps) => (
-  <LineIcon {...props}>
-    <path d="m12 3 10 18H2L12 3Zm0 7v4m0 4h.01" />
   </LineIcon>
 );
 

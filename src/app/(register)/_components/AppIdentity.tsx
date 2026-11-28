@@ -42,8 +42,9 @@ export function AppCell({app}: {app: App}) {
   return (
     <HStack gap={2} vAlign="center">
       <AppIcon name={app.name} />
-      <VStack gap={0}>
-        <Link href={appRoute(app.id)} color="primary" weight="bold" size="sm">
+      <VStack gap={0} style={{minWidth: 0}}>
+        {/* Long names wrap to two lines, then truncate; the full name shows on hover and stays the link's name. */}
+        <Link href={appRoute(app.id)} color="primary" weight="bold" size="sm" maxLines={2}>
           {app.name}
         </Link>
         <Text type="supporting" color="secondary">

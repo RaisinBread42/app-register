@@ -1,23 +1,31 @@
 import {describe, expect, it} from 'vitest';
-import {APP_HEALTH_FILTER, APP_KIND, APP_LIST_SORT, FILTER_ALL, SETTINGS_SECTION} from '@/lib/constants';
+import {APP_CRITICALITY, APP_HEALTH_FILTER, APP_KIND, APP_LIST_SORT, SETTINGS_SECTION} from '@/lib/constants';
+import {DEFAULT_APP_LIST_VIEW} from './catalog';
 import {appListQuery, appListViewFrom, settingsSection} from './list-filters';
 
-const DEFAULT_VIEW = {query: '', kind: FILTER_ALL, health: FILTER_ALL, sort: APP_LIST_SORT.health};
-
 describe('list state in the URL', () => {
-  it('search, filters and sort round-trip through the URL so Back and shared links restore the same list', () => {
-    const view = {query: 'ledger', kind: APP_KIND.saas, health: APP_HEALTH_FILTER.attention, sort: APP_LIST_SORT.name};
+  it('search, every filter and sort round-trip through the URL so Back and shared links restore the same list', () => {
+    const view = {
+      query: 'ledger',
+      kind: APP_KIND.saas,
+      criticality: APP_CRITICALITY.high,
+      owner: '7d0c1f3e-1111-4222-8333-944455556666',
+      health: APP_HEALTH_FILTER.notMonitored,
+      openNotices: true,
+      sort: APP_LIST_SORT.deadline,
+    };
     const params = Object.fromEntries(new URLSearchParams(appListQuery(view).slice(1)));
     expect(appListViewFrom(params)).toEqual(view);
   });
 
-  it('the default view has no query string, so the plain list stays /applications', () => {
-    expect(appListQuery(DEFAULT_VIEW)).toBe('');
+  it('the default view (needs attention first, no filters) has no query string, so the plain list stays /applications', () => {
+    expect(DEFAULT_APP_LIST_VIEW.sort).toBe(APP_LIST_SORT.attention);
+    expect(appListQuery(DEFAULT_APP_LIST_VIEW)).toBe('');
   });
 
   it('unknown or repeated values fall back to the defaults instead of breaking the list', () => {
-    expect(appListViewFrom({kind: 'spaceship', health: ['healthy', 'attention'], sort: 'random'})).toEqual({
-      ...DEFAULT_VIEW,
+    expect(appListViewFrom({kind: 'spaceship', criticality: 'extreme', health: ['healthy', 'attention'], sort: 'renewal', open_notices: 'yes'})).toEqual({
+      ...DEFAULT_APP_LIST_VIEW,
       health: APP_HEALTH_FILTER.healthy,
     });
   });
