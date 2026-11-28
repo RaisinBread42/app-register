@@ -13,7 +13,7 @@ import {
 } from '@/lib/constants';
 import type {AppDatabase} from '@/lib/db/client';
 import {isUuid, newId} from '@/lib/db/ids';
-import {appNoticeMatches, apps, auditEvents, type AppNoticeMatchRow} from '@/lib/db/schema';
+import {appNoticeMatches, apps, auditEvents, notices, type AppNoticeMatchRow} from '@/lib/db/schema';
 import {todayIso} from '@/lib/notice-alerts';
 import {SYSTEM_ACTOR, type Actor} from './actor';
 import {NotFoundError, ValidationError} from './errors';
@@ -263,7 +263,11 @@ export type AuditEventView = {
   subjectKind: AuditSubject;
   subjectId: string;
   appId: string | null;
+  /** The app's name now (archived apps keep theirs), so a history line can say which app. */
+  appName: string | null;
   noticeId: string | null;
+  /** The notice's title, so a history line can say which notice. */
+  noticeTitle: string | null;
   fromValue: string | null;
   toValue: string | null;
   snoozedUntil: string | null;
@@ -295,8 +299,10 @@ export async function listAuditEvents(db: AppDatabase, workspaceId: string, quer
     beforeSeq = cursor.seq;
   }
   const rows = await db
-    .select()
+    .select({event: auditEvents, appName: apps.name, noticeTitle: notices.title})
     .from(auditEvents)
+    .leftJoin(apps, and(eq(apps.id, auditEvents.appId), eq(apps.workspaceId, auditEvents.workspaceId)))
+    .leftJoin(notices, and(eq(notices.id, auditEvents.noticeId), eq(notices.workspaceId, auditEvents.workspaceId)))
     .where(
       and(
         eq(auditEvents.workspaceId, workspaceId),
@@ -308,20 +314,22 @@ export async function listAuditEvents(db: AppDatabase, workspaceId: string, quer
     )
     .orderBy(desc(auditEvents.seq))
     .limit(limit);
-  return rows.map((row) => ({
-    id: row.id,
-    occurredAt: row.occurredAt,
-    actor: row.actor,
-    actorKeyId: row.actorKeyId,
-    action: row.action as AuditAction,
-    subjectKind: row.subjectKind as AuditSubject,
-    subjectId: row.subjectId,
-    appId: row.appId,
-    noticeId: row.noticeId,
-    fromValue: row.fromValue,
-    toValue: row.toValue,
-    snoozedUntil: row.snoozedUntil,
-    note: row.note,
+  return rows.map(({event, appName, noticeTitle}) => ({
+    id: event.id,
+    occurredAt: event.occurredAt,
+    actor: event.actor,
+    actorKeyId: event.actorKeyId,
+    action: event.action as AuditAction,
+    subjectKind: event.subjectKind as AuditSubject,
+    subjectId: event.subjectId,
+    appId: event.appId,
+    appName,
+    noticeId: event.noticeId,
+    noticeTitle,
+    fromValue: event.fromValue,
+    toValue: event.toValue,
+    snoozedUntil: event.snoozedUntil,
+    note: event.note,
   }));
 }
 

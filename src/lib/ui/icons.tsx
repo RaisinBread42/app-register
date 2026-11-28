@@ -106,12 +106,6 @@ export const BackArrowIcon = (props: IconProps) => (
   </LineIcon>
 );
 
-export const CheckIcon = (props: IconProps) => (
-  <LineIcon {...props}>
-    <path d="m5 12 4 4L19 6" />
-  </LineIcon>
-);
-
 export const WarningIcon = (props: IconProps) => (
   <LineIcon {...props}>
     <path d="m12 3 10 18H2L12 3Zm0 7v4m0 4h.01" />

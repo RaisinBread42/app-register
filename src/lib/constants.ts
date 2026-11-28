@@ -362,6 +362,13 @@ export const AUDIT_PAGE_MAX = 200;
 export const AUDIT_PAGE_DEFAULT = 50;
 
 /** The kinds of date the Overview lists. */
+/** Overview (spec §4.1): how far ahead the key number and the date list look, how far back a passed notice deadline stays, and list lengths. */
+export const OVERVIEW_DEADLINE_DAYS = 30;
+export const OVERVIEW_DATES_DAYS = 90;
+export const OVERVIEW_OVERDUE_DAYS = 30;
+export const OVERVIEW_QUEUE_LIMIT = 5;
+export const OVERVIEW_ACTIVITY_LIMIT = 5;
+
 export const DATE_KIND = {notice: 'notice', renewal: 'renewal'} as const;
 export type DateKind = (typeof DATE_KIND)[keyof typeof DATE_KIND];
 

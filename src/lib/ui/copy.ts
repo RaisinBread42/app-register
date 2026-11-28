@@ -6,6 +6,7 @@ import {
   APP_HEALTH_FILTER,
   APP_KINDS,
   APP_LIST_SORT,
+  AUDIT_ACTION,
   MATCH_CONFIDENCE,
   MATCH_STATUS,
   NOTICE_CATEGORY,
@@ -20,6 +21,7 @@ import {
   type AppEnvironment,
   type AppKind,
   type AppListSort,
+  type AuditAction,
   type MatchConfidence,
   type MatchStatus,
   type NoticeCategory,
@@ -103,6 +105,17 @@ export const MATCH_CONFIDENCE_LABEL: Record<MatchConfidence, string> = {
   [MATCH_CONFIDENCE.high]: "High confidence",
   [MATCH_CONFIDENCE.medium]: "Medium confidence",
   [MATCH_CONFIDENCE.low]: "Low confidence: may not affect this app",
+};
+
+/** How an audit event reads between "<who> " and what it was done to (a notice or an application), in activity lists. */
+export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
+  [AUDIT_ACTION.noticeStatusChanged]: "changed the status of",
+  [AUDIT_ACTION.noticeAssigned]: "changed the owner of",
+  [AUDIT_ACTION.noticeStatusUndone]: "undid a status change on",
+  [AUDIT_ACTION.noticeAssignmentUndone]: "undid an owner change on",
+  [AUDIT_ACTION.noticeSnoozeEnded]: "ended the snooze on",
+  [AUDIT_ACTION.noticeReopened]: "reopened",
+  [AUDIT_ACTION.appArchived]: "archived",
 };
 
 export const NO_BACKUP_OWNER = "No backup owner";

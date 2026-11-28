@@ -10,60 +10,55 @@ import {HStack} from '@astryxdesign/core/HStack';
 import {Link} from '@astryxdesign/core/Link';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
-import {AUDIT_ACTION, DATE_KIND, ROUTES, SETTINGS_SECTION, settingsRoute, type AuditAction} from '@/lib/constants';
+import {DATE_KIND, OVERVIEW_DATES_DAYS, OVERVIEW_DEADLINE_DAYS, OVERVIEW_OVERDUE_DAYS, ROUTES, SETTINGS_SECTION, settingsRoute} from '@/lib/constants';
 import type {App, AuditEvent, MonitoringSource, Notice} from '@/lib/ui/api-client';
 import {MATCH_STATUS_LABEL, NOTICE_CATEGORY_LABEL, NOTICE_SEVERITY_LABEL, NOTICE_SEVERITY_VARIANT} from '@/lib/ui/copy';
-import {DEFAULT_INBOX_VIEW, inboxQuery} from '@/lib/ui/notice-inbox';
-import {keyNumbers, lastSuccessfulCheck, portfolioSummary, upcomingDates, urgentQueue} from '@/lib/ui/overview';
-import {formatDate, formatDateTime} from '@/lib/ui/register-view';
+import {DEFAULT_INBOX_VIEW, INBOX_STATUS, inboxQuery} from '@/lib/ui/notice-inbox';
+import {activityLine, checkStatusLine, keyNumbers, portfolioNote, portfolioSummary, upcomingDates, urgentQueue} from '@/lib/ui/overview';
+import {formatDate} from '@/lib/ui/register-view';
 import {CardLink, PanelCard} from './_components/Cards';
 import {PageFrame} from './_components/PageFrame';
 import {PageHeader} from './_components/PageHeader';
 import {AddApplicationDialog} from './applications/AddApplicationDialog';
 import type {PersonOption} from './applications/AppForm';
 
-const ACTION_LABEL: Record<AuditAction, string> = {
-  [AUDIT_ACTION.noticeStatusChanged]: 'changed a notice status',
-  [AUDIT_ACTION.noticeAssigned]: 'changed a notice owner',
-  [AUDIT_ACTION.noticeStatusUndone]: 'undid a status change',
-  [AUDIT_ACTION.noticeAssignmentUndone]: 'undid an owner change',
-  [AUDIT_ACTION.noticeSnoozeEnded]: 'ended a snooze',
-  [AUDIT_ACTION.noticeReopened]: 'reopened a notice the source reports again',
-  [AUDIT_ACTION.appArchived]: 'archived an application',
-};
-
 type Props = {
   apps: App[];
   notices: Notice[];
-  sources: MonitoringSource[];
-  activity: AuditEvent[];
+  /** Null when the sources could not be read; the page still shows everything else. */
+  sources: MonitoringSource[] | null;
+  /** Null when the history could not be read. */
+  activity: AuditEvent[] | null;
   people: PersonOption[];
   addKey: string;
   today: string;
+  /** The server's time, as ISO, so freshness reads the same on the server and in the browser. */
+  now: string;
 };
+
+/** "1 critical · 2 in review · 1 snoozed", leaving out zeros; snoozed is counted, never hidden (spec Journey A). */
+function attentionDetail({critical, inReview, snoozed}: {critical: number; inReview: number; snoozed: number}): string {
+  const parts = [critical ? `${critical} critical` : 'none critical', inReview ? `${inReview} in review` : '', snoozed ? `${snoozed} snoozed` : ''];
+  return parts.filter(Boolean).join(' · ');
+}
 
 /**
  * The daily check-in (spec §4.1, Journey A): when data was last checked, a few
  * numbers, the urgent queue, upcoming dates, the portfolio, then recent activity.
  * No metric-card wall and no decorative charts (spec §7).
  */
-export function OverviewView({apps, notices, sources, activity, people, addKey, today}: Props) {
+export function OverviewView({apps, notices, sources, activity, people, addKey, today, now}: Props) {
   const [isAdding, setIsAdding] = useState(false);
-  const numbers = keyNumbers(notices, apps, sources, today);
+  const numbers = keyNumbers(notices, apps, sources ?? [], today, new Date(now));
   const queue = urgentQueue(notices);
   const dates = upcomingDates(apps, today);
   const portfolio = portfolioSummary(apps, notices);
-  const lastCheck = lastSuccessfulCheck(sources);
-  const appName = new Map(apps.map((app) => [app.id, app.name]));
   const addButton = <Button label="+ Add application" variant="primary" onClick={() => setIsAdding(true)} />;
+  const snoozedLink = `${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, status: INBOX_STATUS.snoozed})}`;
 
   return (
     <PageFrame crumbs={[{label: 'Overview'}]}>
-      <PageHeader
-        title="Overview"
-        description={lastCheck ? `Last successful check: ${formatDateTime(lastCheck)}` : 'No source has been checked yet.'}
-        actions={addButton}
-      />
+      <PageHeader title="Overview" description={checkStatusLine(sources)} actions={addButton} />
 
       {apps.length === 0 ? (
         <Card>
@@ -80,19 +75,19 @@ export function OverviewView({apps, notices, sources, activity, people, addKey, 
               <KeyNumber
                 value={numbers.needAttention}
                 label={numbers.needAttention === 1 ? 'needs attention' : 'need attention'}
-                detail={numbers.critical ? `${numbers.critical} critical` : 'none critical'}
+                detail={attentionDetail(numbers)}
                 href={ROUTES.notices}
               />
               <KeyNumber
                 value={numbers.deadlinesSoon}
-                label={numbers.deadlinesSoon === 1 ? 'notice deadline in 30 days' : 'notice deadlines in 30 days'}
-                detail="Decide before they pass"
+                label={`${numbers.deadlinesSoon === 1 ? 'notice deadline' : 'notice deadlines'} in ${OVERVIEW_DEADLINE_DAYS} days`}
+                detail={numbers.overdue ? `${numbers.overdue} passed in the last ${OVERVIEW_OVERDUE_DAYS} days` : 'Decide before they pass'}
               />
-              {numbers.sourcesDown > 0 && (
+              {numbers.staleSources > 0 && (
                 <KeyNumber
-                  value={numbers.sourcesDown}
-                  label={numbers.sourcesDown === 1 ? 'source not answering' : 'sources not answering'}
-                  detail="Their data may be out of date"
+                  value={numbers.staleSources}
+                  label={numbers.staleSources === 1 ? 'source out of date' : 'sources out of date'}
+                  detail="Did not answer, or not checked recently; data may be missing"
                   href={settingsRoute(SETTINGS_SECTION.sources)}
                 />
               )}
@@ -102,11 +97,16 @@ export function OverviewView({apps, notices, sources, activity, people, addKey, 
           <PanelCard
             title="Needs attention"
             subtitle="The most severe open notices first"
-            action={<CardLink label="All notices" href={ROUTES.notices} />}>
+            action={
+              <HStack gap={4} vAlign="center" wrap="wrap">
+                {numbers.snoozed > 0 && <CardLink label={`${numbers.snoozed} snoozed`} href={snoozedLink} />}
+                <CardLink label="All notices" href={ROUTES.notices} />
+              </HStack>
+            }>
             {queue.length === 0 ? (
               <EmptyState
-                title={numbers.sourcesDown ? 'Nothing open, but some data is out of date' : 'Nothing needs attention'}
-                description="Snoozed and handled notices are in the Notices inbox."
+                title={numbers.staleSources ? 'Nothing open, but some data is out of date' : 'Nothing needs attention'}
+                description={numbers.snoozed ? `${numbers.snoozed} snoozed until their dates. Handled notices are in the Notices inbox.` : 'Snoozed and handled notices are in the Notices inbox.'}
                 isCompact
               />
             ) : (
@@ -131,21 +131,26 @@ export function OverviewView({apps, notices, sources, activity, people, addKey, 
             )}
           </PanelCard>
 
-          <PanelCard title="Upcoming dates" subtitle="Notice deadlines and renewals in the next 90 days">
+          <PanelCard
+            title="Upcoming dates"
+            subtitle={`Notice deadlines and renewals in the next ${OVERVIEW_DATES_DAYS} days, and notice deadlines passed in the last ${OVERVIEW_OVERDUE_DAYS} days`}>
             {dates.length === 0 ? (
-              <EmptyState title="No dates in the next 90 days" description="Add renewal and notice dates when you edit an application." isCompact />
+              <EmptyState title={`No dates in the next ${OVERVIEW_DATES_DAYS} days`} description="Add renewal and notice dates when you edit an application." isCompact />
             ) : (
               <VStack gap={0} paddingInline={5} paddingBlockEnd={3}>
                 {dates.map((row, index) => (
                   <VStack key={`${row.appId}-${row.kind}`} gap={0}>
                     {index > 0 && <Divider />}
-                    <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3}>
+                    <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3} wrap="wrap">
                       <Link href={`${ROUTES.applications}/${encodeURIComponent(row.appId)}`} size="sm" weight="bold">
                         {row.title}
                       </Link>
-                      <HStack gap={2} vAlign="center">
+                      <HStack gap={2} vAlign="center" style={{flex: 'none'}}>
                         <Text size="sm">{formatDate(row.date)}</Text>
-                        <Badge label={row.kind === DATE_KIND.notice ? 'Notice' : 'Renewal'} variant="neutral" />
+                        <Badge
+                          label={row.isOverdue ? 'Passed' : row.kind === DATE_KIND.notice ? 'Notice' : 'Renewal'}
+                          variant={row.isOverdue ? 'red' : 'neutral'}
+                        />
                       </HStack>
                     </HStack>
                   </VStack>
@@ -157,22 +162,20 @@ export function OverviewView({apps, notices, sources, activity, people, addKey, 
           <PanelCard title="Your applications" action={<CardLink label="All applications" href={ROUTES.applications} />}>
             <VStack gap={1} paddingInline={5} paddingBlockEnd={5}>
               <Text>{`${portfolio.total} applications · ${portfolio.withOpenNotices} with open notices`}</Text>
-              <Text color="secondary">
-                {portfolio.notMonitored
-                  ? `${portfolio.monitored} are monitored. ${portfolio.notMonitored} have nothing to check yet (no dependencies or hosting recorded), so they are not counted as healthy.`
-                  : `All ${portfolio.monitored} are monitored.`}
-              </Text>
+              <Text color="secondary">{portfolioNote(portfolio)}</Text>
             </VStack>
           </PanelCard>
 
           <PanelCard title="Recent activity">
-            {activity.length === 0 ? (
+            {activity === null ? (
+              <EmptyState title="Activity could not be loaded" description="Reload the page to try again; everything above is current." isCompact />
+            ) : activity.length === 0 ? (
               <EmptyState title="No activity yet" description="Actions on notices and applications show here." isCompact />
             ) : (
               <VStack gap={1} paddingInline={5} paddingBlockEnd={5}>
                 {activity.map((event) => (
                   <Text key={event.id} size="sm">
-                    {`${formatDateTime(event.occurredAt)} · ${event.actor} ${ACTION_LABEL[event.action]}${event.appId && appName.get(event.appId) ? ` on ${appName.get(event.appId)}` : ''}`}
+                    {activityLine(event)}
                   </Text>
                 ))}
               </VStack>

@@ -18,8 +18,10 @@ test('Journey A: the Overview leads with what needs attention; acting on the top
   await expect(page.getByText('Health distribution')).toHaveCount(0);
   await expect(page.getByText('Average health score')).toHaveCount(0);
 
+  const counts = page.getByText(/^(none|\d+) critical/).first();
+  const countsBefore = await counts.textContent();
   const queue = page.getByRole('heading', {name: 'Needs attention'}).locator('xpath=ancestor::*[3]');
-  const top = queue.getByRole('link').filter({hasNotText: 'All notices'}).first();
+  const top = queue.getByRole('link').filter({hasNotText: /All notices|snoozed/}).first();
   const title = await top.textContent();
   await top.click();
   const drawer = page.getByRole('dialog');
@@ -30,7 +32,8 @@ test('Journey A: the Overview leads with what needs attention; acting on the top
   await page.keyboard.press('Escape');
   await expect(drawer).toHaveCount(0);
   await page.getByRole('navigation').first().getByRole('link', {name: /^Overview$/}).click();
-  await expect(page.getByRole('link', {name: title!})).toBeVisible();
-  await expect(page.getByText(/· Reviewing$/).first()).toBeVisible();
+  // The acted-on item is still listed, with its new status, and the in-review count moved.
+  await expect(page.getByRole('link', {name: title!}).locator('xpath=..')).toContainText('· Reviewing');
+  await expect(counts).not.toHaveText(countsBefore!);
   expect(loadMs).toBeLessThan(5000);
 });

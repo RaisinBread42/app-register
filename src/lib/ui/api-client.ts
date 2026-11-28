@@ -271,7 +271,9 @@ export type AuditEvent = {
   subjectKind: string;
   subjectId: string;
   appId: string | null;
+  appName: string | null;
   noticeId: string | null;
+  noticeTitle: string | null;
   fromValue: string | null;
   toValue: string | null;
   snoozedUntil: string | null;
