@@ -20,20 +20,23 @@ type EditDialogProps = {
 
 /**
  * Every form dialog's one layout ([30]): the title with a close control at the top,
- * the fields in a body that scrolls on its own (so a long form keeps its title and its
- * buttons in view), the API's error, then Cancel and the primary action. The dialog
- * traps focus and returns it to the opener on close.
+ * then a body that scrolls on its own and holds the fields and any error, then Cancel
+ * and the primary action. The header and the buttons never scroll away, whatever the
+ * window height or the length of the error. The dialog traps focus and returns it to
+ * the opener on close.
  */
 export function EditDialog({title, subtitle, isOpen, onClose, onSave, isSaving, error, saveLabel = 'Save', children}: EditDialogProps) {
   return (
-    <Dialog isOpen={isOpen} onOpenChange={(open) => !open && onClose()} purpose="form" width={520} padding={4} maxHeight="85dvh">
-      <VStack gap={4}>
-        <DialogHeader title={title} subtitle={subtitle} onOpenChange={(open) => !open && onClose()} />
-        <VStack gap={4} paddingInline={0.5} style={{maxHeight: 'calc(85dvh - var(--spacing-10) * 4)', overflowY: 'auto'}}>
+    <Dialog isOpen={isOpen} onOpenChange={(open) => !open && onClose()} purpose="form" width={520} padding={0} maxHeight="85dvh">
+      <VStack gap={0} style={{maxHeight: '85dvh'}}>
+        <VStack paddingInline={4} paddingBlockStart={4} style={{flex: 'none'}}>
+          <DialogHeader title={title} subtitle={subtitle} onOpenChange={(open) => !open && onClose()} />
+        </VStack>
+        <VStack gap={4} padding={4} style={{flex: '1 1 auto', minHeight: 0, overflowY: 'auto'}}>
+          <FormError error={error} />
           {children}
         </VStack>
-        <FormError error={error} />
-        <HStack gap={2} justify="end">
+        <HStack gap={2} justify="end" padding={4} style={{flex: 'none'}}>
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button label={saveLabel} variant="primary" isLoading={isSaving} onClick={onSave} />
         </HStack>

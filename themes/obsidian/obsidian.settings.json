@@ -754,6 +754,12 @@
       "value": "#A69FB6",
       "source": "token",
       "on": "side-nav-heading"
+    },
+    {
+      "thing": "--focus-outline-color",
+      "value": "#AA9BFC",
+      "source": "token",
+      "on": "side-nav-item"
     }
   ],
   "lifted": [

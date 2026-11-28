@@ -517,6 +517,7 @@ export const obsidianTheme = {
         "gap": "12px",
         "--color-icon-primary": "#C5BCD1",
         "--color-icon-secondary": "#C5BCD1",
+        "--focus-outline-color": "#AA9BFC",
         ":hover": {
           "backgroundColor": "#292036",
           "color": "#FFFFFF"

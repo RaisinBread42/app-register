@@ -6,10 +6,12 @@ import {Button} from '@astryxdesign/core/Button';
 import {CheckboxList, CheckboxListItem} from '@astryxdesign/core/CheckboxList';
 import {DateInput} from '@astryxdesign/core/DateInput';
 import {FormLayout} from '@astryxdesign/core/FormLayout';
+import {Grid} from '@astryxdesign/core/Grid';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {NumberInput} from '@astryxdesign/core/NumberInput';
 import {Selector} from '@astryxdesign/core/Selector';
+import {Text} from '@astryxdesign/core/Text';
 import {TextArea} from '@astryxdesign/core/TextArea';
 import {TextInput} from '@astryxdesign/core/TextInput';
 import {VStack} from '@astryxdesign/core/VStack';
@@ -93,22 +95,14 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
         <TextArea label="Description" value={values.description} onChange={text('description')} />
 
         <Heading level={2}>Licence and dates</Heading>
-        {/* Bottom-aligned, so the notice deadline's helper text does not push its input below the renewal date's. */}
-        <HStack gap={3} wrap="wrap" vAlign="end">
-          <DateInput
-            label="Notice deadline"
-            description={`Last day to give notice. Alerts go out ${NOTICE_ALERT_OFFSET_DAYS.join(', ')} days before.`}
-            value={isoDate(values.noticeDeadline)}
-            onChange={text('noticeDeadline')}
-            hasClear
-          />
-          <DateInput
-            label="Renewal date"
-            value={isoDate(values.renewalDate)}
-            onChange={text('renewalDate')}
-            hasClear
-          />
-        </HStack>
+        {/* Two equal columns with no helper text inside, so the inputs line up even when one shows its own error below. */}
+        <Grid columns={{minWidth: 190, max: 2}} gap={3} align="start">
+          <DateInput label="Notice deadline" value={isoDate(values.noticeDeadline)} onChange={text('noticeDeadline')} hasClear width="100%" />
+          <DateInput label="Renewal date" value={isoDate(values.renewalDate)} onChange={text('renewalDate')} hasClear width="100%" />
+        </Grid>
+        <Text type="supporting" color="secondary">
+          {`The notice deadline is the last day to give notice. Alerts go out ${NOTICE_ALERT_OFFSET_DAYS.join(', ')} days before.`}
+        </Text>
         <HStack gap={3} wrap="wrap">
           <NumberInput label="Cost" value={values.cost} onChange={(cost) => set('cost')(Number.isFinite(cost) ? cost : null)} min={0} step={0.01} hasClear />
           <TextInput

@@ -54,7 +54,11 @@ describe('UI boundaries', () => {
       const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
       expect(code, file).not.toMatch(/['"`][^'"`\n]*#[0-9a-fA-F]{3,8}\b/);
       expect(code, file).not.toMatch(/\b\d+(\.\d+)?px\b/);
+      expect(code, file).not.toMatch(/\b(rgba?|hsla?)\(/);
     }
+    // The global stylesheet only loads Astryx and sets the page background from a token.
+    const globals = readFileSync(path.join(ROOT, 'app', 'globals.css'), 'utf8');
+    expect(globals).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\b\d+px\b|\b(rgba?|hsla?)\(/);
   });
 
   it('Sources and People moved under Settings: their old routes only redirect there (spec §4, ADR 0003)', () => {

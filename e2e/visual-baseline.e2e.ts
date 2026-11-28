@@ -14,8 +14,10 @@ async function appId(page: Page, name: string): Promise<string> {
 async function checkDialog(page: Page, opener: ReturnType<Page['getByRole']>, title: string) {
   await opener.click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', {level: 2, name: title})).toBeVisible();
-  await expect(dialog.getByRole('button', {name: /close/i}).first()).toBeVisible();
+  const heading = dialog.getByRole('heading', {level: 2, name: title});
+  await expect(heading).toBeVisible();
+  // The close control sits in the shared header, beside the title (not some other "Close" button further down).
+  await expect(dialog.locator('.astryx-dialog-header').getByRole('button')).toHaveCount(1);
   // Check contrast once the dialog has finished fading in, not halfway through.
   await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== 'running'));
   await expectNoAxeViolations(page);
@@ -42,6 +44,35 @@ test('AC5: every dialog has the same layout (title, close control), passes axe, 
 
   await page.goto('/notices');
   await checkDialog(page, page.getByRole('button', {name: 'Keyboard shortcuts'}), 'Keyboard shortcuts');
+});
+
+test('AC5: after a refused save, in a laptop window and on a phone, the title, the error and both buttons stay in view; the title lines up with the fields', async ({page}) => {
+  for (const viewport of [{width: 1280, height: 720}, {width: 360, height: 640}]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/applications');
+    await page.getByRole('button', {name: '+ Add application'}).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', {name: 'Add application'}).click();
+    await expect(dialog.getByText('Not saved')).toBeVisible();
+    for (const name of ['Add application', 'Cancel']) {
+      await expect(dialog.getByRole('button', {name, exact: true}), `${viewport.width}×${viewport.height}: ${name}`).toBeInViewport({ratio: 1});
+    }
+    await expect(dialog.getByRole('heading', {level: 2, name: 'Add application'})).toBeInViewport();
+    if (viewport.width === 1280) {
+      const title = (await dialog.getByRole('heading', {level: 2, name: 'Add application'}).boundingBox())!;
+      const label = (await dialog.getByText('Application name', {exact: true}).first().boundingBox())!;
+      expect(Math.abs(title.x - label.x), 'title and fields share one left edge').toBeLessThanOrEqual(2);
+    }
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('AC5: the notice drawer has the same close control and button styles as the dialogs', async ({page}) => {
+  await page.goto('/notices');
+  await page.locator('a[data-inbox-row]').first().click();
+  const drawer = page.getByRole('dialog');
+  await drawer.getByRole('button', {name: 'Close', exact: true}).click();
+  await expect(drawer).toHaveCount(0);
 });
 
 test('AC5: in a short window a long dialog keeps its title and buttons in view while its fields scroll', async ({page}) => {
@@ -73,10 +104,24 @@ test('AC4: with reduced motion the notice drawer appears without animating', asy
   expect(moving).toEqual([]);
 });
 
-test('AC6: the Renewal date and Notice deadline inputs line up in the Edit form', async ({page}) => {
+test('AC6: the Renewal date and Notice deadline inputs line up in the Edit form, also when one shows an error, at 768 and 1280 px', async ({page}) => {
   await page.goto(`/applications/${await appId(page, 'Ledgerline')}/edit`);
-  const box = async (label: string) => (await page.getByLabel(label, {exact: true}).boundingBox())!;
+  await expect(page.locator('label', {hasText: /^Renewal date/}).first()).toBeVisible();
+  // The labels sit straight above their inputs in two equal columns; equal tops mean the inputs line up.
+  const box = async (label: string) => (await page.locator('label', {hasText: new RegExp(`^${label}`)}).first().boundingBox())!;
+  for (const width of [1280, 768]) {
+    await page.setViewportSize({width, height: 900});
+    const [notice, renewal] = [await box('Notice deadline'), await box('Renewal date')];
+    expect(Math.abs(notice.y - renewal.y), `${width}px: same top`).toBeLessThanOrEqual(1);
+  }
+  await page.getByLabel('Renewal date', {exact: true}).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('99/99/2026');
+  await page.keyboard.press('Tab');
+  await page.getByRole('heading', {name: 'Licence and dates'}).click();
+  await expect(page.getByText(/invalid date/i).first()).toBeVisible();
   const [notice, renewal] = [await box('Notice deadline'), await box('Renewal date')];
-  expect(Math.abs(notice.y + notice.height - (renewal.y + renewal.height))).toBeLessThanOrEqual(1);
+  expect(Math.abs(notice.y - renewal.y), 'with an error under one input').toBeLessThanOrEqual(1);
+  await page.reload();
   await captureAtAllWidths(page, 'edit-form');
 });

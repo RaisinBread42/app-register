@@ -632,6 +632,7 @@
     gap: 12px;
     --color-icon-primary: #C5BCD1;
     --color-icon-secondary: #C5BCD1;
+    --focus-outline-color: #AA9BFC;
   }
 
   .astryx-side-nav-item:hover:where(:not(:disabled,[aria-disabled="true"])) {

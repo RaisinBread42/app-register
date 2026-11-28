@@ -108,7 +108,7 @@ export function ApiKeysSection({apiKeys, createKey, revokeKeys}: Props) {
           collapsible={false}
           endContent={<Button label={COPY.copyKey} variant="secondary" size="sm" onClick={() => void copyKey()} />}
         >
-          <Text weight="bold" style={{fontFamily: 'var(--font-mono, ui-monospace)', wordBreak: 'break-all'}}>
+          <Text weight="bold" style={{fontFamily: 'var(--font-family-code)', wordBreak: 'break-all'}}>
             {createdKey}
           </Text>
         </Banner>

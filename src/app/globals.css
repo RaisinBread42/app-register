@@ -10,18 +10,3 @@ body {
   margin: 0;
   background: var(--color-background-body);
 }
-
-/*
- * [30] Respect a reader's request for less motion: Astryx's drawer and dialog slide and
- * fade by default, so with reduced motion every animation and transition ends at once.
- */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}

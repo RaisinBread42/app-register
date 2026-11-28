@@ -16,7 +16,7 @@ import {Tooltip} from '@astryxdesign/core/Tooltip';
 import {VStack} from '@astryxdesign/core/VStack';
 import {DEPENDENCY_IMPORT_MAX_BYTES} from '@/lib/constants';
 import type {AppDetail, Dependency, DependencyImport} from '@/lib/ui/api-client';
-import {NOT_SET, SEVERITY_VARIANT, orDash} from '@/lib/ui/copy';
+import {ADVISORY_SEVERITY_LABEL, NOT_SET, SEVERITY_VARIANT, orDash} from '@/lib/ui/copy';
 import {dependencyToForm, type DependencyFormValues} from '@/lib/ui/forms';
 import {formatDate, handRecordedAdvisories, lastChecked, statusNote, worstAdvisoriesFirst} from '@/lib/ui/register-view';
 import {importDependenciesAction, refreshDependenciesAction, removeDependencyAction, saveDependencyAction} from '../../actions';
@@ -243,7 +243,7 @@ function AdvisoriesCell({dependency}: {dependency: Dependency}) {
     <HStack gap={1} wrap="wrap">
       {shown.map((advisory) => (
         <Link key={advisory.id} href={advisory.url} target="_blank" rel="noreferrer" tooltip={`${advisory.severity}: ${advisory.summary}`}>
-          <Badge label={advisory.id} variant={SEVERITY_VARIANT[advisory.severity]} />
+          <Badge label={`${ADVISORY_SEVERITY_LABEL[advisory.severity]} · ${advisory.id}`} variant={SEVERITY_VARIANT[advisory.severity]} />
         </Link>
       ))}
       {hidden > 0 && <Badge label={`+${hidden} more`} variant="neutral" />}

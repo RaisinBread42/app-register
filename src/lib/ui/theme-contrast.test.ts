@@ -86,6 +86,12 @@ const PAIRS: [string, string][] = [
   ['--color-text-purple', '--color-background-purple'],
   ['--color-text-pink', '--color-background-pink'],
   ['--color-text-accent', '--color-accent-muted'],
+  ['--color-text-blue', '--color-info-muted'],
+  ['--color-text-gray', '--color-background-muted'],
+  ['--color-on-success-muted', '--color-success-muted'],
+  ['--color-on-warning-muted', '--color-warning-muted'],
+  ['--color-on-error-muted', '--color-error-muted'],
+  ['--color-on-info-muted', '--color-info-muted'],
   ['--color-on-accent', '--color-accent'],
   ['--color-on-success', '--color-success'],
   ['--color-on-error', '--color-error'],
@@ -102,7 +108,7 @@ describe('theme contrast', () => {
   });
 
   for (const mode of ['light', 'dark'] as const) {
-    it(`AC2: every text and status colour meets WCAG AA (${AA_TEXT}:1) on its surface in ${mode} mode`, () => {
+    it(`AC2: every text and status colour with an opaque value meets WCAG AA (${AA_TEXT}:1) on its surface in ${mode} mode (axe checks what each screen renders)`, () => {
       const failures = PAIRS.flatMap(([text, surface]) => {
         const [foreground, background] = [colour(text, mode), colour(surface, mode)];
         if (!foreground || !background) return [];
