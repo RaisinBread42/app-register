@@ -14,7 +14,8 @@ import {DATE_KIND, OVERVIEW_DATES_DAYS, OVERVIEW_DEADLINE_DAYS, OVERVIEW_OVERDUE
 import type {App, AuditEvent, MonitoringSource, Notice} from '@/lib/ui/api-client';
 import {MATCH_STATUS_LABEL, NOTICE_CATEGORY_LABEL, NOTICE_SEVERITY_LABEL, NOTICE_SEVERITY_VARIANT} from '@/lib/ui/copy';
 import {DEFAULT_INBOX_VIEW, INBOX_STATUS, inboxQuery} from '@/lib/ui/notice-inbox';
-import {activityLine, checkStatusLine, keyNumbers, portfolioNote, portfolioSummary, upcomingDates, urgentQueue} from '@/lib/ui/overview';
+import {activityLine} from '@/lib/ui/activity';
+import {checkStatusLine, keyNumbers, portfolioNote, portfolioSummary, upcomingDates, urgentQueue} from '@/lib/ui/overview';
 import {formatDate} from '@/lib/ui/register-view';
 import {CardLink, PanelCard} from './_components/Cards';
 import {PageFrame} from './_components/PageFrame';

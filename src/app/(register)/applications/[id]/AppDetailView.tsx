@@ -18,7 +18,7 @@ import {Tab, TabList} from '@astryxdesign/core/TabList';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {APP_TAB, HEALTH_MAX_SCORE, ROUTES, appTabRoute, editAppRoute, type AppTab} from '@/lib/constants';
-import type {AppDetail, Deduction, Health, HostingCatalog} from '@/lib/ui/api-client';
+import type {AppDetail, AuditEvent, Deduction, Health, HostingCatalog, Notice} from '@/lib/ui/api-client';
 import {
   CRITICALITY_LABEL,
   CRITICALITY_NOT_SET,
@@ -26,17 +26,23 @@ import {
   HEALTH_BASIS_NOTE,
   HEALTH_STATUS_VARIANT,
   KIND_LABEL,
+  MATCH_STATUS_LABEL,
   NO_BACKUP_OWNER,
   NO_SCORE_HINT,
   NO_SCORE_TITLE,
   NOT_SET,
+  NOTICE_CATEGORY_LABEL,
+  NOTICE_SEVERITY_LABEL,
+  NOTICE_SEVERITY_VARIANT,
   formatCost,
   healthVerdict,
   orDash,
 } from '@/lib/ui/copy';
 import {BackArrowIcon, PencilIcon} from '@/lib/ui/icons';
 import {useRememberedListHref} from '@/lib/ui/list-memory';
-import {formatDate, primaryHosting} from '@/lib/ui/register-view';
+import {DEFAULT_INBOX_VIEW, inboxQuery, inboxRows} from '@/lib/ui/notice-inbox';
+import {activitySummary} from '@/lib/ui/activity';
+import {allDeductions, formatDate, formatDateTime, latestCheck, primaryHosting} from '@/lib/ui/register-view';
 import {archiveAppAction} from '../../actions';
 import {AppIcon, PendingPill} from '../../_components/AppIdentity';
 import {FootNote, KeyValueRows, PanelCard} from '../../_components/Cards';
@@ -56,12 +62,14 @@ export type AppDetailKeys = {
   hosting: Record<string, string>;
 };
 
-type Props = {app: AppDetail; initialTab: AppTab; keys: AppDetailKeys; catalog: HostingCatalog; today: string};
+type Props = {app: AppDetail; notices: Notice[]; activity: AuditEvent[]; initialTab: AppTab; keys: AppDetailKeys; catalog: HostingCatalog; today: string};
 
 const NOT_RECORDED = 'Not recorded';
+/** The breakdown shows the biggest deductions first, with the rest behind "See scoring details" (spec §8). */
+const TOP_DEDUCTIONS = 3;
 const dateOrDash = (iso: string | null) => (iso ? formatDate(iso) : NOT_SET);
 
-export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
+export function AppDetailView({app, notices, activity, initialTab, keys, catalog, today}: Props) {
   const router = useRouter();
   const [tab, setTabState] = useState<string>(initialTab);
   /** The open tab lives in the URL, so a link or Back opens the same tab. */
@@ -117,9 +125,10 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
           <Tab value={APP_TAB.overview} label="Overview" />
           <Tab value={APP_TAB.dependencies} label="Dependencies" />
           <Tab value={APP_TAB.hosting} label="Hosting & infrastructure" />
-          <Tab value={APP_TAB.licence} label="Licence & pricing" />
+          <Tab value={APP_TAB.licence} label="Licences" />
+          <Tab value={APP_TAB.activity} label="Activity" />
         </TabList>
-        {tab === APP_TAB.overview && <OverviewTab app={app} hosting={hosting} />}
+        {tab === APP_TAB.overview && <OverviewTab app={app} hosting={hosting} notices={notices} />}
         {tab === APP_TAB.dependencies && (
           <DependenciesTab
             app={app}
@@ -140,6 +149,7 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
           />
         )}
         {tab === APP_TAB.licence && <LicenceTab app={app} />}
+        {tab === APP_TAB.activity && <ActivityTab events={activity} />}
       </VStack>
       {confirm.element}
     </PageFrame>
@@ -147,10 +157,13 @@ export function AppDetailView({app, initialTab, keys, catalog, today}: Props) {
 }
 
 function Hero({app, hosting}: {app: AppDetail; hosting: string}) {
+  const checked = latestCheck(app);
   const meta = [
-    {label: 'Category', value: orDash(app.category)},
     {label: 'Owner', value: app.owner.name},
-    {label: 'Renewal date', value: dateOrDash(app.renewalDate)},
+    {label: 'Backup owner', value: app.backupOwner?.name ?? NO_BACKUP_OWNER},
+    {label: 'Criticality', value: app.criticality ? CRITICALITY_LABEL[app.criticality] : CRITICALITY_NOT_SET},
+    {label: 'Environments', value: app.environments.length ? app.environments.map((environment) => ENVIRONMENT_LABEL[environment]).join(', ') : NOT_SET},
+    {label: 'Last checked', value: checked ? formatDateTime(checked) : 'Never checked'},
     {label: 'Hosting', value: hosting},
   ];
   return (
@@ -174,7 +187,7 @@ function Hero({app, hosting}: {app: AppDetail; hosting: string}) {
         </HStack>
         <VStack gap={5}>
           <Divider />
-          <Grid columns={4} gap={4}>
+          <Grid columns={3} gap={4}>
             {meta.map((item) => (
               <VStack key={item.label} gap={1}>
                 <Text type="supporting" color="secondary">
@@ -219,13 +232,11 @@ function HeroScore({health}: {health: Health}) {
 }
 
 /** The prototype's deductions list: the starting score, each deduction with its points, then the score. */
-function HealthBreakdown({health}: {health: Health}) {
+function HealthBreakdown({health, limit}: {health: Health; limit?: number}) {
   if (health.score === null) {
     return <EmptyState title={NO_SCORE_TITLE} description={NO_SCORE_HINT} isCompact />;
   }
-  const deductions = Object.values(health.dimensions)
-    .flatMap((dimension) => dimension?.deductions ?? [])
-    .sort((a, b) => b.points - a.points);
+  const deductions = allDeductions(health).slice(0, limit);
   return (
     <VStack gap={0}>
       <BreakdownRow title="Starting score" detail="Every monitored check starts clear">
@@ -282,13 +293,55 @@ function BreakdownRow({title, detail, children}: {title: string; detail?: string
   );
 }
 
-function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
+function OverviewTab({app, hosting, notices}: {app: AppDetail; hosting: string; notices: Notice[]}) {
+  const [showAllDeductions, setShowAllDeductions] = useState(false);
+  const deductions = allDeductions(app.health);
+  const rows = inboxRows(notices, DEFAULT_INBOX_VIEW).filter((row) => row.match.app.id === app.id);
   return (
     <Grid columns={12} gap={4} align="start">
       <GridSpan columns={7}>
         <VStack gap={4}>
-          <PanelCard title="Health breakdown" subtitle="How the 0–100 score is calculated">
-            <HealthBreakdown health={app.health} />
+          <PanelCard title="Needs attention" subtitle="Open notices on this application, most severe first">
+            {rows.length === 0 ? (
+              <EmptyState title="No open notices" description="Snoozed and handled notices are in the Notices inbox." isCompact />
+            ) : (
+              <VStack gap={0}>
+                {rows.map(({notice, match}, index) => (
+                  <VStack key={match.id} gap={0}>
+                    {index > 0 && <Divider />}
+                    <HStack gap={3} vAlign="center" hAlign="between" paddingBlock={3} wrap="wrap">
+                      <HStack gap={3} vAlign="center" style={{flex: 1, minWidth: 0}}>
+                        <Badge label={NOTICE_SEVERITY_LABEL[notice.severity]} variant={NOTICE_SEVERITY_VARIANT[notice.severity]} />
+                        <VStack gap={0.5}>
+                          <Text weight="bold" size="sm">
+                            {notice.title}
+                          </Text>
+                          <Text type="supporting" color="secondary">
+                            {`${NOTICE_CATEGORY_LABEL[notice.category]} · ${MATCH_STATUS_LABEL[match.status]}`}
+                          </Text>
+                        </VStack>
+                      </HStack>
+                      <Button label="Review notice" size="sm" href={`${ROUTES.notices}${inboxQuery({...DEFAULT_INBOX_VIEW, notice: match.id})}`} />
+                    </HStack>
+                  </VStack>
+                ))}
+              </VStack>
+            )}
+          </PanelCard>
+          <PanelCard
+            title="Health breakdown"
+            subtitle={showAllDeductions ? 'Every deduction behind the score' : 'The three biggest deductions'}
+            action={
+              deductions.length > TOP_DEDUCTIONS ? (
+                <Button
+                  label={showAllDeductions ? 'Show the top three' : 'See scoring details'}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllDeductions((current) => !current)}
+                />
+              ) : undefined
+            }>
+            <HealthBreakdown health={app.health} limit={showAllDeductions ? undefined : TOP_DEDUCTIONS} />
           </PanelCard>
         </VStack>
       </GridSpan>
@@ -310,13 +363,7 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
               rows={[
                 {label: 'Supplier', value: orDash(app.vendor)},
                 {label: 'Type', value: KIND_LABEL[app.kind]},
-                {label: 'Criticality', value: app.criticality ? CRITICALITY_LABEL[app.criticality] : CRITICALITY_NOT_SET},
-                {label: 'Owner', value: app.owner.name},
-                {label: 'Backup owner', value: app.backupOwner?.name ?? NO_BACKUP_OWNER},
-                {
-                  label: 'Environments',
-                  value: app.environments.length ? app.environments.map((environment) => ENVIRONMENT_LABEL[environment]).join(', ') : NOT_SET,
-                },
+                {label: 'Category', value: orDash(app.category)},
                 {
                   label: 'Repository',
                   value: app.repositoryUrl ? (
@@ -327,17 +374,43 @@ function OverviewTab({app, hosting}: {app: AppDetail; hosting: string}) {
                     NOT_SET
                   ),
                 },
-                {label: 'Category', value: orDash(app.category)},
                 {label: 'Hosting', value: hosting},
                 {label: 'Renewal', value: dateOrDash(app.renewalDate)},
                 {label: 'Notice deadline', value: dateOrDash(app.noticeDeadline)},
-                {label: 'Monitoring', value: <Badge label="Not configured" variant="purple" />},
+                {label: 'Where it runs', value: orDash(app.runtimeLocation)},
+                {label: 'Data and keys it touches', value: orDash(app.dataAndKeys)},
+                {label: 'What breaks if it stops', value: orDash(app.whatBreaksIfStopped)},
               ]}
             />
           </PanelCard>
         </VStack>
       </GridSpan>
     </Grid>
+  );
+}
+
+/** Everything done to this application and its notices, newest first (append-only history). */
+function ActivityTab({events}: {events: AuditEvent[]}) {
+  return (
+    <PanelCard title="Activity" subtitle="Who did what, and when; this history is never rewritten">
+      {events.length === 0 ? (
+        <EmptyState title="No activity yet" description="Actions on this application and its notices show here." isCompact />
+      ) : (
+        <VStack gap={0}>
+          {events.map((event, index) => (
+            <VStack key={event.id} gap={0}>
+              {index > 0 && <Divider />}
+              <VStack gap={0.5} paddingBlock={3}>
+                <Text size="sm">{activitySummary(event)}</Text>
+                <Text type="supporting" color="secondary">
+                  {[formatDateTime(event.occurredAt), event.note].filter(Boolean).join(' · ')}
+                </Text>
+              </VStack>
+            </VStack>
+          ))}
+        </VStack>
+      )}
+    </PanelCard>
   );
 }
 

@@ -14,7 +14,10 @@ import {
 import type {
   Advisory,
   App,
+  AppDetail,
+  Deduction,
   Dependency,
+  Health,
   Hosting,
   HostingIncident,
 } from "./api-client";
@@ -319,4 +322,17 @@ export function checkErrors(hosting: Hosting[]): string[] {
   return [
     ...new Set(hosting.flatMap((row) => row.healthError?.split("; ") ?? [])),
   ];
+}
+
+/** Every deduction behind a score, biggest first (the detail page shows the top three, then the rest on request). */
+export function allDeductions(health: Health): Deduction[] {
+  return Object.values(health.dimensions)
+    .flatMap((dimension) => dimension?.deductions ?? [])
+    .sort((a, b) => b.points - a.points);
+}
+
+/** When any check last looked at the app (its dependencies or hosting), as an ISO time, or null if never. */
+export function latestCheck(app: Pick<AppDetail, 'dependencies' | 'hosting'>): string | null {
+  const times = [...app.dependencies.flatMap((dependency) => dependency.checkedAt ?? []), ...app.hosting.flatMap((row) => row.healthCheckedAt ?? [])].sort();
+  return times.at(-1) ?? null;
 }

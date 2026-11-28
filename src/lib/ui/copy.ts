@@ -143,7 +143,7 @@ export const LIVE_DATA_NOTE =
 
 /** Shown wherever a score is, while dependencies and hosting are the monitored dimensions. */
 export const HEALTH_BASIS_NOTE = "Based on dependencies and hosting; licence and pricing checks coming soon.";
-export const NO_SCORE_TITLE = "No health score yet";
+export const NO_SCORE_TITLE = "Insufficient data";
 export const NO_SCORE_HINT =
   "Import a package.json or package-lock.json on an application's Dependencies tab, or add where it runs on its Hosting tab, to score it. A score appears once they have been checked.";
 export const NOTHING_TO_CHECK = "Nothing recorded or checked yet";

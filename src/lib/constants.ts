@@ -66,6 +66,7 @@ export const APP_TAB = {
   dependencies: 'dependencies',
   hosting: 'hosting',
   licence: 'licence',
+  activity: 'activity',
 } as const;
 export const APP_TABS = Object.values(APP_TAB);
 export type AppTab = (typeof APP_TABS)[number];
@@ -371,6 +372,9 @@ export const OVERVIEW_ACTIVITY_LIMIT = 5;
 
 export const DATE_KIND = {notice: 'notice', renewal: 'renewal'} as const;
 export type DateKind = (typeof DATE_KIND)[keyof typeof DATE_KIND];
+
+/** How many audit events an application's Activity tab shows. */
+export const APP_ACTIVITY_LIMIT = 50;
 
 /** Longest text kept for a notice title and summary. */
 export const NOTICE_TITLE_MAX_LENGTH = 300;
