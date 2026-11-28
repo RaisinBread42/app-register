@@ -57,7 +57,7 @@ function Topbar({crumbs}: {crumbs: Crumb[]}) {
           </BreadcrumbItem>
         ))}
       </Breadcrumbs>
-      <HStack gap={3} vAlign="center" hAlign="end" style={{flex: '1 1 240px', minWidth: 0}}>
+      <HStack gap={3} vAlign="center" hAlign="end" style={{flex: '1 1 calc(var(--spacing-10) * 6)', minWidth: 0}}>
         <HStack maxWidth={350} style={{flex: 1, minWidth: 0}}>
           <TextInput
             label="Search applications"

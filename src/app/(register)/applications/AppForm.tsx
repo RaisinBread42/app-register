@@ -93,7 +93,8 @@ export function AppForm({idempotencyKey, initial, people, appId}: AppFormProps) 
         <TextArea label="Description" value={values.description} onChange={text('description')} />
 
         <Heading level={2}>Licence and dates</Heading>
-        <HStack gap={3} wrap="wrap">
+        {/* Bottom-aligned, so the notice deadline's helper text does not push its input below the renewal date's. */}
+        <HStack gap={3} wrap="wrap" vAlign="end">
           <DateInput
             label="Notice deadline"
             description={`Last day to give notice. Alerts go out ${NOTICE_ALERT_OFFSET_DAYS.join(', ')} days before.`}

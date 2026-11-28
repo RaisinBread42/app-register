@@ -47,6 +47,16 @@ describe('UI boundaries', () => {
     }
   });
 
+  it('[30] AC1: colour, spacing and type come from theme tokens: no raw hex colours or px values in UI code (comments aside)', () => {
+    const uiCode = files.filter(({file}) => file.startsWith('app') || file.startsWith(path.join('lib', 'ui')));
+    expect(uiCode.length).toBeGreaterThan(10);
+    for (const {file, text} of uiCode) {
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+      expect(code, file).not.toMatch(/['"`][^'"`\n]*#[0-9a-fA-F]{3,8}\b/);
+      expect(code, file).not.toMatch(/\b\d+(\.\d+)?px\b/);
+    }
+  });
+
   it('Sources and People moved under Settings: their old routes only redirect there (spec §4, ADR 0003)', () => {
     for (const [folder, section] of [['sources', 'sources'], ['people', 'people']]) {
       const screens = uiFiles.filter(({file}) => file.startsWith(path.join('app', '(register)', folder) + path.sep));

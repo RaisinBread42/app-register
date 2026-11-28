@@ -6,7 +6,7 @@ import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {Button} from '@astryxdesign/core/Button';
 import {Card} from '@astryxdesign/core/Card';
-import {Dialog} from '@astryxdesign/core/Dialog';
+import {Dialog, DialogHeader} from '@astryxdesign/core/Dialog';
 import {EmptyState} from '@astryxdesign/core/EmptyState';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
@@ -293,9 +293,9 @@ export function NoticesView({notices, people, keys, staleSources, hasAnySourceAn
         </VStack>
       </Card>
       <NoticeDrawer key={open?.match.id ?? ''} row={open} people={people} keys={keys} today={today} onClose={closeNotice} />
-      <Dialog isOpen={isHelpOpen} onOpenChange={setHelpOpen} purpose="info" width={420} padding={6}>
-        <VStack gap={3}>
-          <Heading level={2}>Keyboard shortcuts</Heading>
+      <Dialog isOpen={isHelpOpen} onOpenChange={setHelpOpen} purpose="info" width={420} padding={4}>
+        <VStack gap={4}>
+          <DialogHeader title="Keyboard shortcuts" onOpenChange={setHelpOpen} />
           {SHORTCUTS.map((shortcut) => (
             <HStack key={shortcut.key} gap={3} vAlign="center">
               <Badge label={shortcut.key} variant="neutral" />
@@ -306,7 +306,7 @@ export function NoticesView({notices, people, keys, staleSources, hasAnySourceAn
             Shortcuts are off while you type in a field.
           </Text>
           <HStack hAlign="end">
-            <Button label="Close" onClick={() => setHelpOpen(false)} />
+            <Button label="Close" variant="primary" onClick={() => setHelpOpen(false)} />
           </HStack>
         </VStack>
       </Dialog>
