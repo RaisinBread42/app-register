@@ -46,7 +46,11 @@ export const UI_QUERY = {
   add: 'add',
   /** Applications list filters and sort, kept in the URL so Back and shared links restore them. */
   kind: 'kind',
+  criticality: 'criticality',
+  owner: 'owner',
   health: 'health',
+  /** `?open_notices=1` keeps only applications with an open notice. */
+  openNotices: 'open_notices',
   sort: 'sort',
   /** Which Settings section is open. */
   section: 'section',
@@ -75,13 +79,17 @@ export type AppTab = (typeof APP_TABS)[number];
 export const APP_HEALTH_FILTER = {
   attention: 'attention',
   healthy: 'healthy',
+  /** Nothing recorded to check, so no score: never counted as healthy. */
+  notMonitored: 'not_monitored',
 } as const;
+export const APP_HEALTH_FILTERS = Object.values(APP_HEALTH_FILTER);
 
-/** Sort orders of the applications list (sorted in the browser over the loaded apps). */
+/** Sort orders of the applications list (sorted in the browser over the loaded apps). `attention` is the default. */
 export const APP_LIST_SORT = {
-  health: 'health',
+  attention: 'attention',
   name: 'name',
-  renewal: 'renewal',
+  health: 'health',
+  deadline: 'deadline',
 } as const;
 export const APP_LIST_SORTS = Object.values(APP_LIST_SORT);
 export type AppListSort = (typeof APP_LIST_SORTS)[number];
@@ -249,6 +257,8 @@ export const APP_CRITICALITY = {
   critical: 'critical',
 } as const;
 export const APP_CRITICALITIES = Object.values(APP_CRITICALITY);
+/** The catalog's criticality filter value for apps whose criticality is not set yet, so they can be found and set. */
+export const CRITICALITY_FILTER_NOT_SET = 'not_set';
 export type AppCriticality = (typeof APP_CRITICALITIES)[number];
 
 /** Environments an app runs in; production exposure feeds health scoring later ([32]). */

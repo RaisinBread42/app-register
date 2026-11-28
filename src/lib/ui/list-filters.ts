@@ -1,19 +1,21 @@
 import {
-  APP_HEALTH_FILTER,
+  APP_CRITICALITIES,
+  APP_HEALTH_FILTERS,
   APP_KINDS,
-  APP_LIST_SORT,
   APP_LIST_SORTS,
   APP_TAB,
   APP_TABS,
+  CRITICALITY_FILTER_NOT_SET,
   FILTER_ALL,
   SETTINGS_SECTION,
   SETTINGS_SECTIONS,
   UI_QUERY,
+  UI_QUERY_ON,
   type AppListSort,
   type AppTab,
   type SettingsSection,
 } from "@/lib/constants";
-import type { AppListView } from "./register-view";
+import { DEFAULT_APP_LIST_VIEW, type AppListView } from "./catalog";
 
 /** A page's `searchParams`, as Next.js hands them over. */
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -45,15 +47,16 @@ export function settingsSection(value: string | string[] | undefined): SettingsS
   return oneOf(SETTINGS_SECTIONS, first(value)) ?? SETTINGS_SECTION.sources;
 }
 
-const HEALTH_FILTERS = Object.values(APP_HEALTH_FILTER);
-
 /** The applications list view a URL describes; unknown values fall back to the defaults. */
 export function appListViewFrom(params: SearchParams): AppListView {
   return {
     query: textParam(params, UI_QUERY.search),
     kind: oneOf(APP_KINDS, first(params[UI_QUERY.kind])) ?? FILTER_ALL,
-    health: oneOf(HEALTH_FILTERS, first(params[UI_QUERY.health])) ?? FILTER_ALL,
-    sort: oneOf<AppListSort>(APP_LIST_SORTS, first(params[UI_QUERY.sort])) ?? APP_LIST_SORT.health,
+    criticality: oneOf([...APP_CRITICALITIES, CRITICALITY_FILTER_NOT_SET], first(params[UI_QUERY.criticality])) ?? FILTER_ALL,
+    owner: textParam(params, UI_QUERY.owner) || FILTER_ALL,
+    health: oneOf(APP_HEALTH_FILTERS, first(params[UI_QUERY.health])) ?? FILTER_ALL,
+    openNotices: first(params[UI_QUERY.openNotices]) === UI_QUERY_ON,
+    sort: oneOf<AppListSort>(APP_LIST_SORTS, first(params[UI_QUERY.sort])) ?? DEFAULT_APP_LIST_VIEW.sort,
   };
 }
 
@@ -62,8 +65,11 @@ export function appListQuery(view: AppListView): string {
   const query = new URLSearchParams();
   if (view.query.trim()) query.set(UI_QUERY.search, view.query);
   if (view.kind !== FILTER_ALL) query.set(UI_QUERY.kind, view.kind);
+  if (view.criticality !== FILTER_ALL) query.set(UI_QUERY.criticality, view.criticality);
+  if (view.owner !== FILTER_ALL) query.set(UI_QUERY.owner, view.owner);
   if (view.health !== FILTER_ALL) query.set(UI_QUERY.health, view.health);
-  if (view.sort !== APP_LIST_SORT.health) query.set(UI_QUERY.sort, view.sort);
+  if (view.openNotices) query.set(UI_QUERY.openNotices, UI_QUERY_ON);
+  if (view.sort !== DEFAULT_APP_LIST_VIEW.sort) query.set(UI_QUERY.sort, view.sort);
   const text = query.toString();
   return text ? `?${text}` : "";
 }

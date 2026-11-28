@@ -51,7 +51,7 @@ export function keyNumbers(notices: Notice[], apps: App[], sources: MonitoringSo
 }
 
 /** A notice deadline that passed in the last 30 days: it may have renewed without a decision, so it stays in view. */
-function isOverdue(noticeDeadline: string | null, today: string): boolean {
+export function isOverdue(noticeDeadline: string | null, today: string): boolean {
   return noticeDeadline !== null && noticeDeadline < today && noticeDeadline >= addDaysIso(today, -OVERVIEW_OVERDUE_DAYS);
 }
 

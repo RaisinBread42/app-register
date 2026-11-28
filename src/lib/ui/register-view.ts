@@ -1,20 +1,14 @@
 import {
   ADVISORY_SEVERITIES,
-  APP_HEALTH_FILTER,
-  APP_LIST_SORT,
   END_OF_SUPPORT_SOON_DAYS,
-  FILTER_ALL,
-  HEALTH_ATTENTION_BELOW,
   HEALTH_DIMENSIONS,
   HEALTH_STATUS,
   INCIDENT_IMPACT,
   INCIDENT_SCOPE,
   MS_PER_DAY,
-  type AppListSort,
 } from "@/lib/constants";
 import type {
   Advisory,
-  App,
   AppDetail,
   Deduction,
   Dependency,
@@ -25,89 +19,9 @@ import type {
 import { CHECK_ERROR_LABEL, DIMENSION_NAME, NOT_CHECKED_YET, NOT_MONITORED } from "./copy";
 
 /**
- * Display-only shaping of data the pages already loaded: search, filters,
- * sort order and short lists. No business rules; those stay in the API.
+ * Display-only shaping of data the pages already loaded: dates, statuses,
+ * check notes and short lists. No business rules; those stay in the API.
  */
-
-/** Applications whose name contains the search text, ignoring case and surrounding spaces. */
-export function filterAppsByName<T extends { name: string }>(
-  apps: T[],
-  query: string,
-): T[] {
-  const needle = query.trim().toLowerCase();
-  return needle
-    ? apps.filter((app) => app.name.toLowerCase().includes(needle))
-    : apps;
-}
-
-export type AppListView = {
-  query: string;
-  kind: string;
-  health: string;
-  sort: AppListSort;
-};
-
-/** The applications list as the filters ask: name search, kind, health, then sort. */
-export function applyAppListView(apps: App[], view: AppListView): App[] {
-  const byKind =
-    view.kind === FILTER_ALL
-      ? apps
-      : apps.filter((app) => app.kind === view.kind);
-  const byHealth = byKind.filter((app) => matchesHealth(app, view.health));
-  const shown = [...filterAppsByName(byHealth, view.query)];
-  if (view.sort === APP_LIST_SORT.renewal) {
-    return shown.sort(byRenewalThenName);
-  }
-  if (view.sort === APP_LIST_SORT.health) {
-    return shown.sort(byScoreThenName);
-  }
-  return shown.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** "Needs attention" is a score below 95, "Healthy" is 95 or more; apps with no score match neither. */
-function matchesHealth(app: App, filter: string): boolean {
-  if (filter === FILTER_ALL) {
-    return true;
-  }
-  const { score } = app.health;
-  if (score === null) {
-    return false;
-  }
-  return filter === APP_HEALTH_FILTER.healthy
-    ? score >= HEALTH_ATTENTION_BELOW
-    : score < HEALTH_ATTENTION_BELOW;
-}
-
-/** Lowest score first; apps with no score last. */
-function byScoreThenName(a: App, b: App): number {
-  const [left, right] = [a.health.score, b.health.score];
-  if (left === right) {
-    return a.name.localeCompare(b.name);
-  }
-  if (left === null) return 1;
-  if (right === null) return -1;
-  return left - right;
-}
-
-export type HealthStats = {
-  /** Rounded mean of the scored apps, or null when none has a score. */
-  average: number | null;
-  healthy: number;
-  needAttention: number;
-};
-
-export function healthStats(apps: App[]): HealthStats {
-  const scores = apps.flatMap((app) => app.health.score ?? []);
-  const total = scores.reduce((sum, score) => sum + score, 0);
-  const healthy = scores.filter((score) => score >= HEALTH_ATTENTION_BELOW).length;
-  return {
-    average: scores.length ? Math.round(total / scores.length) : null,
-    healthy,
-    needAttention: scores.length - healthy,
-  };
-}
-
-
 
 /** Advisory ids recorded by hand that monitoring did not find under any of its ids. */
 export function handRecordedAdvisories(dependency: Dependency): string[] {
@@ -141,21 +55,6 @@ export function lastChecked(dependencies: Dependency[]): string | null {
   const dates = dependencies.flatMap((dependency) => dependency.checkedAt ?? []).sort();
   return dates.at(-1)?.slice(0, 10) ?? null;
 }
-
-function byRenewalThenName(a: App, b: App): number {
-  if (a.renewalDate === b.renewalDate) {
-    return a.name.localeCompare(b.name);
-  }
-  if (a.renewalDate === null) return 1;
-  if (b.renewalDate === null) return -1;
-  return a.renewalDate.localeCompare(b.renewalDate);
-}
-
-/** Applications with a renewal date, soonest first. */
-export function appsWithRenewal(apps: App[]): App[] {
-  return apps.filter((app) => app.renewalDate !== null).sort(byRenewalThenName);
-}
-
 
 /** The first hosting row as "Provider Service", or null when none is recorded. */
 export function primaryHosting(hosting: Hosting[]): string | null {

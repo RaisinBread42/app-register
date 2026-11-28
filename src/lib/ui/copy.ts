@@ -124,18 +124,22 @@ export const NO_BACKUP_OWNER = "No backup owner";
 export const CRITICALITY_NOT_SET = "Not set";
 
 export const APP_LIST_SORT_LABEL: Record<AppListSort, string> = {
-  [APP_LIST_SORT.health]: "Health (lowest)",
+  [APP_LIST_SORT.attention]: "Needs attention first",
   [APP_LIST_SORT.name]: "Name (A–Z)",
-  [APP_LIST_SORT.renewal]: "Renewal (soonest)",
+  [APP_LIST_SORT.health]: "Health (lowest)",
+  [APP_LIST_SORT.deadline]: "Next date (soonest)",
 };
 
 const HEALTHY = "Healthy";
 const NEEDS_ATTENTION = "Needs attention";
+/** Nothing can be checked yet: a hosting row with no status (and no failed check), or an app with no health score. */
+export const NOT_MONITORED = "Not monitored";
 
 export const HEALTH_FILTER_OPTIONS = [
   { value: FILTER_ALL, label: "All health" },
   { value: APP_HEALTH_FILTER.attention, label: NEEDS_ATTENTION },
   { value: APP_HEALTH_FILTER.healthy, label: HEALTHY },
+  { value: APP_HEALTH_FILTER.notMonitored, label: NOT_MONITORED },
 ];
 
 /** For parts of the prototype that have no API yet. */
@@ -143,8 +147,6 @@ export const COMING_SOON = "Coming soon";
 export const LIVE_DATA_NOTE =
   "Health scores come from dependency and hosting checks; licence and pricing checks are coming soon.";
 
-/** Shown wherever a score is, while dependencies and hosting are the monitored dimensions. */
-export const HEALTH_BASIS_NOTE = "Based on dependencies and hosting; licence and pricing checks coming soon.";
 export const NO_SCORE_TITLE = "Insufficient data";
 export const NO_SCORE_HINT =
   "Import a package.json or package-lock.json on an application's Dependencies tab, or add where it runs on its Hosting tab, to score it. A score appears once they have been checked.";
@@ -221,5 +223,3 @@ export function formatCost(
   return billingCycle ? `${amount} · ${billingCycle}` : amount;
 }
 
-/** Why a hosting row has no status when no check has failed. */
-export const NOT_MONITORED = "Not monitored";
