@@ -98,6 +98,8 @@ test('E: after closing a drawer with Escape, one Back leaves the inbox (no dupli
   await rows(page).first().click();
   await expect(page).toHaveURL(/notice=/);
   await expect(page.getByRole('dialog')).toBeVisible();
+  // Escape goes to whatever has focus: wait until the drawer has taken it, as it does for a person.
+  await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('dialog,[role="dialog"]')))).toBe(true);
   await page.keyboard.press('Escape');
   await expect(page).not.toHaveURL(/notice=/);
   await page.goBack();

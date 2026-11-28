@@ -1,4 +1,4 @@
-import {UI_QUERY} from '@/lib/constants';
+import {APP_ACTIVITY_LIMIT, UI_QUERY} from '@/lib/constants';
 import {todayIso} from '@/lib/notice-alerts';
 import {apiClient} from '@/lib/ui/api-client';
 import {appTab, type SearchParams} from '@/lib/ui/list-filters';
@@ -10,10 +10,19 @@ type Props = {params: Promise<{id: string}>; searchParams: Promise<SearchParams>
 
 export default async function AppPage({params, searchParams}: Props) {
   const [{id}, query] = await Promise.all([params, searchParams]);
-  const [app, catalog] = await Promise.all([loadApp(id), apiClient().getHostingCatalog()]);
+  const client = apiClient();
+  // All at once; notices and activity are secondary, so if either fails the page still shows the app.
+  const [app, catalog, notices, activity] = await Promise.all([
+    loadApp(id),
+    client.getHostingCatalog(),
+    client.listNotices({appId: id}).catch(() => null),
+    client.listAuditEvents({appId: id, limit: APP_ACTIVITY_LIMIT}).catch(() => null),
+  ]);
   return (
     <AppDetailView
       app={app}
+      notices={notices}
+      activity={activity}
       catalog={catalog}
       today={todayIso()}
       initialTab={appTab(query[UI_QUERY.tab])}

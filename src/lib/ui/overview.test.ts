@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest';
 import {AUDIT_ACTION, MATCH_STATUS, MONITORING_SOURCE_STATUS, NOTICE_SEVERITY} from '@/lib/constants';
 import type {App, AuditEvent, MonitoringSource, Notice} from './api-client';
-import {activityLine, checkStatusLine, keyNumbers, lastSuccessfulCheck, portfolioSummary, upcomingDates, urgentQueue} from './overview';
+import {activityLine} from './activity';
+import {checkStatusLine, keyNumbers, lastSuccessfulCheck, portfolioSummary, upcomingDates, urgentQueue} from './overview';
 
 const TODAY = '2026-11-28';
 

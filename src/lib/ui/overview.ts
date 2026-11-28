@@ -1,5 +1,4 @@
 import {
-  AUDIT_ACTION,
   DATE_KIND,
   MATCH_STATUS,
   MONITORING_SOURCE_STATUS,
@@ -9,11 +8,9 @@ import {
   OVERVIEW_OVERDUE_DAYS,
   OVERVIEW_QUEUE_LIMIT,
   type DateKind,
-  type MatchStatus,
 } from '@/lib/constants';
 import {addDaysIso} from '@/lib/notice-alerts';
-import type {App, AuditEvent, MonitoringSource, Notice} from './api-client';
-import {AUDIT_ACTION_LABEL, MATCH_STATUS_LABEL} from './copy';
+import type {App, MonitoringSource, Notice} from './api-client';
 import {staleSources} from './freshness';
 import {DEFAULT_INBOX_VIEW, INBOX_STATUS, inboxRows, type InboxRow} from './notice-inbox';
 import {formatDateTime} from './register-view';
@@ -115,14 +112,4 @@ export function checkStatusLine(sources: MonitoringSource[] | null): string {
   return sources.some((source) => source.status === MONITORING_SOURCE_STATUS.unavailable)
     ? 'No source answered on the last check.'
     : 'No source has been checked yet.';
-}
-
-/** One history line: when, who, what, to which notice on which app (or which app), and the new status when there is one. */
-export function activityLine(event: AuditEvent): string {
-  const status = event.toValue && event.toValue in MATCH_STATUS_LABEL ? ` (now ${MATCH_STATUS_LABEL[event.toValue as MatchStatus]})` : '';
-  const target =
-    event.action === AUDIT_ACTION.appArchived
-      ? (event.appName ?? 'an application')
-      : `${event.noticeTitle ? `“${event.noticeTitle}”` : 'a notice'}${event.appName ? ` on ${event.appName}` : ''}`;
-  return `${formatDateTime(event.occurredAt)} · ${event.actor} ${AUDIT_ACTION_LABEL[event.action]} ${target}${status}`;
 }

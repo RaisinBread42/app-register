@@ -36,11 +36,14 @@ function Topbar({crumbs}: {crumbs: Crumb[]}) {
   const [query, setQuery] = useState('');
   const search = () => router.push(`${ROUTES.applications}?${new URLSearchParams({[UI_QUERY.search]: query})}`);
   return (
+    // On a phone the search moves under the breadcrumbs and shrinks to fit, instead of running off the screen.
     <HStack
-      height={70}
+      minHeight={70}
       gap={4}
       vAlign="center"
       hAlign="between"
+      wrap="wrap"
+      paddingBlock={3}
       style={{
         flex: 'none',
         paddingInline: GUTTER,
@@ -54,18 +57,20 @@ function Topbar({crumbs}: {crumbs: Crumb[]}) {
           </BreadcrumbItem>
         ))}
       </Breadcrumbs>
-      <HStack gap={3} vAlign="center">
-        <TextInput
-          label="Search applications"
-          isLabelHidden
-          type="search"
-          startIcon="search"
-          placeholder="Search applications or sources…"
-          value={query}
-          onChange={setQuery}
-          onEnter={search}
-          width={350}
-        />
+      <HStack gap={3} vAlign="center" hAlign="end" style={{flex: '1 1 240px', minWidth: 0}}>
+        <HStack maxWidth={350} style={{flex: 1, minWidth: 0}}>
+          <TextInput
+            label="Search applications"
+            isLabelHidden
+            type="search"
+            startIcon="search"
+            placeholder="Search applications or sources…"
+            value={query}
+            onChange={setQuery}
+            onEnter={search}
+            width="100%"
+          />
+        </HStack>
         <IconButton label="About this data" tooltip={LIVE_DATA_NOTE} icon={<InfoIcon />} variant="secondary" size="sm" />
         <Avatar name={WORKSPACE_NAME} size={32} tooltip={false} />
       </HStack>

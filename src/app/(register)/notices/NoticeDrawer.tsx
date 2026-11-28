@@ -1,6 +1,6 @@
 'use client';
 
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
 import {DateInput} from '@astryxdesign/core/DateInput';
@@ -55,6 +55,14 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
   const [assignee, setAssignee] = useState<string | null>(null);
   const action = useAction();
   const confirm = useConfirmWithUndo(keys);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  // A drawer that opens with the page (a deep link, Back) takes focus too, so Escape and Tab work in it (WAI-ARIA dialog).
+  useEffect(() => {
+    const title = titleRef.current;
+    if (title && !title.closest('dialog,[role="dialog"]')?.contains(document.activeElement)) {
+      title.focus();
+    }
+  }, []);
 
   if (!row) {
     return null;
@@ -93,7 +101,9 @@ export function NoticeDrawer({row, people, keys, today, onClose}: Props) {
               {`${NOTICE_CATEGORY_LABEL[notice.category]} · ${MATCH_STATUS_LABEL[match.status]}`}
             </Text>
           </HStack>
-          <Heading level={2}>{notice.title}</Heading>
+          <Heading level={2} ref={titleRef} tabIndex={-1}>
+            {notice.title}
+          </Heading>
         </VStack>
 
         <Section title="What happened">
